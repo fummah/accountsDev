@@ -1,0 +1,60 @@
+{
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8",
+    "electron-rebuild": "^3.2.9"
+  },
+  "name": "accounts",
+  "version": "1.0.0",
+  "description": "Accounts Desktop App",
+  "main": "src/backend/main.js",
+  "scripts": {
+    "start": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
+    "rebuild": "electron-rebuild -f -w sqlite3",
+    "test": "",
+    "build": "react-scripts build",
+    "react-start": "react-scripts start",
+    "electron-start": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
+    "postinstall": "electron-builder install-app-deps",
+    "package": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.tendai.myapp",
+    "files": [
+    "src/backend/main.js",
+    "src/backend/db/**/*", 
+    "src/frontend/build/**/*" 
+  ],
+    "win": {
+      "target": "nsis",
+      "icon": "favicon.ico"
+    },
+    "directories": {
+      "output": "dist"
+    },
+     "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fummah/accounts.git"
+  },
+  "keywords": [
+    "accounts"
+  ],
+  "author": "Tendai Fuma",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/fummah/accounts/issues"
+  },
+  "homepage": "https://github.com/fummah/accounts#readme",
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "concurrently": "^9.0.1",
+    "knew": "^0.0.0",
+    "sqlite3": "^5.1.7"
+  }
+}
