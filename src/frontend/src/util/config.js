@@ -1,3 +1,3 @@
 module.exports = {
-  footerText: 'Copyright Company Name © 2024',
+  footerText: 'Copyright Company Name © 2025',
 }

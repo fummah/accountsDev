@@ -8,7 +8,7 @@ import Employees from "./Employees";
 import Reports from "./Reports";
 import Vat from "./Vat";
 import Profile from "./Profile";
-import Test from "./Test";
+
 
 const Inner = ({match}) => (
   <Switch>
@@ -20,7 +20,7 @@ const Inner = ({match}) => (
     <Route path={`${match.url}/reports`} component={Reports}/>
     <Route path={`${match.url}/vat`} component={Vat}/>
     <Route path={`${match.url}/profile`} component={Profile}/>
-    <Route path={`${match.url}/test`} component={Test}/>
+    
   </Switch>
 );
 

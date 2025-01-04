@@ -221,11 +221,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                   id="accounts.receipts"/></span>
                   </Link>
               </Menu.Item>
-              <Menu.Item key="lists/claims3">
+              <Menu.Item key="lists/receipts3">
               <Link to={{ pathname: "/inner/transactions", state: { tabKey: "2" } }}>
                 <i className="icon icon icon-check-square-o -flex-column-reverse"/><span><IntlMessages
                   id="accounts.reconcile"/></span></Link>
               </Menu.Item>
+           
            
               </SubMenu>
 
@@ -243,11 +244,30 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                   <span><IntlMessages id="accounts.employees"/></span>
                 </Link>
               </Menu.Item>
-              <Menu.Item key="inner/reports">
-                <Link to="/inner/reports"><i
-                  className="icon icon-chart"/><span><IntlMessages
-                  id="accounts.reports"/></span></Link>
+              <SubMenu key="reports" popupClassName={getNavStyleSubMenuClass(navStyle)}
+                       title={
+<span>
+<i className="icon icon-chart" />
+<Link to="/inner/reports">
+  <span>
+    <IntlMessages id="accounts.reports" />
+  </span>
+</Link>
+</span>
+                        }>
+                         <Menu.Item key="inner/reports">
+                         <Link to={{ pathname: "/inner/reports", state: { tabKey: "1" } }}>
+                <i className="icon icon-etherium"/><span>Financial Reports</span></Link>
               </Menu.Item>
+              <Menu.Item key="lists/reports0">
+              <Link to={{ pathname: "/inner/reports", state: { tabKey: "2" } }}>
+                <i className="icon icon-ripple"/><span>Management Reports</span></Link>
+              </Menu.Item>   
+              <Menu.Item key="lists/reports1">
+                <Link to={{ pathname: "/inner/reports", state: { tabKey: "3" } }}>
+                  <i className="icon icon-invert-color"/><span>Tax Reports</span></Link>
+                </Menu.Item>          
+</SubMenu>
               <Menu.Item key="inner/profile">
                 <Link to="/inner/profile"><i
                   className="icon icon-user"/><span>Profile</span></Link>

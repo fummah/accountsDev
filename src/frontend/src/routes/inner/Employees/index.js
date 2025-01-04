@@ -7,6 +7,27 @@ import AddEmployee from 'components/Inner/Employees/AddEmployee';
 import Toast from "components/AppNotification/toast.js";
 import dayjs from 'dayjs';
 
+const data = [
+  {
+    id: 1,
+    name: 'John Doe',
+    position: 'Software Engineer',
+    salary: 6000,
+  },
+  {
+    id: 2,
+    name: 'Jane Smith',
+    position: 'Project Manager',
+    salary: 8000,
+  },
+  {
+    id: 3,
+    name: 'Alice Johnson',
+    position: 'Designer',
+    salary: 5000,
+  },
+];
+
 
 
 const Employees = () => {
@@ -20,6 +41,8 @@ const Employees = () => {
   const [employees, setEmployees] = useState([]);
   const [employeesSearched, setEmployeesSearched] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
+
+  const totalSalary = data.reduce((sum, employee) => sum + employee.salary, 0);
   
   const onSaveUser = async(userData) => {
     console.log("User Data Saved:", userData);
@@ -158,6 +181,17 @@ const Employees = () => {
         <Alert message={message} type={isSuccess?'success':'error'} />
         )
       }
+      <Row>
+            <Col span={24}>
+            <div style={{ marginTop: '20px' }}>
+            <h2>Payroll Summary</h2>
+            <p><strong>Total Employees:</strong> {data.length}</p>
+            <p><strong>Total Salary Expense:</strong> ${totalSalary.toLocaleString()}</p>
+          </div>
+       
+              </Col>
+                    
+            </Row><hr/>
   <Row gutter={[16, 16]}>
           
        <Col xs={24} sm={24} md={24}>

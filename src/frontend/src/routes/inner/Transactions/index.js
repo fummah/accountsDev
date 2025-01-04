@@ -37,6 +37,7 @@ const Transactions = () => {
             <ReconcileTab/>
             </div>
           </TabPane>
+    
         </Tabs>
        </Col>
        </Row>
