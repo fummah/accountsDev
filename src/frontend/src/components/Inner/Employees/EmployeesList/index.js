@@ -9,6 +9,12 @@ const options = [
   'Delete',
 ];
 
+const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+}).format(number); 
+};
+
 const menus = () => (<Menu onClick={(e) => {
   if (e.key === 'Edit') {    
   } else {
@@ -52,6 +58,14 @@ const EmployeesList = ({employees, onSelectEmployee, setAddUserState, handleSear
       sorter: (a, b) => a.date_entered - b.date_entered,
       render: (text, record) => {
         return <span className="gx-text-grey">{record.date_entered}</span>
+      },
+  
+    },   {
+      title: 'Salary',
+      dataIndex: 'salary',
+      sorter: (a, b) => a.salary - b.salary,
+      render: (text, record) => {
+        return <span className="gx-text-grey">{formattedNumber(record.salary)}</span>
       },
   
     },

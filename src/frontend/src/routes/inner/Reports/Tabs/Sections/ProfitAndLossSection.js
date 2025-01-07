@@ -6,11 +6,11 @@ import Widget from "components/Widget/index";
 
 const ProfitAndLossSection = ({data}) => {
   const tableData = [
-    { key: "1", category: "Revenue", amount: data.revenue },
-    { key: "2", category: "COGS", amount: data.cogs },
-    { key: "3", category: "Gross Profit", amount: data.grossProfit },
-    { key: "4", category: "Operating Expenses", amount: data.operatingExpenses },
-    { key: "5", category: "Net Profit", amount: data.netProfit },
+    { key: "1", category: "Revenue", amount: data?.revenue || 0 },
+    { key: "2", category: "COGS", amount: data?.cogs || 0 },
+    { key: "3", category: "Gross Profit", amount: data?.grossProfit || 0 },
+    { key: "4", category: "Operating Expenses", amount: data?.operatingExpenses || 0 },
+    { key: "5", category: "Net Profit", amount: data?.netProfit || 0 },
   ];
 
   const columns = [

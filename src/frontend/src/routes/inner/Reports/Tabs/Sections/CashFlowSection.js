@@ -6,10 +6,10 @@ import Widget from "components/Widget/index";
 
 const CashFlowSection = ({data}) => {
   const tableData = [
-    { key: "1", category: "Operating Activities", amount: data.operating },
-    { key: "2", category: "Investing Activities", amount: data.investing },
-    { key: "3", category: "Financing Activities", amount: data.financing },
-    { key: "4", category: "Net Cash Flow", amount: data.netCashFlow },
+    { key: "1", category: "Operating Activities", amount: data?.operating || 0 },
+    { key: "2", category: "Investing Activities", amount: data?.investing || 0 },
+    { key: "3", category: "Financing Activities", amount: data?.financing || 0},
+    { key: "4", category: "Net Cash Flow", amount: data?.netCashFlow || 0 },
   ];
 
   const columns = [

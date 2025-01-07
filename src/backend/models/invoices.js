@@ -247,8 +247,91 @@ const Invoices = {
       console.error('Error updating invoice:', error);
       throw error;
     }
+  },
+  getFinancialReport: function (start_date, last_date) {
+    try {
+    const stmt_revenue = db.prepare("SELECT SUM(l.amount * l.quantity + ((l.amount * l.quantity) * i.vat / 100)) AS revenue_total_amount, SUM(p.price * l.quantity) AS product_total_amount FROM invoice_lines AS l INNER JOIN products as p ON l.product=p.name INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Paid', 'Partially Paid') AND i.start_date BETWEEN ? AND ?");
+    const stmt_expense = db.prepare("SELECT SUM(l.amount) AS expense_total_amount FROM expense_lines AS l INNER JOIN expenses AS e ON l.expense_id = e.id WHERE e.approval_status IN ('Paid', 'Pending') AND e.payment_date BETWEEN ? AND ?");
+   
+    const revenue = stmt_revenue.get(start_date, last_date);
+    const expense = stmt_expense.get(start_date, last_date);
+
+    return {
+      profitLoss: {
+        revenue: revenue.revenue_total_amount,
+        cogs: revenue.product_total_amount,
+        operatingExpenses: expense.expense_total_amount,
+        grossProfit: revenue.revenue_total_amount - revenue.product_total_amount,
+        netProfit: (revenue.revenue_total_amount - revenue.product_total_amount) - expense.expense_total_amount,
+      },
+      balanceSheet: {
+        assets: {
+          cash: ((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0),
+          accountsReceivable: 0,
+          inventory: 0,
+          total: ((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0) + 0,
+        },
+        liabilities: {
+          accountsPayable: expense.expense_total_amount || 0,
+          shortTermDebt: 0,
+          total: (expense.expense_total_amount || 0) + 0,
+        },
+        equity: {
+          retainedEarnings: 0,
+          shareholderEquity: 0,
+          total: 0,
+        },
+      },
+      cashFlow: {
+        operating: ((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0),
+        investing: 0,
+        financing: 0,
+        netCashFlow: this.operating + this.investing + this.financing, // Sum of all activities
+      },
+    };
+  } catch (error) {
+    console.error('Error fetching report:', error);
+    throw error;
   }
-  ,
+
+  },
+  getManagementReport: function (start_date, last_date) {
+    try {
+      const formattedNumber = (number) => { 
+        const num = new Intl.NumberFormat('fr-FR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(number); 
+      return `$${num}`;
+      };
+
+    const report = this.getFinancialReport(start_date, last_date);
+    const kpiData = {
+      totalRevenue: report.profitLoss.revenue,
+      totalExpenses: report.profitLoss.operatingExpenses,
+      netProfit: report.profitLoss.revenue - report.profitLoss.operatingExpenses,
+      customerGrowth: "0%",
+    };
+    const chartData = [
+      { name: "Revenue", value: kpiData.totalRevenue },
+      { name: "Expenses", value: kpiData.totalExpenses },
+      { name: "Profit", value: kpiData.netProfit },
+    ];
+
+    const tableData = [
+      { key: "1", metric: "Revenue", value: formattedNumber(kpiData?.totalRevenue || 0)},
+      { key: "2", metric: "Expenses", value: formattedNumber(kpiData?.totalExpenses || 0)},
+      { key: "3", metric: "Net Profit", value: formattedNumber(kpiData?.netProfit || 0)},
+      { key: "4", metric: "Customer Growth", value: "0%" },
+    ];
+    return { kpiData, chartData, tableData  };
+    
+  } catch (error) {
+    console.error('Error fetching report:', error);
+    throw error;
+  }
+
+  },
 };
 
 // Ensure the Invoices table is created

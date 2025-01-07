@@ -214,23 +214,15 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
 </span>
                         }>
             
-              <Menu.Item key="inner/receipts">
-              <Link to={{ pathname: "/inner/transactions", state: { tabKey: "1" } }}>
-                <i className="icon icon-folder-o"/>
-                <span><IntlMessages
-                  id="accounts.receipts"/></span>
-                  </Link>
-              </Menu.Item>
+           
               <Menu.Item key="lists/receipts3">
-              <Link to={{ pathname: "/inner/transactions", state: { tabKey: "2" } }}>
+              <Link to={{ pathname: "/inner/transactions", state: { tabKey: "1" } }}>
                 <i className="icon icon icon-check-square-o -flex-column-reverse"/><span><IntlMessages
                   id="accounts.reconcile"/></span></Link>
               </Menu.Item>
            
            
-              </SubMenu>
-
-             
+              </SubMenu>             
             
               <Menu.Item key="inner/vat">
                 <Link to="/inner/vat"><i

@@ -33,9 +33,9 @@ const registerIpcHandlers = () => {
   });
 
   // Handler to insert an employee
-  ipcMain.handle('insert-employee', async (event, first_name, last_name, mi, email, date_hired, entered_by) => {
+  ipcMain.handle('insert-employee', async (event, first_name, last_name, mi, email, date_hired, entered_by, salary, status) => {
     try {
-      return await Employees.insertEmployee(first_name, last_name, mi, email, date_hired, entered_by);
+      return await Employees.insertEmployee(first_name, last_name, mi, email, date_hired, entered_by, salary, status);
     } catch (error) {
       console.error('Error inserting employee:', error);
       return { error: error.message };
@@ -249,6 +249,36 @@ ipcMain.handle('get-initinvoice', async (event,invoice_id, type) => {
     return await Invoices.getInitialInvoice(invoice_id, type);
   } catch (error) {    
     console.error(`Error fetching: ${type}`, error);
+    return { error: error.message };
+  }
+});
+
+// Handler to get all Financial Reports
+ipcMain.handle('get-financial', async (event,start_date, last_date) => {
+  try {
+    return await Invoices.getFinancialReport(start_date, last_date);
+  } catch (error) {    
+    console.error(`Error fetching:`, error);
+    return { error: error.message };
+  }
+});
+
+// Handler to get all Management Reports
+ipcMain.handle('get-management', async (event,start_date, last_date) => {
+  try {
+    return await Invoices.getManagementReport(start_date, last_date);
+  } catch (error) {    
+    console.error(`Error fetching:`, error);
+    return { error: error.message };
+  }
+});
+
+// Handler to get all Vat Reports
+ipcMain.handle('get-vatreport', async (event,start_date, last_date) => {
+  try {
+    return await Vat.getVatReport(start_date, last_date);
+  } catch (error) {    
+    console.error(`Error fetching:`, error);
     return { error: error.message };
   }
 });

@@ -1,7 +1,9 @@
 import React, { forwardRef, useImperativeHandle, useEffect } from 'react';
-import { Button, Col, Drawer, Form, Input, Row, Space,Dropdown, DatePicker } from 'antd';
+import { Button, Col, Drawer, Form, Input, Row, Space,Dropdown, DatePicker, Select } from 'antd';
 import { DownOutlined,IdcardOutlined } from '@ant-design/icons';
 import Widget from "components/Widget/index";
+
+const { Option } = Select;
 
 const AddEmployee = forwardRef(({ onSaveUser, onUserClose, showDrawer, open, setShowError,setMessage, employee }, ref) => {
   
@@ -93,7 +95,9 @@ useEffect(() => {
         }
       >
       
-  <Form form={form} layout="" {...layout}>
+  <Form form={form} layout="" {...layout} initialValues={{
+    status: `Activate`,
+  }}>
   <Widget
       title={
         <h3 className="h3 gx-text-capitalize gx-mb-0"><IdcardOutlined /> {employee ? 'Edit' : 'Add'} Employee</h3> 
@@ -116,15 +120,28 @@ useEffect(() => {
                    <Input/> 
               </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col span={8}>
               <Form.Item name="email" label="Email Address" rules={[{ required: true, message: 'Enter Email Address', },{type: "email",message: "Please enter a valid email address!", },]}>
                    <Input/> 
               </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col span={8}>
               <Form.Item ame="hire_date" label="Hire Date" rules={[{ required: true, message: 'Enter hire date', },]}>
                    <DatePicker/> 
               </Form.Item>
+              </Col>
+              <Col span={8}>
+              <Form.Item name="salary" label="Salary" rules={[{ required: true, message: 'Enter Salary', },{message: "Please enter a valid salary!", },]}>
+                   <Input/> 
+              </Form.Item>
+              </Col>
+              <Col span={8}>
+              <Form.Item name="status" label="Status" rules={[{ required: true, message: 'Please select ststus', },]}> 
+<Select mode="single" placeholder="Please select status" value="" defaultValue="Select status">
+<Option value="Active">Active</Option>
+<Option value="Deactivated">Deactivated</Option>
+</Select>
+</Form.Item>
               </Col>
               </Row>            
               

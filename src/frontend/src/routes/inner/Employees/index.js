@@ -42,7 +42,7 @@ const Employees = () => {
   const [employeesSearched, setEmployeesSearched] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
 
-  const totalSalary = data.reduce((sum, employee) => sum + employee.salary, 0);
+  const totalSalary = employees.reduce((sum, employee) => sum + employee.salary, 0);
   
   const onSaveUser = async(userData) => {
     console.log("User Data Saved:", userData);
@@ -53,18 +53,20 @@ const Employees = () => {
       const last_name = userData.last_name;
       const mi = userData.mi;
       const email = userData.email;
-      const entered_by = "1";      
+      const entered_by = "1";  
+      const status = userData.status;
+      const salary = userData.salary;    
       const date_hired = userData.date_hired ? dayjs(userData.date_hired).format('YYYY-MM-DD') : null;
 
       let result;
         
       if (userData.id) {
         const id = userData.id;
-        const employeeData = {id,first_name, last_name, mi, email, date_hired, entered_by};
+        const employeeData = {id,first_name, last_name, mi, email, date_hired, entered_by, salary, status};
         result = await window.electronAPI.updateEmployee(employeeData);   
       }
       else{
-        result = await window.electronAPI.insertEmployee(first_name, last_name, mi, email, date_hired, entered_by); 
+        result = await window.electronAPI.insertEmployee(first_name, last_name, mi, email, date_hired, entered_by, salary, status); 
           }
             console.log(result.message);
       setIsSuccess(result.success);  
@@ -185,7 +187,7 @@ const Employees = () => {
             <Col span={24}>
             <div style={{ marginTop: '20px' }}>
             <h2>Payroll Summary</h2>
-            <p><strong>Total Employees:</strong> {data.length}</p>
+            <p><strong>Total Employees:</strong> {employees.length}</p>
             <p><strong>Total Salary Expense:</strong> ${totalSalary.toLocaleString()}</p>
           </div>
        

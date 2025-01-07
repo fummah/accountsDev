@@ -6,44 +6,9 @@ import InvoicePDF from "components/Inner/Sales/Invoices/InvoicePDF";
 
 const { Title, Text } = Typography;
 
-const invoiceData = {
-  
-    "header": {
-      "invoiceNumber": "INV-1001",
-      "date": "2024-12-29",
-      "dueDate": "2025-01-15",
-      "customerName": "John Doe",
-      "customerEmail": "john.doe@example.com",
-      "billingAddress": "123 Main St, Springfield, USA",
-      "status": "Unpaid",
-      "notes": "Thank you for your business!",
-      "totalAmount": 2415,
-      "tax": "315.00"
-    },
-    "lines": [
-      {
-        "description": "Website Development",
-        "quantity": 1,
-        "unitPrice": 1500,
-        "lineTotal": 1500
-      },
-      {
-        "description": "Monthly Hosting (Dec 2024)",
-        "quantity": 1,
-        "unitPrice": 50,
-        "lineTotal": 50
-      },
-      {
-        "description": "Logo Design",
-        "quantity": 2,
-        "unitPrice": 300,
-        "lineTotal": 600
-      }
-    ]
-    
-};
 
 const Totals = ({detail}) => {
+  console.log(detail);
   const type = useContext(TypeContext);
   let totalAmount = detail?.lines?.reduce((total, line) => total + (line.amount || 0) * (line.quantity || 0), 0);
   totalAmount = totalAmount + (totalAmount*(detail?.vat/100));
@@ -52,7 +17,7 @@ const Totals = ({detail}) => {
     <Widget 
     extra ={
       <span className="gx-link gx-mr-3">
-        <InvoicePDF invoice={invoiceData} />      
+        <InvoicePDF invoice={detail} type={type} />      
     </span>
     }    
     styleName="gx-card-profile-sm">

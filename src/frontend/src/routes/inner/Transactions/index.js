@@ -27,12 +27,8 @@ const Transactions = () => {
        activeKey={activeKey}
        onChange={(key) => setActiveKey(key)}
        >         
-          <TabPane tab="All Receipts" key="1">
-            <div className="gx-mb-2">
-             <ReceiptsTab/>
-            </div>
-          </TabPane>
-          <TabPane tab="Reconcile" key="2">
+          
+          <TabPane tab="Reconcile" key="1">
             <div className="gx-mb-2">
             <ReconcileTab/>
             </div>

@@ -3,7 +3,7 @@ import { Button, Col, Select, Drawer, Form, Input, Row, Space,Dropdown,DatePicke
 import { DownOutlined } from '@ant-design/icons';
 import Widget from "components/Widget/index";
 import InvoiceTable from './InvoiceTable';
-import dayjs from 'dayjs';
+import moment from "moment";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -109,8 +109,8 @@ useEffect(() => {
       form.setFieldsValue({
         ...item,
         islater: item.islater === "on",
-        start_date: item.start_date ? dayjs(item.start_date) : null,
-        last_date: item.last_date ? dayjs(item.last_date) : null,
+        start_date: item.start_date ? moment(item.start_date) : null,
+        last_date: item.last_date ? moment(item.last_date) : null,
       });
     } else {
       form.resetFields(); // Clear form for a new item
