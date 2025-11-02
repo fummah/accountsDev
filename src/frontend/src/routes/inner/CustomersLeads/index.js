@@ -2,6 +2,9 @@ import React, {useState, useEffect} from "react";
 import { useLocation } from "react-router-dom";
 import {Col, Row,Tabs} from "antd";
 import CustomersTab from "./Tabs/CustomersTab";
+import StatementsTab from "./Tabs/StatementsTab";
+import ReceivePaymentsTab from "./Tabs/ReceivePaymentsTab";
+import IncomeTrackerTab from "./Tabs/IncomeTrackerTab";
 import Auxiliary from "util/Auxiliary";
 
 const TabPane = Tabs.TabPane;
@@ -30,6 +33,23 @@ const CustomersLeads = () => {
           <TabPane tab="Customers" key="1">
             <div className="gx-mb-2">
              <CustomersTab/>
+            </div>
+          </TabPane>
+             <TabPane tab="Statements" key="2">
+            <div className="gx-mb-2">
+             <StatementsTab/>
+            </div>
+          </TabPane>
+
+            <TabPane tab="Receive Payments" key="3">
+            <div className="gx-mb-2">
+             <ReceivePaymentsTab/>
+            </div>
+          </TabPane>
+
+            <TabPane tab="Income Tracker" key="4">
+            <div className="gx-mb-2">
+             <IncomeTrackerTab/>
             </div>
           </TabPane>
           

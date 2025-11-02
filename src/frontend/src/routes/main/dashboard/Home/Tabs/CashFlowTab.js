@@ -27,22 +27,37 @@ const CashFlowTab = () => {
   const [dueexpensemoney, setDueExpenseMoney] = useState(0);
 
   const fetchInitials = async () => {
-            
-    try {        
-        const response = await window.electronAPI.getInvoiceSummary();    
+    try {
+      const response = await window.electronAPI.getInvoiceSummary();
 
-        console.log(response);
-        setOpenInvoice(response.open_invoice[0].open_invoice);
-        setDueInvoice(response.due_invoice[0].due_invoice);
-        setOpenInvoiceMoney(response.open_invoice[0].open_total_amount);
-        setDueInvoiceMoney(response.due_invoice[0].due_total_amount);
-        setOpenExpense(response.open_expense[0].open_expense);
-        setDueExpense(response.due_expense[0].due_expense);
-        setOpenExpenseMoney(response.open_expense[0].open_total_amount_expense);
-        setDueExpenseMoney(response.due_expense[0].due_total_amount_expense);
+      if (!response || response.error) {
+        const errorMessage = response?.error || 'No invoice summary returned';
+        setMessage(`Error fetching summary: ${errorMessage}`);
+        setShowError(true);
+        return;
+      }
+
+      // Safe reads with fallbacks
+      const openInv = (response.open_invoice && response.open_invoice[0] && Number(response.open_invoice[0].open_invoice)) || 0;
+      const dueInv = (response.due_invoice && response.due_invoice[0] && Number(response.due_invoice[0].due_invoice)) || 0;
+      const openInvMoney = (response.open_invoice && response.open_invoice[0] && Number(response.open_invoice[0].open_total_amount)) || 0;
+      const dueInvMoney = (response.due_invoice && response.due_invoice[0] && Number(response.due_invoice[0].due_total_amount)) || 0;
+      const openExp = (response.open_expense && response.open_expense[0] && Number(response.open_expense[0].open_expense)) || 0;
+      const dueExp = (response.due_expense && response.due_expense[0] && Number(response.due_expense[0].due_expense)) || 0;
+      const openExpMoney = (response.open_expense && response.open_expense[0] && Number(response.open_expense[0].open_total_amount_expense)) || 0;
+      const dueExpMoney = (response.due_expense && response.due_expense[0] && Number(response.due_expense[0].due_total_amount_expense)) || 0;
+
+      setOpenInvoice(openInv);
+      setDueInvoice(dueInv);
+      setOpenInvoiceMoney(openInvMoney);
+      setDueInvoiceMoney(dueInvMoney);
+      setOpenExpense(openExp);
+      setDueExpense(dueExp);
+      setOpenExpenseMoney(openExpMoney);
+      setDueExpenseMoney(dueExpMoney);
     } catch (error) {
       const errorMessage = error.message || "An unknown error occurred.";
-  setMessage(`Error fetching summary: ${errorMessage}`);
+      setMessage(`Error fetching summary: ${errorMessage}`);
       setShowError(true);
     }
 };
@@ -68,7 +83,8 @@ useEffect(() => {
       <Row>
       <Col span={24}>
       <div className="ant-row-flex">
-            <h1 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">${formattedNumber(openinvoicemoney - openexpensemoney)}</h1>
+            <h1 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">${formattedNumber((openinvoicemoney || 0) - (openexpensemoney || 0))}</h1>
+            <p className="gx-text-grey">Includes paid and pending transactions</p>
           </div>
         </Col>
               

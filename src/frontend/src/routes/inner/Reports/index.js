@@ -5,6 +5,8 @@ import { useLocation } from "react-router-dom";
 import FinancialReportTab from "./Tabs/FinancialReportTab";
 import ManagementReportTab from "./Tabs/ManagementReportTab";
 import TaxReportTab from "./Tabs/TaxReportTab";
+import PlanningBudgeting from "./Tabs/PlanningBudgeting";
+import CashflowProjector from "./Tabs/CashflowProjector";
 
 const TabPane = Tabs.TabPane;
 
@@ -43,6 +45,18 @@ const Reports = () => {
           <TabPane tab="Tax Reports" key="3">
             <div className="gx-mb-2">
             <TaxReportTab/>
+            </div>
+          </TabPane>
+
+           <TabPane tab="Planning & Budgeting" key="4">
+            <div className="gx-mb-2">
+            <PlanningBudgeting/>
+            </div>
+          </TabPane>
+
+           <TabPane tab="Cashflow Projector" key="5">
+            <div className="gx-mb-2">
+            <CashflowProjector/>
             </div>
           </TabPane>
          

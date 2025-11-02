@@ -1,18 +1,22 @@
 import React from "react";
-import {Route, Switch} from "react-router-dom";
-import Widgets from "./Widgets";
-import Metrics from "./Metrics";
+import { Route, Switch } from "react-router-dom";
 import Dashboard from "./dashboard";
-import Layouts from "./Layouts";
-import asyncComponent from "../../util/asyncComponent";
+import BankingRoutes from "../../components/banking";
+import EmployeeRoutes from "../../components/employees";
+import AccountantRoutes from "../../components/accountant";
+import ExpenseRoutes from "../../components/expenses";
+import ReportRoutes from "../../components/reports";
+import SettingsRoutes from "../../components/settings";
 
-const Main = ({match}) => (
+const Main = ({ match }) => (
   <Switch>
-    <Route path={`${match.url}/dashboard`} component={Dashboard}/>
-    <Route path={`${match.url}/widgets`} component={Widgets}/>
-    <Route path={`${match.url}/metrics`} component={Metrics}/>
-    <Route path={`${match.url}/layouts`} component={Layouts}/>
-    <Route path={`${match.url}/algolia`} component={asyncComponent(() => import('../algolia'))}/>
+    <Route path={`${match.path}/dashboard`} component={Dashboard} />
+    <Route path={`${match.path}/banking`} component={BankingRoutes} />
+    <Route path={`${match.path}/employees`} component={EmployeeRoutes} />
+    <Route path={`${match.path}/accountant`} component={AccountantRoutes} />
+    <Route path={`${match.path}/expenses`} component={ExpenseRoutes} />
+    <Route path={`${match.path}/reports`} component={ReportRoutes} />
+    <Route path={`${match.path}/settings`} component={SettingsRoutes} />
   </Switch>
 );
 

@@ -181,6 +181,20 @@ const Quotes = {
       throw error;
     }
   },
+  deleteQuote: async (id) => {
+    try {
+      const transaction = db.transaction((quoteId) => {
+        db.prepare(`DELETE FROM quote_lines WHERE quote_id = ?`).run(quoteId);
+        const res = db.prepare(`DELETE FROM quotes WHERE id = ?`).run(quoteId);
+        return res.changes;
+      });
+      const changes = transaction(id);
+      return { success: changes > 0 };
+    } catch (error) {
+      console.error('Error deleting quote:', error);
+      return { success: false, error: error.message };
+    }
+  },
   
   convertToInvoice: (quote_id) => {
     try {

@@ -1,7 +1,26 @@
 // ipcHandlers.js
 
 const { ipcMain } = require('electron');
-const { Employees, Customers, Suppliers, Expenses, Quotes, Invoices, Products, Vat, Users } = require('./../models');
+const {
+  Customers,
+  Invoices,
+  Quotes,
+  Products,
+  Employees,
+  Expenses,
+  Notes,
+  Suppliers,
+  Users,
+  Vat,
+  CashflowProjections,
+  Budgets,
+  ChartOfAccounts,
+  FixedAssets,
+  Company,
+  Transactions,
+  Journal,
+  Ledger,
+} = require('./../models');
 
 const registerIpcHandlers = () => {
   // Handler to get all employees
@@ -22,6 +41,59 @@ const registerIpcHandlers = () => {
       return { error: error.message };
     }
   });
+// Transactions
+ipcMain.handle('get-transactions', async () => {
+  try {
+    return Transactions.getAll();
+  } catch (error) {
+    console.error('Error fetching transactions:', error);
+    return { error: error.message };
+  }
+});
+ipcMain.handle('insert-transaction', async (event, tx) => {
+  try {
+    return Transactions.insert(tx);
+  } catch (error) {
+    console.error('Error inserting transaction:', error);
+    return { error: error.message };
+  }
+});
+ipcMain.handle('void-transaction', async (event, id) => {
+  try {
+    return Transactions.voidTransaction(id);
+  } catch (error) {
+    console.error('Error voiding transaction:', error);
+    return { error: error.message };
+  }
+});
+
+// Journal
+ipcMain.handle('get-journal', async () => {
+  try {
+    return Journal.getAll();
+  } catch (error) {
+    console.error('Error fetching journal:', error);
+    return { error: error.message };
+  }
+});
+ipcMain.handle('insert-journal', async (event, entry) => {
+  try {
+    return Journal.insert(entry);
+  } catch (error) {
+    console.error('Error inserting journal entry:', error);
+    return { error: error.message };
+  }
+});
+
+// Ledger
+ipcMain.handle('get-ledger', async () => {
+  try {
+    return Ledger.getAll();
+  } catch (error) {
+    console.error('Error fetching ledger:', error);
+    return { error: error.message };
+  }
+});
 
   ipcMain.handle('updateuser', async (event, userData) => {
     try {
@@ -35,7 +107,7 @@ const registerIpcHandlers = () => {
   // Handler to insert an employee
   ipcMain.handle('insert-employee', async (event, first_name, last_name, mi, email, date_hired, entered_by, salary, status) => {
     try {
-      return await Employees.insertEmployee(first_name, last_name, mi, email, date_hired, entered_by, salary, status);
+      return await Employees.insertEmployee(first_name, last_name, mi, email,phone,address, date_hired, entered_by, salary, status);
     } catch (error) {
       console.error('Error inserting employee:', error);
       return { error: error.message };
@@ -243,6 +315,44 @@ ipcMain.handle('insert-vat', async (event, vat_name,vat_percentage,entered_by) =
   }
 });
 
+// Chart of Accounts handlers
+ipcMain.handle('get-chart-accounts', async () => {
+  try {
+    return await ChartOfAccounts.getAllAccounts();
+  } catch (error) {
+    console.error('Error fetching chart of accounts:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('insert-chart-account', async (event, name, type, number, entered_by) => {
+  try {
+    return await ChartOfAccounts.insertAccount(name, type, number, entered_by);
+  } catch (error) {
+    console.error('Error inserting chart account:', error);
+    return { error: error.message };
+  }
+});
+
+// Fixed assets handlers
+ipcMain.handle('get-fixed-assets', async () => {
+  try {
+    return await FixedAssets.getAllAssets();
+  } catch (error) {
+    console.error('Error fetching fixed assets:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('insert-fixed-asset', async (event, name, category, value, entered_by) => {
+  try {
+    return await FixedAssets.insertAsset(name, category, value, entered_by);
+  } catch (error) {
+    console.error('Error inserting fixed asset:', error);
+    return { error: error.message };
+  }
+});
+
 // Handler to get all invoice
 ipcMain.handle('get-initinvoice', async (event,invoice_id, type) => {
   try {
@@ -279,6 +389,44 @@ ipcMain.handle('get-vatreport', async (event,start_date, last_date) => {
     return await Vat.getVatReport(start_date, last_date);
   } catch (error) {    
     console.error(`Error fetching:`, error);
+    return { error: error.message };
+  }
+});
+
+// Cashflow projections handlers
+ipcMain.handle('get-cashflow-projections', async (event, year) => {
+  try {
+    return await CashflowProjections.getProjections(year);
+  } catch (error) {
+    console.error('Error fetching cashflow projections:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('save-cashflow-projections', async (event, projections, year) => {
+  try {
+    return await CashflowProjections.saveProjections(projections, year);
+  } catch (error) {
+    console.error('Error saving cashflow projections:', error);
+    return { error: error.message };
+  }
+});
+
+// Budgets handlers
+ipcMain.handle('get-budgets', async () => {
+  try {
+    return await Budgets.getBudgets();
+  } catch (error) {
+    console.error('Error fetching budgets:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('insert-budget', async (event, department, period, amount, forecast, entered_by) => {
+  try {
+    return await Budgets.insertBudget(department, period, amount, forecast, entered_by);
+  } catch (error) {
+    console.error('Error inserting budget:', error);
     return { error: error.message };
   }
 });
@@ -366,7 +514,21 @@ ipcMain.handle('updatesupplier', async (event,supplierData) => {
 // Deleting record
 ipcMain.handle('deletingrecord', async (event,id,table) => {
   try {
-    return await Vat.deleteRecord(id,table);
+    table = (table || '').toLowerCase();
+    switch (table) {
+      case 'invoices':
+        return await Invoices.deleteInvoice(id);
+      case 'quotes':
+        return await Quotes.deleteQuote(id);
+      case 'expenses':
+        // delete expense lines first then expense
+        return await Expenses.deleteExpense ? await Expenses.deleteExpense(id) : await Vat.deleteRecord(id,table);
+      case 'vat':
+        return await Vat.deleteRecord(id,table);
+      default:
+        // fallback to generic delete
+        return await Vat.deleteRecord(id,table);
+    }
   } catch (error) {    
     console.error('Error deleting record:', error);
     return { error: error.message };
@@ -382,6 +544,62 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     return { error: error.message };
   }
 });
+
+  // Banking handlers
+  ipcMain.handle('reconcile-transactions', async (event, data) => {
+    try {
+      return await Transactions.reconcileTransactions(data);
+    } catch (error) {
+      console.error('Error reconciling transactions:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('create-bank-transfer', async (event, data) => {
+    try {
+      return await Transactions.createBankTransfer(data);
+    } catch (error) {
+      console.error('Error creating bank transfer:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('create-deposit', async (event, data) => {
+    try {
+      return await Transactions.createDeposit(data);
+    } catch (error) {
+      console.error('Error creating deposit:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('process-payroll', async (event, data) => {
+    try {
+      return await Transactions.processPayroll(data);
+    } catch (error) {
+      console.error('Error processing payroll:', error);
+      return { error: error.message };
+    }
+  });
+
+  // Company handlers
+  ipcMain.handle('get-company', async () => {
+    try {
+      return await Company.getInfo();
+    } catch (error) {
+      console.error('Error fetching company info:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('save-company', async (event, data) => {
+    try {
+      return await Company.saveInfo(data);
+    } catch (error) {
+      console.error('Error saving company info:', error);
+      return { error: error.message };
+    }
+  });
 };
 
 module.exports = registerIpcHandlers;

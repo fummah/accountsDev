@@ -53,6 +53,8 @@ const Employees = () => {
       const last_name = userData.last_name;
       const mi = userData.mi;
       const email = userData.email;
+      const phone = userData.phone;
+      const address = userData.address;
       const entered_by = "1";  
       const status = userData.status;
       const salary = userData.salary;    
@@ -62,11 +64,11 @@ const Employees = () => {
         
       if (userData.id) {
         const id = userData.id;
-        const employeeData = {id,first_name, last_name, mi, email, date_hired, entered_by, salary, status};
+        const employeeData = {id,first_name, last_name, mi, email,phone,address, date_hired, entered_by, salary, status};
         result = await window.electronAPI.updateEmployee(employeeData);   
       }
       else{
-        result = await window.electronAPI.insertEmployee(first_name, last_name, mi, email, date_hired, entered_by, salary, status); 
+        result = await window.electronAPI.insertEmployee(first_name, last_name, mi, email,phone,address, date_hired, entered_by, salary, status); 
           }
             console.log(result.message);
       setIsSuccess(result.success);  

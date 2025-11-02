@@ -11,6 +11,8 @@ const Employees = {
 	last_name	TEXT,
 	mi	TEXT,
 	email	TEXT,
+  phone	TEXT,
+  address	TEXT,
 	date_hired	TEXT,
 	entered_by	TEXT,
   salary	REAL DEFAULT 0,
@@ -23,10 +25,10 @@ const Employees = {
   },
 
   // Insert a new employee
-  insertEmployee: async (first_name, last_name, mi,email,date_hired,entered_by,salary,status) => {
+  insertEmployee: async (first_name, last_name, mi,email,phone,address,date_hired,entered_by,salary,status) => {
     try {
-    const stmt = db.prepare('INSERT INTO employees (first_name, last_name, mi,email,date_hired,entered_by,salary,status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    const result = await stmt.run(first_name, last_name, mi,email,date_hired,entered_by,salary,status);
+    const stmt = db.prepare('INSERT INTO employees (first_name, last_name, mi,email,phone,address,date_hired,entered_by,salary,status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const result = await stmt.run(first_name, last_name, mi,email,phone,address,date_hired,entered_by,salary,status);
    
      
     if (result.changes > 0) {
@@ -49,12 +51,14 @@ const Employees = {
     const { id, ...employeeDetails } = employeeData;
     try {
       // Update the main employee details
-      await db.prepare(`UPDATE employees SET first_name = ?, last_name = ?, mi =?, email =?, date_hired =?, salary =?, status = ? WHERE id = ?`).run(
+      await db.prepare(`UPDATE employees SET first_name = ?, last_name = ?, mi =?, email =?,phone =?, address =?, date_hired =?, salary =?, status = ? WHERE id = ?`).run(
         [
           employeeDetails.first_name,
           employeeDetails.last_name,
           employeeDetails.mi,
           employeeDetails.email,
+          employeeDetails.phone,
+          employeeDetails.address,
           employeeDetails.date_hired,
           employeeDetails.salary,
           employeeDetails.status,

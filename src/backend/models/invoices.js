@@ -107,37 +107,255 @@ const Invoices = {
     return {open_invoice,due_invoice, paid_invoice};
   },
   getDashboardSummary: function () {
-    const stmt_not_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS not_due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Pending' AND i.last_date > ?");
-    const stmt_open_expense = db.prepare("SELECT COUNT(DISTINCT e.id) AS open_expense,SUM(l.amount) AS open_total_amount_expense FROM expense_lines AS l INNER JOIN expenses AS e ON l.expense_id = e.id WHERE e.approval_status = 'Pending' ");
-    const stmt_due_expense = db.prepare("SELECT COUNT(DISTINCT e.id) AS due_expense,SUM(l.amount) AS due_total_amount_expense FROM expense_lines AS l INNER JOIN expenses AS e ON l.expense_id = e.id WHERE e.approval_status = 'Pending' AND e.payment_date < ?");
-    const stmt_quote = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_quote,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS due_total_amount FROM quote_lines AS l INNER JOIN quotes AS i ON l.quote_id = i.id WHERE i.status = 'Pending' AND i.last_date < ?");
+    // Not due invoices (pending but not overdue)
+    const stmt_not_due = db.prepare(`
+      SELECT COUNT(DISTINCT i.id) AS due_invoice,
+             SUM(l.amount * l.quantity * (1 + i.vat/100)) AS not_due_total_amount 
+      FROM invoice_lines AS l 
+      INNER JOIN invoices AS i ON l.invoice_id = i.id 
+      WHERE i.status = 'Pending' AND i.last_date > ?`);
+
+    // Open expenses (pending approval)
+    const stmt_open_expense = db.prepare(`
+      SELECT COUNT(DISTINCT e.id) AS open_expense,
+             SUM(l.amount) AS open_total_amount_expense 
+      FROM expense_lines AS l 
+      INNER JOIN expenses AS e ON l.expense_id = e.id 
+      WHERE e.approval_status = 'Pending'`);
+
+    // Due expenses (pending and overdue)
+    const stmt_due_expense = db.prepare(`
+      SELECT COUNT(DISTINCT e.id) AS due_expense,
+             SUM(l.amount) AS due_total_amount_expense 
+      FROM expense_lines AS l 
+      INNER JOIN expenses AS e ON l.expense_id = e.id 
+      WHERE e.approval_status = 'Pending' AND e.payment_date < ?`);
+
+    // Due quotes
+    const stmt_quote = db.prepare(`
+      SELECT COUNT(DISTINCT i.id) AS due_quote,
+             SUM(l.amount * l.quantity * (1 + i.vat/100)) AS due_total_amount 
+      FROM quote_lines AS l 
+      INNER JOIN quotes AS i ON l.quote_id = i.id 
+      WHERE i.status = 'Pending' AND i.last_date < ?`);
     
-    const stmt_invoicetrend= db.prepare("SELECT strftime('%Y-%m', start_date) AS name, COUNT(*) AS number FROM invoices WHERE start_date >= date('now', '-5 months') AND status='Paid' GROUP BY strftime('%Y-%m', start_date) ORDER BY name ASC");
-    const stmt_customertrend= db.prepare("SELECT strftime('%Y-%m', date_entered) AS name, COUNT(*) AS number FROM customers WHERE date_entered >= date('now', '-5 months') GROUP BY strftime('%Y-%m', date_entered) ORDER BY name");
-    const stmt_suppliertrend= db.prepare("SELECT strftime('%Y-%m', date_entered) AS name, COUNT(*) AS number FROM suppliers WHERE date_entered >= date('now', '-5 months') GROUP BY strftime('%Y-%m', date_entered) ORDER BY name");
-    const stmt_expenselist= db.prepare("SELECT category as name, COUNT(*) as value FROM expense_lines GROUP BY category");
+    // Invoice trends with comprehensive metrics
+    const stmt_invoicetrend = db.prepare(`
+      SELECT 
+        strftime('%Y-%m', i.start_date) AS name,
+        COUNT(DISTINCT i.id) AS number,
+        SUM(l.amount * l.quantity * (1 + i.vat/100)) as revenue_total_amount,
+        SUM(CASE WHEN i.status = 'Paid' THEN l.amount * l.quantity * (1 + i.vat/100) ELSE 0 END) as paid_amount,
+        SUM(CASE WHEN i.status = 'Pending' THEN l.amount * l.quantity * (1 + i.vat/100) ELSE 0 END) as pending_amount,
+        COUNT(DISTINCT CASE WHEN i.status = 'Paid' THEN i.id END) as paid_count,
+        COUNT(DISTINCT CASE WHEN i.status = 'Pending' THEN i.id END) as pending_count,
+        AVG(l.amount * l.quantity * (1 + i.vat/100)) as avg_invoice_value
+      FROM invoices i
+      INNER JOIN invoice_lines l ON l.invoice_id = i.id
+      WHERE i.start_date >= date('now', '-12 months') 
+      GROUP BY strftime('%Y-%m', i.start_date) 
+      ORDER BY name ASC`);
+      
+    // Monthly performance metrics
+    const stmt_monthly_performance = db.prepare(`
+      WITH monthly_stats AS (
+        SELECT 
+          strftime('%Y-%m', i.start_date) as month,
+          SUM(l.amount * l.quantity * (1 + i.vat/100)) as revenue,
+          COUNT(DISTINCT i.id) as invoice_count,
+          COUNT(DISTINCT i.customer) as unique_customers
+        FROM invoices i
+        INNER JOIN invoice_lines l ON l.invoice_id = i.id
+        WHERE i.start_date >= date('now', '-12 months')
+        GROUP BY strftime('%Y-%m', i.start_date)
+      )
+      SELECT 
+        month,
+        revenue,
+        invoice_count,
+        unique_customers,
+        revenue / invoice_count as avg_invoice_value,
+        LAG(revenue) OVER (ORDER BY month) as prev_month_revenue,
+        LAG(invoice_count) OVER (ORDER BY month) as prev_month_count
+      FROM monthly_stats
+      ORDER BY month DESC
+      LIMIT 12
+    `);
+      
+    // Customer metrics
+    const stmt_customer_metrics = db.prepare(`
+      SELECT 
+        COUNT(DISTINCT customer) as total_customers,
+        SUM(CASE WHEN status = 'Paid' THEN 1 ELSE 0 END) as paying_customers,
+        ROUND(AVG(CASE 
+          WHEN status = 'Paid' 
+          THEN (SELECT SUM(amount * quantity * (1 + vat/100)) 
+                FROM invoice_lines 
+                WHERE invoice_id = invoices.id)
+        END), 2) as avg_customer_value
+      FROM invoices
+      WHERE start_date >= date('now', '-12 months')`);
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const due_date = `${year}-${month}-${day}`;
+    // Customer growth trend
+    const stmt_customertrend = db.prepare(`
+      SELECT strftime('%Y-%m', date_entered) AS name, 
+             COUNT(*) AS number 
+      FROM customers 
+      WHERE date_entered >= date('now', '-5 months') 
+      GROUP BY strftime('%Y-%m', date_entered) 
+      ORDER BY name`);
 
-  const report = this.getInvoiceReport();
-  const open_invoice = report.open_invoice;
-  const paid_invoice = report.paid_invoice;
-  const due_invoice = report.due_invoice;
-  const due_not_invoice = stmt_not_due.all(due_date);
-  const open_expense = stmt_open_expense.all();
-  const due_expense = stmt_due_expense.all(due_date);
-  const due_quote = stmt_quote.all(due_date);
-  const invoicetrend = stmt_invoicetrend.all();
-  const customertrend = stmt_customertrend.all();
-  const suppliertrend = stmt_suppliertrend.all();
-  const expenselist = stmt_expenselist.all();
+    // Supplier growth trend
+    const stmt_suppliertrend = db.prepare(`
+      SELECT strftime('%Y-%m', date_entered) AS name, 
+             COUNT(*) AS number 
+      FROM suppliers 
+      WHERE date_entered >= date('now', '-5 months') 
+      GROUP BY strftime('%Y-%m', date_entered) 
+      ORDER BY name`);
 
+    // Detailed expense analysis
+    const stmt_expenselist = db.prepare(`
+      WITH monthly_expenses AS (
+        SELECT 
+          el.category as name,
+          COUNT(*) as count,
+          SUM(el.amount) as value,
+          strftime('%Y-%m', e.payment_date) as month,
+          AVG(el.amount) as avg_expense,
+          MAX(el.amount) as max_expense,
+          MIN(el.amount) as min_expense
+        FROM expense_lines el
+        INNER JOIN expenses e ON e.id = el.expense_id
+        WHERE e.payment_date >= date('now', '-12 months')
+        GROUP BY el.category, strftime('%Y-%m', e.payment_date)
+      )
+      SELECT 
+        name,
+        SUM(count) as count,
+        SUM(value) as value,
+        ROUND(AVG(value), 2) as monthly_average,
+        MAX(value) as highest_month,
+        MIN(value) as lowest_month,
+        ROUND(AVG(avg_expense), 2) as typical_expense,
+        MAX(max_expense) as largest_expense
+      FROM monthly_expenses
+      GROUP BY name
+      ORDER BY value DESC`);
 
-  return {open_invoice,due_invoice,open_expense,due_expense,due_quote,invoicetrend, customertrend,suppliertrend, expenselist, due_not_invoice,paid_invoice,report};
+    // Get current date for due date calculations
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const due_date = `${year}-${month}-${day}`;
+
+    // Get invoice report for open/paid/due amounts
+    const report = this.getInvoiceReport();
+    const open_invoice = report.open_invoice;
+    const paid_invoice = report.paid_invoice;
+    const due_invoice = report.due_invoice;
+
+    // Execute all queries
+    const due_not_invoice = stmt_not_due.all(due_date);
+    const open_expense = stmt_open_expense.all();
+    const due_expense = stmt_due_expense.all(due_date);
+    const due_quote = stmt_quote.all(due_date);
+    const invoicetrend = stmt_invoicetrend.all();
+    const customertrend = stmt_customertrend.all();
+    const suppliertrend = stmt_suppliertrend.all();
+    const expenselist = stmt_expenselist.all();
+
+    // Calculate some derived values
+    const currentMonthInvoices = invoicetrend.length > 0 ? invoicetrend[invoicetrend.length - 1] : { number: 0, revenue_total_amount: 0 };
+    const currentMonthExpenses = expenselist.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+    
+    // Get new metrics data
+    const monthly_performance = stmt_monthly_performance.all();
+    const customer_metrics = stmt_customer_metrics.get();
+    
+    // Calculate month-over-month changes
+    const currentMonth = monthly_performance[0] || {};
+    const prevMonth = monthly_performance[1] || {};
+    
+    const revenueChange = currentMonth.revenue && prevMonth.revenue
+      ? ((currentMonth.revenue - prevMonth.revenue) / prevMonth.revenue * 100).toFixed(1)
+      : 0;
+    
+    const customerChange = currentMonth.unique_customers && prevMonth.unique_customers
+      ? ((currentMonth.unique_customers - prevMonth.unique_customers) / prevMonth.unique_customers * 100).toFixed(1)
+      : 0;
+
+    // Enhanced expense metrics
+    const enhancedExpenseList = expenselist.map(item => ({
+      ...item,
+      value: Number(item.value) || 0,
+      count: Number(item.count) || 0,
+      monthlyAverage: Number(item.monthly_average) || 0,
+      highestMonth: Number(item.highest_month) || 0,
+      lowestMonth: Number(item.lowest_month) || 0,
+      typicalExpense: Number(item.typical_expense) || 0,
+      largestExpense: Number(item.largest_expense) || 0
+    }));
+
+    // Calculate totals
+    const totalExpenses = enhancedExpenseList.reduce((sum, item) => sum + item.value, 0);
+    const totalRevenue = monthly_performance.reduce((sum, month) => sum + (Number(month.revenue) || 0), 0);
+    
+    return {
+      // Original metrics
+      open_invoice,
+      due_invoice,
+      open_expense,
+      due_expense,
+      due_quote,
+      invoicetrend,
+      customertrend,
+      suppliertrend,
+      due_not_invoice,
+      paid_invoice,
+      report,
+
+      // Enhanced metrics
+      expenseAnalysis: enhancedExpenseList,
+      monthlyPerformance: monthly_performance.map(month => ({
+        ...month,
+        revenue: Number(month.revenue) || 0,
+        invoice_count: Number(month.invoice_count) || 0,
+        unique_customers: Number(month.unique_customers) || 0,
+        avg_invoice_value: Number(month.avg_invoice_value) || 0,
+        prev_month_revenue: Number(month.prev_month_revenue) || 0,
+        prev_month_count: Number(month.prev_month_count) || 0
+      })),
+      
+      customerMetrics: {
+        totalCustomers: Number(customer_metrics.total_customers) || 0,
+        payingCustomers: Number(customer_metrics.paying_customers) || 0,
+        avgCustomerValue: Number(customer_metrics.avg_customer_value) || 0,
+        customerRetentionRate: customer_metrics.total_customers > 0 
+          ? (customer_metrics.paying_customers / customer_metrics.total_customers * 100).toFixed(1) 
+          : 0
+      },
+
+      performance: {
+        currentMonth: {
+          revenue: Number(currentMonth.revenue) || 0,
+          invoiceCount: Number(currentMonth.invoice_count) || 0,
+          uniqueCustomers: Number(currentMonth.unique_customers) || 0,
+          avgInvoiceValue: Number(currentMonth.avg_invoice_value) || 0,
+          expenses: totalExpenses,
+          profit: (Number(currentMonth.revenue) || 0) - totalExpenses
+        },
+        trends: {
+          revenueGrowth: `${revenueChange}%`,
+          customerGrowth: `${customerChange}%`,
+          profitMargin: totalRevenue > 0 
+            ? ((totalRevenue - totalExpenses) / totalRevenue * 100).toFixed(1) 
+            : '0',
+          averageInvoiceValue: currentMonth.avg_invoice_value || 0
+        }
+      }
+    };
   },
   getSingleInvoice: (invoice_id) => {
     const stmt = db.prepare(`SELECT invoices.id as invoice_id, customers.first_name, customers.last_name,customers.phone_number, customers.mobile_number, invoices.status, invoices.customer_email, invoices.islater, invoices.billing_address,
@@ -248,6 +466,20 @@ const Invoices = {
       throw error;
     }
   },
+  deleteInvoice: async (id) => {
+    try {
+      const transaction = db.transaction((invoiceId) => {
+        db.prepare(`DELETE FROM invoice_lines WHERE invoice_id = ?`).run(invoiceId);
+        const res = db.prepare(`DELETE FROM invoices WHERE id = ?`).run(invoiceId);
+        return res.changes;
+      });
+      const changes = transaction(id);
+      return { success: changes > 0 };
+    } catch (error) {
+      console.error('Error deleting invoice:', error);
+      return { success: false, error: error.message };
+    }
+  },
   getFinancialReport: function (start_date, last_date) {
     try {
     const stmt_revenue = db.prepare("SELECT SUM(l.amount * l.quantity + ((l.amount * l.quantity) * i.vat / 100)) AS revenue_total_amount, SUM(p.price * l.quantity) AS product_total_amount FROM invoice_lines AS l INNER JOIN products as p ON l.product=p.name INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Paid', 'Partially Paid') AND i.start_date BETWEEN ? AND ?");
@@ -286,7 +518,7 @@ const Invoices = {
         operating: ((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0),
         investing: 0,
         financing: 0,
-        netCashFlow: this.operating + this.investing + this.financing, // Sum of all activities
+        netCashFlow: (((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0)) + 0 + 0, // Sum of all activities
       },
     };
   } catch (error) {

@@ -11,6 +11,7 @@ import CashFlowTrend from "components/dashboard/Home/CashFlowTrend";
 import InvoicesCard from "components/dashboard/Home/InvoicesCard";
 import AccountsPayable from "components/dashboard/Home/AccountsPayable";
 import AccountsReceivable from "components/dashboard/Home/AccountsReceivable";
+import CompanySnapshot from "components/dashboard/Home/CompanySnapshot";
 import Sales from "components/dashboard/Home/Sales";
 import Toast from "components/AppNotification/toast.js";
 
@@ -34,30 +35,48 @@ const HomeTab = () => {
   const [report, setReport] = useState(null);
 
   const fetchInitials = async () => {
-            
-    try {        
-        const response = await window.electronAPI.getDashboardSummary();    
+    try {
+      const response = await window.electronAPI.getDashboardSummary();
 
-        setOpenInvoice(response.open_invoice[0].open_invoice);
-        setDueInvoice(response.due_invoice[0].due_invoice);
-        setDueQuote(response.due_quote[0].due_quote);
-        setOpenInvoiceMoney(response.open_invoice[0].open_total_amount);
-        setDueInvoiceMoney(response.due_invoice[0].due_total_amount);
-        setOpenExpense(response.open_expense[0].open_expense);
-        setDueExpense(response.due_expense[0].due_expense);
-        setOpenExpenseMoney(response.open_expense[0].open_total_amount_expense);
-        setDueExpenseMoney(response.due_expense[0].due_total_amount_expense);
-        setInvoicePaidTrend(response.invoicetrend);
-        setCustomerTrend(response.customertrend);
-        setSupplierTrend(response.suppliertrend);
-        setExpenseList(response.expenselist);
-        setReport(response.report);
+      if (!response || response.error) {
+        const errorMessage = response?.error || 'No dashboard data returned';
+        setMessage(`Error fetching summary: ${errorMessage}`);
+        setShowError(true);
+        return;
+      }
+
+      // Safely read fields with fallbacks
+      const openInv = (response.open_invoice && response.open_invoice[0] && Number(response.open_invoice[0].open_invoice)) || 0;
+      const dueInv = (response.due_invoice && response.due_invoice[0] && Number(response.due_invoice[0].due_invoice)) || 0;
+      const dueQ = (response.due_quote && response.due_quote[0] && Number(response.due_quote[0].due_quote)) || 0;
+      const openInvMoney = (response.open_invoice && response.open_invoice[0] && Number(response.open_invoice[0].open_total_amount)) || 0;
+      const dueInvMoney = (response.due_invoice && response.due_invoice[0] && Number(response.due_invoice[0].due_total_amount)) || 0;
+      const openExp = (response.open_expense && response.open_expense[0] && Number(response.open_expense[0].open_expense)) || 0;
+      const dueExp = (response.due_expense && response.due_expense[0] && Number(response.due_expense[0].due_expense)) || 0;
+      const openExpMoney = (response.open_expense && response.open_expense[0] && Number(response.open_expense[0].open_total_amount_expense)) || 0;
+      const dueExpMoney = (response.due_expense && response.due_expense[0] && Number(response.due_expense[0].due_total_amount_expense)) || 0;
+
+      setOpenInvoice(openInv);
+      setDueInvoice(dueInv);
+      setDueQuote(dueQ);
+      setOpenInvoiceMoney(openInvMoney);
+      setDueInvoiceMoney(dueInvMoney);
+      setOpenExpense(openExp);
+      setDueExpense(dueExp);
+      setOpenExpenseMoney(openExpMoney);
+      setDueExpenseMoney(dueExpMoney);
+
+      setInvoicePaidTrend(Array.isArray(response.invoicetrend) ? response.invoicetrend : []);
+      setCustomerTrend(Array.isArray(response.customertrend) ? response.customertrend : []);
+      setSupplierTrend(Array.isArray(response.suppliertrend) ? response.suppliertrend : []);
+      setExpenseList(Array.isArray(response.expenseAnalysis) ? response.expenseAnalysis : (Array.isArray(response.expenselist) ? response.expenselist : []));
+      setReport(response.report || null);
     } catch (error) {
       const errorMessage = error.message || "An unknown error occurred.";
-  setMessage(`Error fetching summary: ${errorMessage}`);
+      setMessage(`Error fetching summary: ${errorMessage}`);
       setShowError(true);
     }
-};
+  };
 
 useEffect(() => {
   const initialize = async () => {
@@ -135,7 +154,10 @@ useEffect(() => {
         </Col>
 
         <Col xl={14} lg={24} md={14} sm={24} xs={24}>
-          <ProfitAndLoss CurrentBalance = {openinvoicemoney - openexpensemoney} Invoiced = {openinvoicemoney} Expensed = {openexpensemoney}/>
+          <ProfitAndLoss 
+            CurrentBalance = {(Number(openinvoicemoney) || 0) - (Number(openexpensemoney) || 0)} 
+            Invoiced = {Number(openinvoicemoney) || 0} 
+            Expensed = {Number(openexpensemoney) || 0}/>
         </Col>
         <Col xl={10} lg={24} md={10} sm={24} xs={24}>
         <Expenses Expensed = {openexpensemoney} ExpenseList = {expenselist}/>
@@ -158,7 +180,7 @@ useEffect(() => {
         </Col>
               
       </Row>
-
+<CompanySnapshot/>
     </Auxiliary>
   );
 };

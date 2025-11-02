@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useEffect } from 'react';
-import { Button, Col, Drawer, Form, Input, Row, Space,Dropdown, DatePicker, Select } from 'antd';
+import { Button, Col, Drawer, Form, Input, Row, Space,Dropdown, DatePicker, Select,Checkbox } from 'antd';
 import { DownOutlined,IdcardOutlined } from '@ant-design/icons';
 import Widget from "components/Widget/index";
 
@@ -126,6 +126,16 @@ useEffect(() => {
               </Form.Item>
               </Col>
               <Col span={8}>
+              <Form.Item name="phone" label="Phone Number" rules={[{ required: true, message: 'Enter Phone Number', },]}>
+                   <Input/> 
+              </Form.Item>
+              </Col>
+              <Col span={8}>
+              <Form.Item name="address" label="Physical Address" rules={[{ required: true, message: 'Enter Physical Address', },]}>
+                   <Input/> 
+              </Form.Item>
+              </Col>
+              <Col span={8}>
               <Form.Item ame="hire_date" label="Hire Date" rules={[{ required: true, message: 'Enter hire date', },]}>
                    <DatePicker/> 
               </Form.Item>
@@ -142,6 +152,30 @@ useEffect(() => {
 <Option value="Deactivated">Deactivated</Option>
 </Select>
 </Form.Item>
+              </Col>
+
+               {/* New Role Field */}
+              <Col span={12}>
+                <Form.Item name="role" label="Role" rules={[{ required: true, message: 'Select a role' }]}> 
+                  <Select placeholder="Select Role">
+                    <Option value="Admin">Admin</Option>
+                    <Option value="Manager">Manager</Option>
+                    <Option value="Staff">Staff</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+
+              {/* New Permissions Field */}
+              <Col span={24}>
+                <Form.Item name="permissions" label="Permissions">
+                  <Checkbox.Group>
+                    <Row>
+                      <Col span={8}><Checkbox value="view">View</Checkbox></Col>
+                      <Col span={8}><Checkbox value="edit">Edit</Checkbox></Col>
+                      <Col span={8}><Checkbox value="delete">Delete</Checkbox></Col>
+                    </Row>
+                  </Checkbox.Group>
+                </Form.Item>
               </Col>
               </Row>            
               

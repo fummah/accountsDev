@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   //Employees
   getAllEmployees: () => ipcRenderer.invoke('get-employees'),
   updateEmployee: (employeeData) => ipcRenderer.invoke('updateemployee',employeeData),
-  insertEmployee: (first_name, last_name, mi,email,date_hired,entered_by, salary, status) => ipcRenderer.invoke('insert-employee', first_name, last_name, mi,email,date_hired,entered_by, salary, status),
+  insertEmployee: (first_name, last_name, mi,email,phone,address,date_hired,entered_by, salary, status) => ipcRenderer.invoke('insert-employee', first_name, last_name, mi,email,phone,address,date_hired,entered_by, salary, status),
   //Customers
   getAllCustomers: () => ipcRenderer.invoke('get-customers'),
   getSingleCustomer: (customer_id) => ipcRenderer.invoke('get-singleCustomer',customer_id),
@@ -49,5 +49,30 @@ updateVat: (vatData) => ipcRenderer.invoke('updatevat',vatData),
 getVatReport: (start_date, last_date) => ipcRenderer.invoke('get-vatreport',start_date, last_date),
 insertVat: (vat_name,vat_percentage,entered_by) => ipcRenderer.invoke('insert-vat', vat_name,vat_percentage,entered_by),
 deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
+  // Chart of accounts and fixed assets
+  getChartOfAccounts: () => ipcRenderer.invoke('get-chart-accounts'),
+  insertChartAccount: (name,type,number,entered_by) => ipcRenderer.invoke('insert-chart-account', name,type,number,entered_by),
+  getFixedAssets: () => ipcRenderer.invoke('get-fixed-assets'),
+  insertFixedAsset: (name,category,value,entered_by) => ipcRenderer.invoke('insert-fixed-asset', name,category,value,entered_by),
+
+  // Transactions
+  getTransactions: () => ipcRenderer.invoke('get-transactions'),
+  insertTransaction: (tx) => ipcRenderer.invoke('insert-transaction', tx),
+  voidTransaction: (id) => ipcRenderer.invoke('void-transaction', id),
+
+  // Journal
+  getJournal: () => ipcRenderer.invoke('get-journal'),
+  insertJournal: (entry) => ipcRenderer.invoke('insert-journal', entry),
+
+  // Ledger
+  getLedger: () => ipcRenderer.invoke('get-ledger'),
+  // Company
+  getCompany: () => ipcRenderer.invoke('get-company'),
+  saveCompany: (data) => ipcRenderer.invoke('save-company', data),
+  // Reports / Projections / Budgets
+  getCashflowProjections: (year) => ipcRenderer.invoke('get-cashflow-projections', year),
+  saveCashflowProjections: (projections, year) => ipcRenderer.invoke('save-cashflow-projections', projections, year),
+  getBudgets: () => ipcRenderer.invoke('get-budgets'),
+  insertBudget: (department, period, amount, forecast, entered_by) => ipcRenderer.invoke('insert-budget', department, period, amount, forecast, entered_by),
 
 });

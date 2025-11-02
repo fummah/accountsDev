@@ -32,10 +32,38 @@ const overrideProcessEnv = value => config => {
   return config;
 };
 
+const fixPostcssLoader = () => config => {
+  if (config && config.module && Array.isArray(config.module.rules)) {
+    config.module.rules.forEach(rule => {
+      if (rule && Array.isArray(rule.oneOf)) {
+        rule.oneOf.forEach(one => {
+          const uses = one.use || (one.loader ? [one] : []);
+          if (Array.isArray(uses)) {
+            uses.forEach(u => {
+              if (u && u.loader && u.loader.indexOf('postcss-loader') !== -1 && u.options) {
+                // If options.plugins exists (old format), move it under postcssOptions.plugins
+                if (u.options.plugins && !u.options.postcssOptions) {
+                  u.options.postcssOptions = { plugins: u.options.plugins };
+                  delete u.options.plugins;
+                }
+              }
+            });
+          }
+        });
+      }
+    });
+  }
+  return config;
+};
+
 module.exports = override(
   addLessLoader({
     javascriptEnabled: true,
+    lessOptions: {
+      javascriptEnabled: true,
+    }
   }),
+  fixPostcssLoader(),
   overrideProcessEnv({
     VERSION: JSON.stringify(require('./package.json').version),
   })

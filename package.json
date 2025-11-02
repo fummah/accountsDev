@@ -4,7 +4,7 @@
     "electron-builder": "^25.1.8",
     "electron-rebuild": "^3.2.9"
   },
-  "name": "accounts",
+  "name": "Accounting_App_Demo",
   "version": "1.0.0",
   "description": "Accounts Desktop App",
   "main": "src/backend/main.js",
@@ -12,48 +12,58 @@
     "start": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
     "rebuild": "electron-rebuild -f -w sqlite3",
     "test": "",
-    "build": "react-scripts build",
-    "react-start": "react-scripts start",
+    "build": "npm run build-react && npm run build-electron",
+    "build-react": "cd src/frontend && yarn build",
+    "build-electron": "electron-builder",
     "electron-start": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
     "postinstall": "electron-builder install-app-deps",
     "package": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "electron:build": "npm run build-react && electron-builder -c.extraMetadata.main=src/backend/main.js"
   },
   "build": {
     "appId": "com.tendai.myapp",
     "files": [
-    "src/backend/main.js",
-    "src/backend/db/**/*", 
-    "src/frontend/build/**/*" 
-  ],
+      "src/backend/**/*",
+      "src/backend/db/**/*",
+      "src/frontend/build/**/*",
+      "node_modules/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "extraMetadata": {
+      "main": "src/backend/main.js"
+    },
     "win": {
       "target": "nsis",
       "icon": "favicon.ico"
     },
-    "directories": {
-      "output": "dist"
-    },
-     "nsis": {
+    "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fummah/accounts.git"
+    "url": "git+https://github.com/fummah/accountsDev.git"
   },
   "keywords": [
-    "accounts"
+    "Accounting_App_Demo"
   ],
   "author": "Tendai Fuma",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/fummah/accounts/issues"
+    "url": "https://github.com/fummah/accountsDev/issues"
   },
-  "homepage": "https://github.com/fummah/accounts#readme",
+  "homepage": "https://github.com/fummah/accountsDev#readme",
   "dependencies": {
     "better-sqlite3": "^11.5.0",
     "concurrently": "^9.0.1",
+    "electron-build": "^0.0.3",
+    "express": "^4.21.2",
     "knew": "^0.0.0",
     "sqlite3": "^5.1.7"
   }

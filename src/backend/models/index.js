@@ -9,17 +9,32 @@ const Quotes = require('./quotes');
 const Invoices = require('./invoices');
 const Products = require('./products');
 const Vat = require('./vat');
+const CashflowProjections = require('./cashflowProjections');
+const Budgets = require('./budgets');
+const ChartOfAccounts = require('./chartOfAccounts');
+const FixedAssets = require('./fixedAssets');
+const Company = require('./company');
 
+const Transactions = require("./transactions");
+const Journal = require("./journal");
+const Ledger = require("./ledger");
 module.exports = {
-  Users,
-  Employees,
   Customers,
-  Suppliers,
+  Invoices,
+  Quotes,
+  Products,
+  Employees,
   Expenses,
   Notes,
-  Documents,
-  Quotes,
-  Invoices,
-  Products,
+  Suppliers,
+  Users,
   Vat,
+  CashflowProjections,
+  Budgets,
+  ChartOfAccounts,
+  FixedAssets,
+  Company,
+  Transactions,
+  Journal,
+  Ledger
 };

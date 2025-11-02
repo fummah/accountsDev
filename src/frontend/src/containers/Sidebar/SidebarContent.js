@@ -79,7 +79,7 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                      
 <span>
 <i className="icon icon-dasbhoard" />
-<Link to="/main/dashboard/home">
+<Link to="/main/dashboard/home-dash">
   <span>
     <IntlMessages id="sidebar.dashboard" />
   </span>
@@ -87,14 +87,14 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
 </span>
 
                         }>
-                <Menu.Item key="main/dashboard/home">
-                  <Link to={{ pathname: "/main/dashboard/home", state: { tabKey: "1" } }}>
+                <Menu.Item key="main/dashboard/home-dash">
+                  <Link to={{ pathname: "/main/dashboard/home-dash", state: { tabKey: "1" } }}>
                     <i className="icon icon-home"/>
                     <span><IntlMessages id="accounts.home"/></span>
                   </Link>
                   </Menu.Item>
                   <Menu.Item key="main/dashboard/home1">
-                  <Link to={{ pathname: "/main/dashboard/home", state: { tabKey: "2" } }}>
+                  <Link to={{ pathname: "/main/dashboard/home-dash", state: { tabKey: "2" } }}>
                     <i className="icon icon-revenue-new"/>
                     <span><IntlMessages id="accounts.cashflow"/></span>
                   </Link>
@@ -258,7 +258,17 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
               <Menu.Item key="lists/reports1">
                 <Link to={{ pathname: "/inner/reports", state: { tabKey: "3" } }}>
                   <i className="icon icon-invert-color"/><span>Tax Reports</span></Link>
-                </Menu.Item>          
+                </Menu.Item>   
+
+                   <Menu.Item key="lists/reports2">
+                <Link to={{ pathname: "/inner/reports", state: { tabKey: "4" } }}>
+                  <i className="icon icon-orders"/><span>Planning & Reporting</span></Link>
+                </Menu.Item> 
+
+                   <Menu.Item key="lists/reports3">
+                <Link to={{ pathname: "/inner/reports", state: { tabKey: "5" } }}>
+                  <i className="icon icon-crm"/><span>Cashflow Projector</span></Link>
+                </Menu.Item>        
 </SubMenu>
               <Menu.Item key="inner/profile">
                 <Link to="/inner/profile"><i
