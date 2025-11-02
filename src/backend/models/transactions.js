@@ -228,6 +228,35 @@ const Transactions = {
       throw error;
     }
   }
+
+  ,
+
+  getPayrollRuns() {
+    try {
+      const runs = db.prepare(`
+        SELECT pr.id, pr.startDate AS payPeriodStart, pr.endDate AS payPeriodEnd, pr.paymentMethod, pr.bankAccount, pr.notes, pr.status, pr.created_at
+        FROM payroll_runs pr
+        ORDER BY pr.created_at DESC
+      `).all();
+
+      // Attach summary totals for each run
+      const stmtTotals = db.prepare(`SELECT IFNULL(SUM(netPay),0) as totalNetPay, COUNT(*) as paymentsCount FROM payroll_payments WHERE payrollRunId = ?`);
+
+      const results = runs.map(run => {
+        const totals = stmtTotals.get(run.id);
+        return {
+          ...run,
+          totalNetPay: totals ? Number(totals.totalNetPay) : 0,
+          paymentsCount: totals ? Number(totals.paymentsCount) : 0,
+        };
+      });
+
+      return results;
+    } catch (error) {
+      console.error('Error fetching payroll runs:', error);
+      return [];
+    }
+  }
 };
 
 Transactions.createTable();

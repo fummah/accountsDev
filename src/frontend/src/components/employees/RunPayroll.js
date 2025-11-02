@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Form, Button, Table, DatePicker, Select, Input, Row, Col, message, Steps, Modal } from 'antd';
 import { DollarOutlined, CheckOutlined, LoadingOutlined } from '@ant-design/icons';
 import moment from 'moment';
@@ -13,6 +13,8 @@ const RunPayroll = () => {
   const [payPeriod, setPayPeriod] = useState('bi-weekly');
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
+  const [employees, setEmployees] = useState([]);
+  const [payrollRows, setPayrollRows] = useState([]);
 
   const columns = [
     {
@@ -51,69 +53,79 @@ const RunPayroll = () => {
       title: 'Rate',
       dataIndex: 'rate',
       key: 'rate',
-      render: value => '$' + value.toFixed(2) + '/hr'
+      render: value => '$' + (typeof value === 'number' && !isNaN(value) ? value.toFixed(2) : '0.00') + '/hr'
     },
     {
       title: 'Gross Pay',
       key: 'grossPay',
       render: (_, record) => {
-        const regular = record.regularHours * record.rate;
-        const overtime = record.overtimeHours * (record.rate * 1.5);
-        return '$' + (regular + overtime).toFixed(2);
+        const regular = Number(record.regularHours) * Number(record.rate);
+        const overtime = Number(record.overtimeHours) * (Number(record.rate) * 1.5);
+        const gross = regular + overtime;
+        return '$' + (!isNaN(gross) ? gross.toFixed(2) : '0.00');
       }
     },
     {
       title: 'Deductions',
       dataIndex: 'deductions',
       key: 'deductions',
-      render: value => '$' + value.toFixed(2)
+      render: value => '$' + (typeof value === 'number' && !isNaN(value) ? value.toFixed(2) : '0.00')
     },
     {
       title: 'Net Pay',
       key: 'netPay',
       render: (_, record) => {
-        const regular = record.regularHours * record.rate;
-        const overtime = record.overtimeHours * (record.rate * 1.5);
+        const regular = Number(record.regularHours) * Number(record.rate);
+        const overtime = Number(record.overtimeHours) * (Number(record.rate) * 1.5);
         const gross = regular + overtime;
-        return '$' + (gross - record.deductions).toFixed(2);
+        const deductions = Number(record.deductions);
+        const net = gross - deductions;
+        return '$' + (!isNaN(net) ? net.toFixed(2) : '0.00');
       }
     }
   ];
 
-  // Sample data - replace with actual data from your backend
-  const employeeData = [
-    {
-      key: '1',
-      name: 'John Doe',
-      regularHours: 80,
-      overtimeHours: 5,
-      rate: 25.00,
-      deductions: 450.00
-    },
-    {
-      key: '2',
-      name: 'Jane Smith',
-      regularHours: 80,
-      overtimeHours: 0,
-      rate: 30.00,
-      deductions: 520.00
-    },
-    {
-      key: '3',
-      name: 'Mike Johnson',
-      regularHours: 75,
-      overtimeHours: 8,
-      rate: 22.00,
-      deductions: 380.00
+  useEffect(() => {
+    async function fetchEmployees() {
+      try {
+        const response = await window.electronAPI.getAllEmployees();
+        if (response.success) {
+          const list = response.data || [];
+          setEmployees(list);
+          // Initialize editable payroll rows from employees
+          const rows = list.map(emp => ({
+            key: emp.id,
+            id: emp.id,
+            first_name: emp.first_name,
+            last_name: emp.last_name,
+            name: `${emp.first_name} ${emp.last_name}`,
+            regularHours: 80,
+            overtimeHours: 0,
+            rate: typeof emp.salary === 'number' ? emp.salary : parseFloat(emp.salary) || 0,
+            deductions: 0
+          }));
+          setPayrollRows(rows);
+        } else {
+          setEmployees([]);
+          setPayrollRows([]);
+        }
+      } catch (error) {
+        setEmployees([]);
+        setPayrollRows([]);
+      }
     }
-  ];
+    fetchEmployees();
+  }, []);
 
   const handleHoursChange = (key, type, value) => {
-    const newData = [...employeeData];
-    const target = newData.find(item => item.key === key);
-    if (target) {
-      target[type] = parseFloat(value) || 0;
-    }
+    setPayrollRows(prev => {
+      return prev.map(r => {
+        if (r.key === key) {
+          return { ...r, [type]: parseFloat(value) || 0 };
+        }
+        return r;
+      });
+    });
   };
 
   const handleNext = () => {
@@ -131,13 +143,34 @@ const RunPayroll = () => {
   const handlePayrollSubmit = async () => {
     setLoading(true);
     try {
-      // TODO: Implement payroll submission to backend
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulated API call
-      message.success('Payroll processed successfully');
-      setConfirmModalVisible(false);
-      // Reset or redirect as needed
+      // Prepare payload
+      const payload = {
+        payPeriodStart: payrollDate.startOf('day').format('YYYY-MM-DD'),
+        payPeriodEnd: payrollDate.startOf('day').format('YYYY-MM-DD'),
+        processedDate: payrollDate.format('YYYY-MM-DD'),
+        paymentMethod: 'direct_deposit',
+        notes: null,
+        rows: payrollRows.map(r => ({
+          id: r.id,
+          regularHours: r.regularHours,
+          overtimeHours: r.overtimeHours,
+          rate: r.rate,
+          deductions: r.deductions
+        }))
+      };
+
+      const result = await window.electronAPI.processPayroll(payload);
+      if (result && result.success) {
+        message.success(result.message || 'Payroll processed successfully');
+        setConfirmModalVisible(false);
+        // reload payroll records if needed
+        // loadPayrollRecords(); // optional: call if payroll page shows history
+      } else {
+        throw new Error(result?.error || 'Failed to process payroll');
+      }
     } catch (error) {
-      message.error('Failed to process payroll');
+      console.error('Error processing payroll:', error);
+      message.error(error.message || 'Failed to process payroll');
     } finally {
       setLoading(false);
     }
@@ -176,7 +209,7 @@ const RunPayroll = () => {
       content: (
         <Table
           columns={columns}
-          dataSource={employeeData}
+          dataSource={payrollRows}
           pagination={false}
           scroll={{ x: true }}
         />
@@ -191,7 +224,7 @@ const RunPayroll = () => {
               <Card title="Pay Period Summary">
                 <p>Pay Date: {payrollDate.format('MM/DD/YYYY')}</p>
                 <p>Period: {payPeriod}</p>
-                <p>Total Employees: {employeeData.length}</p>
+                <p>Total Employees: {payrollRows.length}</p>
               </Card>
             </Col>
             <Col span={8}>
@@ -203,7 +236,7 @@ const RunPayroll = () => {
             </Col>
             <Col span={8}>
               <Card title="Payment Method">
-                <p>Direct Deposit: {employeeData.length} employees</p>
+                <p>Direct Deposit: {payrollRows.length} employees</p>
                 <p>Check: 0 employees</p>
               </Card>
             </Col>
@@ -212,6 +245,15 @@ const RunPayroll = () => {
       )
     }
   ];
+
+  const employeeData = employees.map(emp => ({
+    key: emp.id,
+    name: `${emp.first_name} ${emp.last_name}`,
+    regularHours: 80, // You can add a field to input/edit this per employee
+    overtimeHours: 0, // You can add a field to input/edit this per employee
+    rate: typeof emp.salary === 'number' ? emp.salary : parseFloat(emp.salary) || 0,
+    deductions: typeof emp.deductions === 'number' ? emp.deductions : parseFloat(emp.deductions) || 0
+  }));
 
   return (
     <Card title="Run Payroll">
@@ -246,7 +288,7 @@ const RunPayroll = () => {
         onCancel={() => setConfirmModalVisible(false)}
         confirmLoading={loading}
       >
-        <p>Are you sure you want to process payroll for {employeeData.length} employees?</p>
+        <p>Are you sure you want to process payroll for {employees.length} employees?</p>
         <p>Total Net Pay: $6,500.00</p>
         <p>This action cannot be undone.</p>
       </Modal>

@@ -19,7 +19,16 @@ const ChartOfAccounts = {
 
   getAllAccounts: () => {
     const stmt = db.prepare('SELECT id, name, type, number, balance, status FROM chart_of_accounts ORDER BY id DESC');
-    return stmt.all();
+    const rows = stmt.all();
+    // map DB fields to frontend-friendly keys used across the app
+    return rows.map(r => ({
+      id: r.id,
+      accountName: r.name,
+      accountType: r.type,
+      accountNumber: r.number,
+      balance: r.balance,
+      status: r.status
+    }));
   },
 
   insertAccount: (name, type, number, entered_by) => {

@@ -34,7 +34,29 @@ const ProfitLoss = () => {
         dateRange[0].format('YYYY-MM-DD'),
         dateRange[1].format('YYYY-MM-DD')
       );
-      setData(result);
+      // Backend returns an object with profitLoss, balanceSheet, cashFlow
+      // Map backend shape to the UI shape expected here.
+      const profit = result && result.profitLoss ? result.profitLoss : null;
+      if (profit) {
+        const mapped = {
+          income: [
+            { category: 'Revenue', amount: Number(profit.revenue || 0) }
+          ],
+          expenses: [
+            { category: 'COGS', amount: Number(profit.cogs || 0) },
+            { category: 'Operating Expenses', amount: Number(profit.operatingExpenses || 0) }
+          ],
+          summary: {
+            totalIncome: Number(profit.revenue || 0),
+            totalExpenses: Number(profit.operatingExpenses || 0),
+            netIncome: Number(profit.netProfit != null ? profit.netProfit : ((profit.revenue || 0) - (profit.product_total_amount || 0) - (profit.operatingExpenses || 0)))
+          }
+        };
+        setData(mapped);
+      } else {
+        // fallback to empty structured data
+        setData({ income: [], expenses: [], summary: { totalIncome: 0, totalExpenses: 0, netIncome: 0 } });
+      }
     } catch (error) {
       console.error('Failed to load profit & loss data:', error);
     } finally {
@@ -58,8 +80,11 @@ const ProfitLoss = () => {
       title: '% of Total',
       dataIndex: 'amount',
       key: 'percentage',
-      render: (amount) => 
-        `${((amount / data.summary.totalIncome) * 100).toFixed(1)}%`,
+      render: (amount) => {
+        const total = (data && data.summary && Number(data.summary.totalIncome)) || 0;
+        if (!total) return '0%';
+        return `${((Number(amount || 0) / total) * 100).toFixed(1)}%`;
+      }
     }
   ];
 
@@ -79,8 +104,11 @@ const ProfitLoss = () => {
       title: '% of Total',
       dataIndex: 'amount',
       key: 'percentage',
-      render: (amount) => 
-        `${((amount / data.summary.totalExpenses) * 100).toFixed(1)}%`,
+      render: (amount) => {
+        const total = (data && data.summary && Number(data.summary.totalExpenses)) || 0;
+        if (!total) return '0%';
+        return `${((Number(amount || 0) / total) * 100).toFixed(1)}%`;
+      }
     }
   ];
 

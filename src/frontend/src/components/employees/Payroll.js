@@ -20,20 +20,35 @@ const Payroll = () => {
 
   const loadEmployees = async () => {
     try {
-      const data = await window.electronAPI.getAllEmployees();
-      setEmployees(data);
+      const response = await window.electronAPI.getAllEmployees();
+      console.log('Employees response:', response);
+
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch employees');
+      }
+
+      setEmployees(response.data || []);
     } catch (error) {
-      message.error('Failed to load employees');
+      console.error('Error loading employees:', error);
+      message.error(error.message || 'Failed to load employees');
+      setEmployees([]);
     }
   };
 
   const loadPayrollRecords = async () => {
     try {
-      // TODO: Implement getPayrollRecords in the backend
-      const data = [];
-      setPayrollRecords(data);
+      const response = await window.electronAPI.getPayrollRecords();
+      console.log('Payroll records response:', response);
+
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch payroll records');
+      }
+
+      setPayrollRecords(response.data || []);
     } catch (error) {
-      message.error('Failed to load payroll records');
+      console.error('Error loading payroll records:', error);
+      message.error(error.message || 'Failed to load payroll records');
+      setPayrollRecords([]);
     }
   };
 
@@ -62,38 +77,25 @@ const Payroll = () => {
 
   const columns = [
     {
-      title: 'Employee',
-      dataIndex: 'employeeName',
-      key: 'employeeName',
+      title: 'Run ID',
+      dataIndex: 'id',
+      key: 'id',
     },
     {
       title: 'Pay Period',
       key: 'payPeriod',
-      render: (_, record) => `${moment(record.payPeriodStart).format('MM/DD/YYYY')} - ${moment(record.payPeriodEnd).format('MM/DD/YYYY')}`,
+      render: (_, record) => `${moment(record.payPeriodStart || record.startDate).format('MM/DD/YYYY')} - ${moment(record.payPeriodEnd || record.endDate).format('MM/DD/YYYY')}`,
     },
     {
-      title: 'Basic Pay',
-      dataIndex: 'basicPay',
-      key: 'basicPay',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      title: 'Total Net Paid',
+      dataIndex: 'totalNetPay',
+      key: 'totalNetPay',
+      render: (amount) => `$${Number(amount || 0).toFixed(2)}`,
     },
     {
-      title: 'Overtime',
-      dataIndex: 'overtime',
-      key: 'overtime',
-      render: (amount) => `$${amount.toFixed(2)}`,
-    },
-    {
-      title: 'Deductions',
-      dataIndex: 'deductions',
-      key: 'deductions',
-      render: (amount) => `$${amount.toFixed(2)}`,
-    },
-    {
-      title: 'Net Pay',
-      dataIndex: 'netPay',
-      key: 'netPay',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      title: 'Payments',
+      dataIndex: 'paymentsCount',
+      key: 'paymentsCount',
     },
     {
       title: 'Status',
@@ -122,9 +124,34 @@ const Payroll = () => {
             <strong>Total Employees:</strong> {employees.length}
           </div>
           <div>
-            <strong>Last Payroll Date:</strong> {payrollRecords[0]?.processedDate || 'N/A'}
+            <strong>Last Payroll Date:</strong> {payrollRecords[0]?.created_at || payrollRecords[0]?.payPeriodEnd || 'N/A'}
           </div>
         </div>
+      </Card>
+
+      {/* Payroll Preview Table for selected employees */}
+      <Card style={{ marginBottom: '24px' }}>
+        <h3>Payroll Preview</h3>
+        <Table
+          columns={[
+            { title: 'Name', dataIndex: 'name', key: 'name' },
+            { title: 'Salary', dataIndex: 'salary', key: 'salary', render: (val) => `$${Number(val).toFixed(2)}` },
+            { title: 'Status', dataIndex: 'status', key: 'status' },
+            { title: 'Role', dataIndex: 'role', key: 'role' },
+            { title: 'Email', dataIndex: 'email', key: 'email' },
+            { title: 'Phone', dataIndex: 'phone', key: 'phone' },
+          ]}
+          dataSource={employees.map(emp => ({
+            key: emp.id,
+            name: `${emp.first_name} ${emp.last_name}`,
+            salary: emp.salary,
+            status: emp.status,
+            role: emp.role,
+            email: emp.email,
+            phone: emp.phone
+          }))}
+          pagination={false}
+        />
       </Card>
 
       <Table 

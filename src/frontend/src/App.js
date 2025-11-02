@@ -10,10 +10,15 @@ const App = () => {
     <ConfigProvider>
       <Router>
         <Switch>
-          <Route path="/signin" component={SignIn} />
-          <Route path="/signup" component={SignUp} />
+          <Route exact path="/signin" component={SignIn} />
+          <Route exact path="/signup" component={SignUp} />
           <Route path="/main" component={MainApp} />
-          <Route exact path="/" render={() => <Redirect to="/main/dashboard" />} />
+          <Route exact path="/">
+            <Redirect to="/main/dashboard/home" />
+          </Route>
+          <Route path="*">
+            <Redirect to="/main/dashboard/home" />
+          </Route>
         </Switch>
       </Router>
     </ConfigProvider>

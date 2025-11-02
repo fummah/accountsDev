@@ -6,9 +6,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateUser: (userData) => ipcRenderer.invoke('updateuser',userData),
   
   //Employees
-  getAllEmployees: () => ipcRenderer.invoke('get-employees'),
-  updateEmployee: (employeeData) => ipcRenderer.invoke('updateemployee',employeeData),
-  insertEmployee: (first_name, last_name, mi,email,phone,address,date_hired,entered_by, salary, status) => ipcRenderer.invoke('insert-employee', first_name, last_name, mi,email,phone,address,date_hired,entered_by, salary, status),
+  getEmployees: () => {
+    console.log('Preload: Invoking get-employees');
+    return ipcRenderer.invoke('get-employees');
+  },
+  getAllEmployees: () => {
+    console.log('Preload: Invoking get-employees (legacy)');
+    return ipcRenderer.invoke('get-employees');
+  },
+  updateEmployee: (employeeData) => ipcRenderer.invoke('update-employee', employeeData),
+  insertEmployee: (employeeData) => ipcRenderer.invoke('insert-employee', employeeData),
+  deleteEmployee: (id) => ipcRenderer.invoke('delete-employee', id),
   //Customers
   getAllCustomers: () => ipcRenderer.invoke('get-customers'),
   getSingleCustomer: (customer_id) => ipcRenderer.invoke('get-singleCustomer',customer_id),
@@ -59,6 +67,9 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   getTransactions: () => ipcRenderer.invoke('get-transactions'),
   insertTransaction: (tx) => ipcRenderer.invoke('insert-transaction', tx),
   voidTransaction: (id) => ipcRenderer.invoke('void-transaction', id),
+  // Payroll
+  getPayrollRecords: () => ipcRenderer.invoke('get-payroll-records'),
+  processPayroll: (data) => ipcRenderer.invoke('process-payroll', data),
 
   // Journal
   getJournal: () => ipcRenderer.invoke('get-journal'),
@@ -66,6 +77,11 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
 
   // Ledger
   getLedger: () => ipcRenderer.invoke('get-ledger'),
+  // Tax Filing
+  getTaxRecords: () => ipcRenderer.invoke('get-tax-records'),
+  submitTaxFiling: (data) => ipcRenderer.invoke('submit-tax-filing', data),
+  updateTaxFiling: (id, updates) => ipcRenderer.invoke('update-tax-filing', { id, updates }),
+
   // Company
   getCompany: () => ipcRenderer.invoke('get-company'),
   saveCompany: (data) => ipcRenderer.invoke('save-company', data),

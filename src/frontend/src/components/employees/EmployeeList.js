@@ -22,10 +22,23 @@ const EmployeeList = () => {
   const loadEmployees = async () => {
     try {
       setLoading(true);
-      const data = await window.electronAPI.getEmployees();
-      setEmployees(data);
+      const response = await window.electronAPI.getAllEmployees();
+      console.log('Employee response:', response);
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch employees');
+      }
+
+      const employeeData = response.data || [];
+      if (!Array.isArray(employeeData)) {
+        throw new Error('Invalid employee data format');
+      }
+
+      setEmployees(employeeData);
     } catch (error) {
-      message.error('Failed to load employees');
+      console.error('Error loading employees:', error);
+      message.error(error.message || 'Failed to load employees');
+      setEmployees([]); // Set empty array as fallback
     } finally {
       setLoading(false);
     }
@@ -73,7 +86,7 @@ const EmployeeList = () => {
 
   const handleDelete = async (id) => {
     try {
-      await window.electronAPI.deletingrecord(id, 'employees');
+      await window.electronAPI.deleteEmployee(id);
       message.success('Employee deleted successfully');
       loadEmployees();
     } catch (error) {
@@ -81,17 +94,17 @@ const EmployeeList = () => {
     }
   };
 
-  const filteredEmployees = employees.filter(employee => {
+  const filteredEmployees = Array.isArray(employees) ? employees.filter(employee => {
     const matchesSearch = (
-      employee.first_name.toLowerCase().includes(searchText.toLowerCase()) ||
-      employee.last_name.toLowerCase().includes(searchText.toLowerCase()) ||
-      employee.email.toLowerCase().includes(searchText.toLowerCase())
+      (employee.first_name || '').toLowerCase().includes(searchText.toLowerCase()) ||
+      (employee.last_name || '').toLowerCase().includes(searchText.toLowerCase()) ||
+      (employee.email || '').toLowerCase().includes(searchText.toLowerCase())
     );
     
     const matchesStatus = filterStatus === 'all' || employee.status === filterStatus;
     
     return matchesSearch && matchesStatus;
-  });
+  }) : [];
 
   const columns = [
     {

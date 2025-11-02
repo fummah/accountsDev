@@ -1,4 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useEffect } from 'react';
+import moment from 'moment';
 import { Button, Col, Drawer, Form, Input, Row, Space,Dropdown, DatePicker, Select,Checkbox } from 'antd';
 import { DownOutlined,IdcardOutlined } from '@ant-design/icons';
 import Widget from "components/Widget/index";
@@ -29,7 +30,13 @@ const AddEmployee = forwardRef(({ onSaveUser, onUserClose, showDrawer, open, set
 
 useEffect(() => {
   if (employee) {
-    form.setFieldsValue(employee); // Prepopulate form fields if editing
+    // Ensure date fields and array fields are converted to the types AntD components expect
+    const vals = {
+      ...employee,
+      date_hired: employee.date_hired ? moment(employee.date_hired) : null,
+      permissions: Array.isArray(employee.permissions) ? employee.permissions : (employee.permissions ? JSON.parse(employee.permissions) : [])
+    };
+    form.setFieldsValue(vals); // Prepopulate form fields if editing
   } else {
     form.resetFields(); // Clear form for adding a new employee
   }
@@ -64,16 +71,12 @@ useEffect(() => {
      
       <Drawer
         title={`${employee ? 'Edit' : 'Add'} Employee`}
-        size='medium'
-        width={400}
+        size="large"
+        width={1000}
         onClose={onUserClose}
         onCancel={onUserClose}
         open={open}
-        styles={{
-          body: {
-            paddingBottom: 80,
-          },
-        }}
+        bodyStyle={{ paddingBottom: 80 }}
         footer={
           <div
             style={{
@@ -135,11 +138,11 @@ useEffect(() => {
                    <Input/> 
               </Form.Item>
               </Col>
-              <Col span={8}>
-              <Form.Item ame="hire_date" label="Hire Date" rules={[{ required: true, message: 'Enter hire date', },]}>
-                   <DatePicker/> 
-              </Form.Item>
-              </Col>
+        <Col span={8}>
+        <Form.Item name="date_hired" label="Hire Date" rules={[{ required: true, message: 'Enter hire date', },]}>
+          <DatePicker/> 
+        </Form.Item>
+        </Col>
               <Col span={8}>
               <Form.Item name="salary" label="Salary" rules={[{ required: true, message: 'Enter Salary', },{message: "Please enter a valid salary!", },]}>
                    <Input/> 

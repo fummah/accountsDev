@@ -40,17 +40,27 @@ const MyCompany = () => {
     load();
   }, [form]);
 
-  const handleUpload = (info) => {
-    if (info.file.status !== "uploading") {
-      console.log(info.file, info.fileList);
+  // read upload as base64 and store in the form field `logo`
+  const getBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (err) => reject(err);
+  });
+
+  const beforeUpload = async (file) => {
+    try {
+      const base64 = await getBase64(file);
+      form.setFieldsValue({ logo: base64 });
+      message.success(`${file.name} uploaded`);
+    } catch (err) {
+      message.error(`${file.name} upload failed`);
     }
-    if (info.file.status === "done") {
-      message.success(`${info.file.name} file uploaded successfully`);
-    } else if (info.file.status === "error") {
-      message.error(`${info.file.name} file upload failed.`);
-    }
+    // prevent auto upload
+    return false;
   };
 
+  // single form instance shared across all tabs so validateFields() works everywhere
   return (
     <Card title="My Company Settings" bordered={false} style={{ margin: 24 }}>
       <Tabs defaultActiveKey="1">
@@ -98,19 +108,34 @@ const MyCompany = () => {
               </Col>
               <Col span={24}>
                 <Form.Item label="Company Logo" name="logo">
-                  <Upload name="logo" action="/upload.do" onChange={handleUpload}>
+                  <Upload beforeUpload={beforeUpload} showUploadList={false}>
                     <Button icon={<UploadOutlined />}>Click to Upload</Button>
                   </Upload>
                 </Form.Item>
               </Col>
             </Row>
             <Form.Item>
-              <Button type="primary" onClick={async () => {
+                  <Button type="primary" onClick={async () => {
                 try {
                   const values = await form.validateFields();
-                  // build payload
+                  // Map form field names back to DB column names expected by backend
                   const payload = {
-                    ...values,
+                    name: values.name,
+                    reg_number: values.regNumber || '',
+                    industry: values.industry || '',
+                    business_type: values.businessType || '',
+                    address: values.address || '',
+                    email: values.email || '',
+                    phone: values.phone || '',
+                    logo: values.logo || '', // base64 string if uploaded
+                    currency: values.currency || '',
+                    fy_start: values.fyStart || '',
+                    vat_rate: values.vat || 0,
+                    terms: values.terms || 0,
+                    bank_name: values.bank || '',
+                    account_number: values.accountNumber || '',
+                    branch_code: values.branchCode || '',
+                    payments: Array.isArray(values.payments) ? values.payments.join(',') : (values.payments || ''),
                   };
                   const res = await window.electronAPI.saveCompany(payload);
                   if (res && res.success) {
@@ -127,7 +152,7 @@ const MyCompany = () => {
         </TabPane>
 
         <TabPane tab="Financial Settings" key="2">
-          <Form layout="vertical">
+          <Form layout="vertical" form={form}>
             <Row gutter={16}>
               <Col span={12}>
                 <Form.Item label="Currency" name="currency">
@@ -158,7 +183,25 @@ const MyCompany = () => {
               <Button type="primary" onClick={async () => {
                 try {
                   const values = await form.validateFields();
-                  const res = await window.electronAPI.saveCompany(values);
+                  const payload = {
+                    name: values.name,
+                    reg_number: values.regNumber || '',
+                    industry: values.industry || '',
+                    business_type: values.businessType || '',
+                    address: values.address || '',
+                    email: values.email || '',
+                    phone: values.phone || '',
+                    logo: values.logo || '',
+                    currency: values.currency || '',
+                    fy_start: values.fyStart || '',
+                    vat_rate: values.vat || 0,
+                    terms: values.terms || 0,
+                    bank_name: values.bank || '',
+                    account_number: values.accountNumber || '',
+                    branch_code: values.branchCode || '',
+                    payments: Array.isArray(values.payments) ? values.payments.join(',') : (values.payments || ''),
+                  };
+                  const res = await window.electronAPI.saveCompany(payload);
                   if (res && res.success) message.success('Financial settings saved');
                   else message.error('Failed to save financial settings');
                 } catch (err) {}
@@ -168,7 +211,7 @@ const MyCompany = () => {
         </TabPane>
 
         <TabPane tab="Banking Details" key="3">
-          <Form layout="vertical">
+          <Form layout="vertical" form={form}>
             <Row gutter={16}>
               <Col span={12}>
                 <Form.Item label="Bank Name" name="bank">
@@ -199,7 +242,25 @@ const MyCompany = () => {
               <Button type="primary" onClick={async () => {
                 try {
                   const values = await form.validateFields();
-                  const res = await window.electronAPI.saveCompany(values);
+                  const payload = {
+                    name: values.name,
+                    reg_number: values.regNumber || '',
+                    industry: values.industry || '',
+                    business_type: values.businessType || '',
+                    address: values.address || '',
+                    email: values.email || '',
+                    phone: values.phone || '',
+                    logo: values.logo || '',
+                    currency: values.currency || '',
+                    fy_start: values.fyStart || '',
+                    vat_rate: values.vat || 0,
+                    terms: values.terms || 0,
+                    bank_name: values.bank || '',
+                    account_number: values.accountNumber || '',
+                    branch_code: values.branchCode || '',
+                    payments: Array.isArray(values.payments) ? values.payments.join(',') : (values.payments || ''),
+                  };
+                  const res = await window.electronAPI.saveCompany(payload);
                   if (res && res.success) message.success('Banking info saved');
                   else message.error('Failed to save banking info');
                 } catch (err) {}

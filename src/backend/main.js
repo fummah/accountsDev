@@ -1,6 +1,8 @@
 const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 const registerIpcHandlers = require('./handlers/ipcHandlers');
+const registerEmployeeHandlers = require('./handlers/employeeHandlers');
+const registerPayrollHandlers = require('./handlers/payrollHandlers');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -427,6 +429,8 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
   registerIpcHandlers();
+  registerEmployeeHandlers();
+  registerPayrollHandlers();
 });
 
 app.on('window-all-closed', () => {

@@ -22,7 +22,11 @@ const {
   Ledger,
 } = require('./../models');
 
+const Tax = require('../models/tax');
+
 const registerIpcHandlers = () => {
+  // Create the tax_filings table when handlers are registered
+  Tax.createTable();
   // Handler to get all employees
   ipcMain.handle('get-employees', async () => {
     try {
@@ -105,9 +109,10 @@ ipcMain.handle('get-ledger', async () => {
   });
 
   // Handler to insert an employee
-  ipcMain.handle('insert-employee', async (event, first_name, last_name, mi, email, date_hired, entered_by, salary, status) => {
+  ipcMain.handle('insert-employee', async (event, employeeData) => {
     try {
-      return await Employees.insertEmployee(first_name, last_name, mi, email,phone,address, date_hired, entered_by, salary, status);
+      const { first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status } = employeeData;
+      return await Employees.insertEmployee(first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status);
     } catch (error) {
       console.error('Error inserting employee:', error);
       return { error: error.message };
@@ -383,36 +388,6 @@ ipcMain.handle('get-management', async (event,start_date, last_date) => {
   }
 });
 
-// Handler to get all Vat Reports
-ipcMain.handle('get-vatreport', async (event,start_date, last_date) => {
-  try {
-    return await Vat.getVatReport(start_date, last_date);
-  } catch (error) {    
-    console.error(`Error fetching:`, error);
-    return { error: error.message };
-  }
-});
-
-// Cashflow projections handlers
-ipcMain.handle('get-cashflow-projections', async (event, year) => {
-  try {
-    return await CashflowProjections.getProjections(year);
-  } catch (error) {
-    console.error('Error fetching cashflow projections:', error);
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('save-cashflow-projections', async (event, projections, year) => {
-  try {
-    return await CashflowProjections.saveProjections(projections, year);
-  } catch (error) {
-    console.error('Error saving cashflow projections:', error);
-    return { error: error.message };
-  }
-});
-
-// Budgets handlers
 ipcMain.handle('get-budgets', async () => {
   try {
     return await Budgets.getBudgets();
@@ -467,6 +442,16 @@ ipcMain.handle('updateemployee', async (event,employeeData) => {
     return await Employees.updateEmployee(employeeData);
   } catch (error) {    
     console.error('Error updating employee:', error);
+    return { error: error.message };
+  }
+});
+
+// Alias with hyphen to support calls using 'update-employee'
+ipcMain.handle('update-employee', async (event, employeeData) => {
+  try {
+    return await Employees.updateEmployee(employeeData);
+  } catch (error) {
+    console.error('Error updating employee (hyphen alias):', error);
     return { error: error.message };
   }
 });
@@ -579,6 +564,47 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     } catch (error) {
       console.error('Error processing payroll:', error);
       return { error: error.message };
+    }
+  });
+
+  // Handler to get payroll runs/records
+  ipcMain.handle('get-payroll-records', async () => {
+    try {
+      return await Transactions.getPayrollRuns();
+    } catch (error) {
+      console.error('Error fetching payroll runs:', error);
+      return { error: error.message };
+    }
+  });
+
+  // Tax Filing handlers
+  ipcMain.handle('get-tax-records', async () => {
+    console.log('Getting tax records...');
+    try {
+      return await Tax.getTaxRecords();
+    } catch (error) {
+      console.error('Error in get-tax-records handler:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('submit-tax-filing', async (_, filingData) => {
+    console.log('Submitting tax filing:', filingData);
+    try {
+      return await Tax.submitTaxFiling(filingData);
+    } catch (error) {
+      console.error('Error in submit-tax-filing handler:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('update-tax-filing', async (_, { id, updates }) => {
+    console.log('Updating tax filing:', id, updates);
+    try {
+      return await Tax.updateTaxFiling(id, updates);
+    } catch (error) {
+      console.error('Error in update-tax-filing handler:', error);
+      return { success: false, error: error.message };
     }
   });
 

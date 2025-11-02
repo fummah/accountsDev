@@ -18,11 +18,14 @@ const TaxFiling = () => {
 
   const loadTaxRecords = async () => {
     try {
-      // TODO: Implement getTaxRecords in the backend
-      const data = [];
-      setTaxRecords(data);
+      const response = await window.electronAPI.getTaxRecords();
+      if (response.success) {
+        setTaxRecords(response.data);
+      } else {
+        throw new Error(response.error || 'Failed to load tax records');
+      }
     } catch (error) {
-      message.error('Failed to load tax records');
+      message.error('Failed to load tax records: ' + error.message);
     }
   };
 
@@ -37,12 +40,15 @@ const TaxFiling = () => {
         }
       };
 
-      // TODO: Implement submitTaxFiling in the backend
-      await window.electronAPI.submitTaxFiling(formData);
-      message.success('Tax filing submitted successfully');
-      setIsModalVisible(false);
-      form.resetFields();
-      loadTaxRecords();
+      const response = await window.electronAPI.submitTaxFiling(formData);
+      if (response.success) {
+        message.success('Tax filing submitted successfully');
+        setIsModalVisible(false);
+        form.resetFields();
+        loadTaxRecords();
+      } else {
+        throw new Error(response.error || 'Failed to submit tax filing');
+      }
     } catch (error) {
       message.error('Failed to submit tax filing');
     } finally {
@@ -50,11 +56,16 @@ const TaxFiling = () => {
     }
   };
 
+  const [viewModalVisible, setViewModalVisible] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportSummary, setReportSummary] = useState(null);
+
   const columns = [
     {
       title: 'Period',
       key: 'period',
-      render: (_, record) => `${moment(record.periodStart).format('MM/DD/YYYY')} - ${moment(record.periodEnd).format('MM/DD/YYYY')}`,
+      render: (_, record) => `${moment(record.period_start).format('MM/DD/YYYY')} - ${moment(record.period_end).format('MM/DD/YYYY')}`,
     },
     {
       title: 'Type',
@@ -63,9 +74,9 @@ const TaxFiling = () => {
     },
     {
       title: 'Total Amount',
-      dataIndex: 'totalAmount',
-      key: 'totalAmount',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      dataIndex: 'total_amount',
+      key: 'total_amount',
+      render: (amount) => amount ? `$${Number(amount).toFixed(2)}` : '$0.00',
     },
     {
       title: 'Status',
@@ -74,9 +85,9 @@ const TaxFiling = () => {
     },
     {
       title: 'Due Date',
-      dataIndex: 'dueDate',
-      key: 'dueDate',
-      render: (date) => moment(date).format('MM/DD/YYYY'),
+      dataIndex: 'due_date',
+      key: 'due_date',
+      render: (date) => date ? moment(date).format('MM/DD/YYYY') : 'N/A',
     },
     {
       title: 'Actions',
@@ -101,11 +112,93 @@ const TaxFiling = () => {
   ];
 
   const handleViewDetails = (record) => {
-    // Implement view details functionality
+    setSelectedRecord(record);
+    setViewModalVisible(true);
   };
 
   const handlePrint = (record) => {
-    // Implement print functionality
+    try {
+      const data = record || selectedRecord;
+      if (!data) {
+        message.error('No tax filing selected to print');
+        return;
+      }
+
+      const html = `
+        <html>
+          <head>
+            <title>Tax Filing - ${data.type}</title>
+            <style>
+              body { font-family: Arial, sans-serif; padding: 24px; }
+              h1 { font-size: 20px; }
+              .field { margin-bottom: 8px; }
+              .label { font-weight: bold; }
+            </style>
+          </head>
+          <body>
+            <h1>Tax Filing</h1>
+            <div class="field"><span class="label">Type:</span> ${data.type || ''}</div>
+            <div class="field"><span class="label">Period:</span> ${data.period_start ? moment(data.period_start).format('MM/DD/YYYY') : ''} - ${data.period_end ? moment(data.period_end).format('MM/DD/YYYY') : ''}</div>
+            <div class="field"><span class="label">Total Amount:</span> ${data.total_amount ? `$${Number(data.total_amount).toFixed(2)}` : '$0.00'}</div>
+            <div class="field"><span class="label">Status:</span> ${data.status || ''}</div>
+            <div class="field"><span class="label">Due Date:</span> ${data.due_date ? moment(data.due_date).format('MM/DD/YYYY') : 'N/A'}</div>
+            <div class="field"><span class="label">Notes:</span> ${data.notes || ''}</div>
+          </body>
+        </html>
+      `;
+
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        message.error('Unable to open print window (popup blocked?)');
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      // Give browser a small delay to render before printing
+      setTimeout(() => {
+        printWindow.print();
+        // optionally close
+        // printWindow.close();
+      }, 300);
+    } catch (err) {
+      console.error('Print error:', err);
+      message.error('Failed to print tax filing');
+    }
+  };
+
+  const generateReport = () => {
+    if (!taxRecords || !taxRecords.length) {
+      message.warning('No tax filings to include in report');
+      return;
+    }
+
+    // Build CSV
+    const headers = ['id','type','period_start','period_end','total_amount','status','due_date','submitted_date','notes'];
+    const rows = taxRecords.map(r => headers.map(h => `"${(r[h] || '').toString().replace(/"/g, '""')}"`).join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+
+    // Trigger download
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tax_filings_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    // Compute summary and show modal
+    const summary = taxRecords.reduce((acc, r) => {
+      acc.total += Number(r.total_amount || 0);
+      acc.count += 1;
+      acc.byType[r.type] = (acc.byType[r.type] || 0) + Number(r.total_amount || 0);
+      return acc;
+    }, { total: 0, count: 0, byType: {} });
+    setReportSummary(summary);
+    setReportModalVisible(true);
   };
 
   return (
@@ -120,21 +213,21 @@ const TaxFiling = () => {
               .slice(0, 3)
               .map(record => (
                 <li key={record.id}>
-                  {record.type} - Due: {moment(record.dueDate).format('MM/DD/YYYY')}
+                  {record.type} - Due: {record.due_date ? moment(record.due_date).format('MM/DD/YYYY') : 'N/A'}
                 </li>
               ))}
           </ul>
         </Card>
 
         <Card title="Quick Actions" style={{ flex: 1 }}>
-          <Button 
-            type="primary" 
-            onClick={() => setIsModalVisible(true)}
-            style={{ marginRight: '8px' }}
-          >
-            New Filing
-          </Button>
-          <Button>Generate Reports</Button>
+            <Button 
+              type="primary" 
+              onClick={() => setIsModalVisible(true)}
+              style={{ marginRight: '8px' }}
+            >
+              New Filing
+            </Button>
+            <Button onClick={generateReport}>Generate Reports</Button>
         </Card>
       </div>
 
@@ -143,6 +236,53 @@ const TaxFiling = () => {
         dataSource={taxRecords}
         rowKey="id"
       />
+
+      {/* View / Print Modal */}
+      <Modal
+        title="Tax Filing Details"
+        open={viewModalVisible}
+        onCancel={() => { setViewModalVisible(false); setSelectedRecord(null); }}
+        footer={[
+          <Button key="print" type="primary" onClick={() => handlePrint(selectedRecord)}>Print</Button>,
+          <Button key="close" onClick={() => { setViewModalVisible(false); setSelectedRecord(null); }}>Close</Button>
+        ]}
+        width={700}
+      >
+        {selectedRecord ? (
+          <div>
+            <p><strong>Type:</strong> {selectedRecord.type}</p>
+            <p><strong>Period:</strong> {selectedRecord.period_start ? moment(selectedRecord.period_start).format('MM/DD/YYYY') : 'N/A'} - {selectedRecord.period_end ? moment(selectedRecord.period_end).format('MM/DD/YYYY') : 'N/A'}</p>
+            <p><strong>Total Amount:</strong> {selectedRecord.total_amount ? `$${Number(selectedRecord.total_amount).toFixed(2)}` : '$0.00'}</p>
+            <p><strong>Status:</strong> {selectedRecord.status}</p>
+            <p><strong>Due Date:</strong> {selectedRecord.due_date ? moment(selectedRecord.due_date).format('MM/DD/YYYY') : 'N/A'}</p>
+            <p><strong>Notes:</strong> {selectedRecord.notes}</p>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* Report Summary Modal */}
+      <Modal
+        title="Tax Report Summary"
+        open={reportModalVisible}
+        onCancel={() => setReportModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setReportModalVisible(false)}>Close</Button>
+        ]}
+        width={600}
+      >
+        {reportSummary ? (
+          <div>
+            <p><strong>Total Filings:</strong> {reportSummary.count}</p>
+            <p><strong>Total Amount:</strong> ${reportSummary.total.toFixed(2)}</p>
+            <h4>By Type</h4>
+            <ul>
+              {Object.keys(reportSummary.byType).map(t => (
+                <li key={t}>{t}: ${reportSummary.byType[t].toFixed(2)}</li>
+              ))}
+            </ul>
+          </div>
+        ) : <p>No report data</p>}
+      </Modal>
 
       <Modal
         title="New Tax Filing"

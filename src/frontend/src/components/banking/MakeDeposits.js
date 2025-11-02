@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Select, DatePicker, Button, Table, message, Card } from 'antd';
+import { Form, Input, Select, DatePicker, Button, Table, message, Card, Modal, Space } from 'antd';
 import { SaveOutlined, PlusOutlined } from '@ant-design/icons';
 import moment from 'moment';
 
@@ -10,6 +10,8 @@ const MakeDeposits = () => {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [deposits, setDeposits] = useState([]);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [accountForm] = Form.useForm();
 
   useEffect(() => {
     loadAccounts();
@@ -107,13 +109,16 @@ const MakeDeposits = () => {
               label="Deposit To"
               rules={[{ required: true, message: 'Please select account!' }]}
             >
-              <Select>
-                {accounts.map(account => (
-                  <Option key={account.id} value={account.id}>
-                    {account.accountName}
-                  </Option>
-                ))}
-              </Select>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Select style={{ flex: 1 }} placeholder={accounts.length ? 'Select account' : 'No bank accounts'}>
+                  {accounts.map(account => (
+                    <Option key={account.id} value={account.id}>
+                      {account.accountName}{account.accountNumber ? ` (${account.accountNumber})` : ''}
+                    </Option>
+                  ))}
+                </Select>
+                <Button icon={<PlusOutlined />} onClick={() => setShowAddAccount(true)}>Add Account</Button>
+              </div>
             </Form.Item>
 
             <Form.Item
@@ -159,6 +164,47 @@ const MakeDeposits = () => {
             </Form.Item>
           </Form>
         </Card>
+
+        {/* Add Account Modal */}
+        <Modal
+          title="Add Bank Account"
+          open={showAddAccount}
+          onCancel={() => { setShowAddAccount(false); accountForm.resetFields(); }}
+          onOk={() => accountForm.submit()}
+          okText="Create"
+        >
+          <Form form={accountForm} layout="vertical" onFinish={async (values) => {
+            try {
+              const res = await window.electronAPI.insertChartAccount(values.name, values.type, values.number, 'current_user');
+              if (res && res.success) {
+                message.success('Account created');
+                setShowAddAccount(false);
+                accountForm.resetFields();
+                // reload accounts and set newly created as selected
+                await loadAccounts();
+                // set the newly created account as selected in deposit form if possible
+                if (res.id) {
+                  form.setFieldsValue({ accountId: res.id });
+                }
+              } else {
+                message.error(res?.error || 'Failed to create account');
+              }
+            } catch (err) {
+              console.error('Add account error', err);
+              message.error('Failed to create account');
+            }
+          }}>
+            <Form.Item name="name" label="Account Name" rules={[{ required: true }]}> <Input/> </Form.Item>
+            <Form.Item name="type" label="Account Type" rules={[{ required: true }]}>
+              <Select>
+                <Option value="Bank">Bank</Option>
+                <Option value="Cash">Cash</Option>
+                <Option value="Other">Other</Option>
+              </Select>
+            </Form.Item>
+            <Form.Item name="number" label="Account Number"> <Input/> </Form.Item>
+          </Form>
+        </Modal>
 
         <Card style={{ flex: 2 }}>
           <h3>Recent Deposits</h3>

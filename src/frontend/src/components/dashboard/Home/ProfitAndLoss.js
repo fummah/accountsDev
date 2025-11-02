@@ -18,8 +18,10 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
 const ProfitAndLoss = ({CurrentBalance, Invoiced, Expensed}) => {
 
  
-  const perc1 = Math.round((Invoiced/Invoiced)*100);
-  const perc2 = Math.round((Expensed/Invoiced)*100);
+  // Safe percentage calculations. If totals are zero, show 0%.
+  const total = (Number(Invoiced) || 0) + (Number(Expensed) || 0);
+  const perc1 = total > 0 ? Math.round((Number(Invoiced) || 0) / total * 100) : 0; // Income %
+  const perc2 = total > 0 ? Math.round((Number(Expensed) || 0) / total * 100) : 0; // Expenses %
 
   const IconButton = ({ icon, text }) => {
     return (

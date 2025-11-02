@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Button, Row, Col, Form, Statistic } from 'antd';
 import { DollarOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import moment from 'moment';
@@ -10,6 +10,13 @@ const ProjectProfitability = () => {
   const [dateRange, setDateRange] = useState([moment().startOf('month'), moment()]);
   const [selectedProject, setSelectedProject] = useState('all');
   const [loading, setLoading] = useState(false);
+  const [data, setData] = useState([]);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    loadReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const columns = [
     {
@@ -78,30 +85,48 @@ const ProjectProfitability = () => {
     }
   ];
 
-  // Sample data - replace with actual data from your backend
-  const data = [
-    {
-      key: '1',
-      projectName: 'Office Renovation',
-      startDate: '2025-10-01',
-      revenue: 50000.00,
-      costs: 35000.00
-    },
-    {
-      key: '2',
-      projectName: 'Software Implementation',
-      startDate: '2025-09-15',
-      revenue: 75000.00,
-      costs: 45000.00
-    },
-    {
-      key: '3',
-      projectName: 'Marketing Campaign',
-      startDate: '2025-10-15',
-      revenue: 25000.00,
-      costs: 28000.00
+  const loadReport = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Best-effort: use management report or financial report to derive project-level overview
+      const report = await window.electronAPI.getManagementReport(
+        dateRange[0].format('YYYY-MM-DD'),
+        dateRange[1].format('YYYY-MM-DD')
+      );
+      if (report && Array.isArray(report.chartData)) {
+        // Map chartData (name/value) into projects
+        const rows = report.chartData.map((r, i) => ({
+          key: String(i + 1),
+          projectName: r.name,
+          startDate: dateRange[0].format('YYYY-MM-DD'),
+          revenue: Number(r.value || 0),
+          costs: 0,
+        }));
+        setData(rows);
+      } else if (report && Array.isArray(report.tableData)) {
+        // Fallback use tableData
+        const rows = report.tableData.map((r, i) => {
+          const raw = typeof r.value === 'string' ? Number(String(r.value).replace(/[^0-9.-]+/g, '')) : Number(r.value || 0);
+          return {
+            key: String(i + 1),
+            projectName: r.metric,
+            startDate: dateRange[0].format('YYYY-MM-DD'),
+            revenue: raw,
+            costs: 0,
+          };
+        });
+        setData(rows);
+      } else {
+        setData([]);
+      }
+    } catch (err) {
+      console.error('Failed to load project profitability', err);
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const handleDateChange = (dates) => {
     setDateRange(dates);
@@ -112,16 +137,14 @@ const ProjectProfitability = () => {
   };
 
   const handleRefresh = () => {
-    setLoading(true);
-    // TODO: Implement data refresh logic
-    setTimeout(() => setLoading(false), 1000);
+    loadReport();
   };
 
   // Calculate summary statistics
-  const totalRevenue = data.reduce((sum, project) => sum + project.revenue, 0);
-  const totalCosts = data.reduce((sum, project) => sum + project.costs, 0);
+  const totalRevenue = data.reduce((sum, project) => sum + (project.revenue || 0), 0);
+  const totalCosts = data.reduce((sum, project) => sum + (project.costs || 0), 0);
   const totalProfit = totalRevenue - totalCosts;
-  const averageMargin = (totalProfit / totalRevenue) * 100;
+  const averageMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
   return (
     <Card title="Project Profitability Report">
@@ -204,6 +227,7 @@ const ProjectProfitability = () => {
         pagination={false}
         scroll={{ x: true }}
       />
+      {error && <div style={{ color: 'red', marginTop: 12 }}>{error}</div>}
     </Card>
   );
 };

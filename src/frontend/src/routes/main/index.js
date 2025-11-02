@@ -8,15 +8,15 @@ import ExpenseRoutes from "../../components/expenses";
 import ReportRoutes from "../../components/reports";
 import SettingsRoutes from "../../components/settings";
 
-const Main = ({ match }) => (
+const Main = () => (
   <Switch>
-    <Route path={`${match.path}/dashboard`} component={Dashboard} />
-    <Route path={`${match.path}/banking`} component={BankingRoutes} />
-    <Route path={`${match.path}/employees`} component={EmployeeRoutes} />
-    <Route path={`${match.path}/accountant`} component={AccountantRoutes} />
-    <Route path={`${match.path}/expenses`} component={ExpenseRoutes} />
-    <Route path={`${match.path}/reports`} component={ReportRoutes} />
-    <Route path={`${match.path}/settings`} component={SettingsRoutes} />
+    <Route path="/main/dashboard" component={Dashboard} />
+    <Route path="/main/banking" component={BankingRoutes} />
+    <Route path="/main/employees" component={EmployeeRoutes} />
+    <Route path="/main/accountant" component={AccountantRoutes} />
+    <Route path="/main/expenses" component={ExpenseRoutes} />
+    <Route path="/main/reports" component={ReportRoutes} />
+    <Route path="/main/settings" component={SettingsRoutes} />
   </Switch>
 );
 

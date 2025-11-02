@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Button, Row, Col, Form } from 'antd';
 import moment from 'moment';
 
@@ -8,6 +8,15 @@ const { Option } = Select;
 const JobCosting = () => {
   const [dateRange, setDateRange] = useState([moment().startOf('month'), moment()]);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    // initial load
+    fetchReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const columns = [
     {
@@ -54,29 +63,41 @@ const JobCosting = () => {
     }
   ];
 
-  // Sample data - replace with actual data from your backend
-  const data = [
-    {
-      key: '1',
-      date: '2025-11-01',
-      jobName: 'Project A',
-      type: 'Labor',
-      description: 'Construction work',
-      laborCost: 1500.00,
-      materialCost: 0.00,
-      totalCost: 1500.00
-    },
-    {
-      key: '2',
-      date: '2025-11-01',
-      jobName: 'Project A',
-      type: 'Material',
-      description: 'Building materials',
-      laborCost: 0.00,
-      materialCost: 2500.00,
-      totalCost: 2500.00
+  const fetchReport = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const report = await window.electronAPI.getManagementReport(
+        dateRange[0].format('YYYY-MM-DD'),
+        dateRange[1].format('YYYY-MM-DD')
+      );
+      // Map management report tableData into job costing rows where reasonable
+      if (report && Array.isArray(report.tableData)) {
+        const rows = report.tableData.map((r, i) => {
+          // attempt to parse numeric value from formatted string
+          const raw = typeof r.value === 'string' ? Number(String(r.value).replace(/[^0-9.-]+/g, '')) : Number(r.value || 0);
+          return {
+            key: String(i + 1),
+            date: dateRange[0].format('YYYY-MM-DD'),
+            jobName: r.metric,
+            type: 'Summary',
+            description: r.metric,
+            laborCost: raw,
+            materialCost: 0,
+            totalCost: raw,
+          };
+        });
+        setData(rows);
+      } else {
+        setData([]);
+      }
+    } catch (err) {
+      console.error('Failed to load job costing', err);
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const handleDateChange = (dates) => {
     setDateRange(dates);
@@ -87,7 +108,7 @@ const JobCosting = () => {
   };
 
   const handleRefresh = () => {
-    // Add logic to refresh data based on selected filters
+    fetchReport();
   };
 
   return (
@@ -130,6 +151,7 @@ const JobCosting = () => {
       <Table
         columns={columns}
         dataSource={data}
+        loading={loading}
         pagination={false}
         summary={pageData => {
           let totalLaborCost = 0;
@@ -137,9 +159,9 @@ const JobCosting = () => {
           let totalCost = 0;
 
           pageData.forEach(({ laborCost, materialCost, totalCost: cost }) => {
-            totalLaborCost += laborCost;
-            totalMaterialCost += materialCost;
-            totalCost += cost;
+            totalLaborCost += Number(laborCost || 0);
+            totalMaterialCost += Number(materialCost || 0);
+            totalCost += Number(cost || 0);
           });
 
           return (
@@ -160,6 +182,7 @@ const JobCosting = () => {
           );
         }}
       />
+      {error && <div style={{ color: 'red', marginTop: 12 }}>{error}</div>}
     </Card>
   );
 };

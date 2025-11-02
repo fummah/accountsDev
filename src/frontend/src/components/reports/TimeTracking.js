@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Button, Row, Col, Form, Statistic } from 'antd';
 import { ClockCircleOutlined } from '@ant-design/icons';
 import moment from 'moment';
@@ -63,36 +63,14 @@ const TimeTracking = () => {
     }
   ];
 
-  // Sample data - replace with actual data from your backend
-  const data = [
-    {
-      key: '1',
-      date: '2025-11-01',
-      employee: 'John Doe',
-      project: 'Office Renovation',
-      task: 'Planning',
-      hours: 8,
-      rate: 75.00
-    },
-    {
-      key: '2',
-      date: '2025-11-01',
-      employee: 'Jane Smith',
-      project: 'Software Implementation',
-      task: 'Development',
-      hours: 6.5,
-      rate: 85.00
-    },
-    {
-      key: '3',
-      date: '2025-11-01',
-      employee: 'Mike Johnson',
-      project: 'Marketing Campaign',
-      task: 'Content Creation',
-      hours: 4,
-      rate: 65.00
-    }
-  ];
+  const [data, setData] = useState([]);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    // initial load
+    handleRefresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDateChange = (dates) => {
     setDateRange(dates);
@@ -106,15 +84,46 @@ const TimeTracking = () => {
     setSelectedProject(value);
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setLoading(true);
-    // TODO: Implement data refresh logic
-    setTimeout(() => setLoading(false), 1000);
+    setError(null);
+    try {
+      // Use management report as a best-effort source for time-related KPIs.
+      // Backend provides get-management which returns KPI/table data.
+      const report = await window.electronAPI.getManagementReport(
+        dateRange[0].format('YYYY-MM-DD'),
+        dateRange[1].format('YYYY-MM-DD')
+      );
+
+      // Map report.tableData (metric/value) to a time-tracking like table if present
+      if (report && Array.isArray(report.tableData)) {
+        const mapped = report.tableData.map((row, idx) => ({
+          key: String(idx + 1),
+          date: dateRange[0].format('YYYY-MM-DD'),
+          employee: row.metric,
+          project: '—',
+          task: row.metric,
+          hours: 0,
+          rate: 0,
+          total: row.value || 0,
+        }));
+        setData(mapped);
+      } else {
+        // fallback empty
+        setData([]);
+      }
+    } catch (err) {
+      console.error('Error loading time tracking data', err);
+      setError(err.message || String(err));
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Calculate summary statistics
-  const totalHours = data.reduce((sum, entry) => sum + entry.hours, 0);
-  const totalValue = data.reduce((sum, entry) => sum + (entry.hours * entry.rate), 0);
+  const totalHours = data.reduce((sum, entry) => sum + (entry.hours || 0), 0);
+  const totalValue = data.reduce((sum, entry) => sum + ((entry.hours || 0) * (entry.rate || 0)), 0);
   const averageRate = totalHours > 0 ? totalValue / totalHours : 0;
 
   return (
@@ -204,8 +213,8 @@ const TimeTracking = () => {
         pagination={false}
         scroll={{ x: true }}
         summary={pageData => {
-          const totalHours = pageData.reduce((sum, entry) => sum + entry.hours, 0);
-          const totalAmount = pageData.reduce((sum, entry) => sum + (entry.hours * entry.rate), 0);
+          const totalHours = pageData.reduce((sum, entry) => sum + (entry.hours || 0), 0);
+          const totalAmount = pageData.reduce((sum, entry) => sum + ((entry.hours || 0) * (entry.rate || 0)), 0);
 
           return (
             <Table.Summary.Row>
@@ -221,6 +230,7 @@ const TimeTracking = () => {
           );
         }}
       />
+      {error && <div style={{ color: 'red', marginTop: 12 }}>Error: {error}</div>}
     </Card>
   );
 };

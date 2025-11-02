@@ -37,14 +37,30 @@ const fixPostcssLoader = () => config => {
     config.module.rules.forEach(rule => {
       if (rule && Array.isArray(rule.oneOf)) {
         rule.oneOf.forEach(one => {
-          const uses = one.use || (one.loader ? [one] : []);
-          if (Array.isArray(uses)) {
-            uses.forEach(u => {
-              if (u && u.loader && u.loader.indexOf('postcss-loader') !== -1 && u.options) {
-                // If options.plugins exists (old format), move it under postcssOptions.plugins
-                if (u.options.plugins && !u.options.postcssOptions) {
-                  u.options.postcssOptions = { plugins: u.options.plugins };
-                  delete u.options.plugins;
+          if (one.use && Array.isArray(one.use)) {
+            one.use.forEach(loader => {
+              if (loader && typeof loader === 'object' && loader.loader && loader.loader.includes('postcss-loader')) {
+                // Remove ident property if it exists
+                if (loader.options && loader.options.ident) {
+                  delete loader.options.ident;
+                }
+                
+                // Ensure proper structure for postcss options
+                if (loader.options && !loader.options.postcssOptions) {
+                  loader.options = {
+                    postcssOptions: {
+                      plugins: [
+                        'postcss-flexbugs-fixes',
+                        ['postcss-preset-env', {
+                          autoprefixer: {
+                            flexbox: 'no-2009',
+                          },
+                          stage: 3,
+                        }],
+                        'postcss-normalize',
+                      ]
+                    }
+                  };
                 }
               }
             });

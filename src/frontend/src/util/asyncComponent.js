@@ -15,22 +15,33 @@ export default function asyncComponent(importComponent) {
       };
     }
 
-    componentWillMount() {
+    componentDidMount() {
+      this.mounted = true;
       Nprogress.start();
+      this.loadComponent();
     }
 
     componentWillUnmount() {
       this.mounted = false;
     }
 
-    async componentDidMount() {
-      this.mounted = true;
-      const {default: Component} = await importComponent();
-      Nprogress.done();
-      if (this.mounted) {
-        this.setState({
-          component: <Component {...this.props} />
-        });
+    async loadComponent() {
+      try {
+        const {default: Component} = await importComponent();
+        Nprogress.done();
+        if (this.mounted) {
+          this.setState({
+            component: <Component {...this.props} />
+          });
+        }
+      } catch (error) {
+        console.error('Error loading component:', error);
+        Nprogress.done();
+        if (this.mounted) {
+          this.setState({
+            component: <div>Error loading component</div>
+          });
+        }
       }
     }
 

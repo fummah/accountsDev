@@ -42,15 +42,29 @@ const Users = () => {
     },
     searchUser: '',
     filterOption: 'All users',
-    allUser: userList, // Assuming `userList` is defined elsewhere in your code
+    // start with sample list but will be replaced with backend data on load
+    allUser: userList,
     users: userList,
     selectedUser: null,
     selectedUsers: 0,
     AddUserState: false,
   });
   useEffect(() => {
-    // Fetch users when the component loads
-    window.electronAPI.getAllEmployees().then(setUsers);
+    // Fetch users when the component loads and populate both the local users
+    // state (used elsewhere) and the state.allUser used by the sidebar filters.
+    const load = async () => {
+      try {
+        const all = await window.electronAPI.getAllEmployees();
+        if (Array.isArray(all)) {
+          setUsers(all);
+          setState(prev => ({ ...prev, allUser: all, users: all }));
+        }
+      } catch (err) {
+        // keep sample data if backend call fails
+        console.error('Failed to load users', err);
+      }
+    };
+    load();
   }, []);
 
   const UserSideBar = (user) => (
@@ -101,7 +115,7 @@ const Users = () => {
   const onUserSelect = (data) => {
     data.selected = !data.selected;
     let selectedUsers = 0;
-    const updatedUserList = state.userList.map((user) => {
+    const updatedUserList = (state.users || []).map((user) => {
       if (user.selected) selectedUsers++;
       return user.id === data.id ? data : user;
     });
@@ -139,34 +153,58 @@ const Users = () => {
     }));
   };
 
-  const onSaveUser = (data) => {
-    let isNew = true;
-    const updatedUserList = state.allUser.map((user) => {
-      if (user.id === data.id) {
-        isNew = false;
-        return data;
-      }
-      return user;
-    });
-    if (isNew) updatedUserList.push(data);
+  const onSaveUser = async (data) => {
+    // Persist to backend: either insert or update an employee record
+    try {
+      const first_name = data.first_name || '';
+      const last_name = data.last_name || '';
+      const mi = data.mi || '';
+      const email = data.email || '';
+      const phone = data.phone || '';
+      const address = data.address || '';
+      const entered_by = "1";
+      const status = data.status || 'Active';
+      const salary = data.salary || 0;
+      const date_hired = data.date_hired || null;
 
-    setState((prevState) => ({
-      ...prevState,
-      alertMessage: isNew ? 'Employee Added Successfully' : 'User Updated Successfully',
-      showMessage: true,
-      users: updatedUserList,
-      allUser: updatedUserList,
-    }));
+      let result;
+      // Determine if this matches an existing backend user by id
+      const exists = users && users.find(u => u.id === data.id);
+      if (exists) {
+        const employeeData = { id: data.id, first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status };
+        result = await window.electronAPI.updateEmployee(employeeData);
+      } else {
+        result = await window.electronAPI.insertEmployee(first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status);
+      }
+
+      if (result && result.success) {
+        // refresh list
+        const all = await window.electronAPI.getAllEmployees();
+        setUsers(all);
+        setState(prev => ({ ...prev, allUser: all, users: all, alertMessage: exists ? 'User Updated Successfully' : 'Employee Added Successfully', showMessage: true }));
+      } else {
+        setState(prev => ({ ...prev, alertMessage: 'Failed to save user', showMessage: true }));
+      }
+    } catch (err) {
+      console.error('Failed saving user', err);
+      setState(prev => ({ ...prev, alertMessage: 'An error occurred saving user', showMessage: true }));
+    }
   };
 
-  const onDeleteUser = (data) => {
-    setState((prevState) => ({
-      ...prevState,
-      alertMessage: 'User Deleted Successfully',
-      showMessage: true,
-      allUser: prevState.allUser.filter((user) => user.id !== data.id),
-      users: prevState.allUser.filter((user) => user.id !== data.id),
-    }));
+  const onDeleteUser = async (data) => {
+    try {
+      const result = await window.electronAPI.deleteRecord(data.id, 'employees');
+      if (result && result.success) {
+        const all = await window.electronAPI.getAllEmployees();
+        setUsers(all);
+        setState(prev => ({ ...prev, allUser: all, users: all, alertMessage: 'User Deleted Successfully', showMessage: true }));
+      } else {
+        setState(prev => ({ ...prev, alertMessage: 'Failed to delete user', showMessage: true }));
+      }
+    } catch (err) {
+      console.error('Failed to delete user', err);
+      setState(prev => ({ ...prev, alertMessage: 'An error occurred deleting user', showMessage: true }));
+    }
   };
 
   const handleRequestClose = () => setState((prevState) => ({ ...prevState, showMessage: false }));
