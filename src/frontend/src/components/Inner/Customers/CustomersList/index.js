@@ -4,8 +4,9 @@ import { useRedirectToItem } from 'util/navigation';
 import { Input, Space } from 'antd';
 import { SearchOutlined,PrinterOutlined } from '@ant-design/icons';
 
-const CustomersList = ({customers, onSelectCustomer, setAddUserState, setDetails, handleSearchedTxt,onDelete}) => {
+const CustomersList = ({ customers, loading = false, total = 0, page = 1, pageSize = 25, onTableChange, onSearch, onSelectCustomer, setAddUserState, setDetails, onDelete }) => {
   const redirectToItem = useRedirectToItem();
+  const [searchInput, setSearchInput] = useState('');
   const columns = [
     {
       title: 'Name',
@@ -39,7 +40,7 @@ const CustomersList = ({customers, onSelectCustomer, setAddUserState, setDetails
       title: 'Open Balance',
       dataIndex: 'transfer',
       render: (text, record) => {
-        return <span className="gx-text-grey">{(record.opening_balance).toFixed(2)}</span>
+        return <span className="gx-text-grey">{(Number(record.opening_balance) || 0).toFixed(2)}</span>
       },
   
     },
@@ -91,7 +92,7 @@ const CustomersList = ({customers, onSelectCustomer, setAddUserState, setDetails
 <>
     <Row>
     <Col xs={24} sm={8} md={8}>
-    <Input placeholder="search..." suffix={<SearchOutlined />} onKeyUp={handleSearchedTxt}/>
+    <Input placeholder="Search (press Enter)" suffix={<SearchOutlined />} allowClear value={searchInput} onChange={(e) => setSearchInput(e.target.value)} onPressEnter={() => typeof onSearch === 'function' && onSearch(searchInput)} onClear={() => { setSearchInput(''); typeof onSearch === 'function' && onSearch(''); }} />
     </Col>
       <Col xs={24} sm={16} md={16}>
          <div style={{ display: 'flex', gap: '10px',float:"right" }}>
@@ -104,8 +105,9 @@ const CustomersList = ({customers, onSelectCustomer, setAddUserState, setDetails
       <Table rowSelection={rowSelection} 
         className="gx-table-no-bordered" 
         columns={columns} 
-        dataSource={customers} 
-        pagination={true} 
+        dataSource={customers || []} 
+        loading={loading}
+        pagination={typeof onTableChange === 'function' ? { current: page, pageSize, total, showSizeChanger: true, pageSizeOptions: ['10', '25', '50', '100'], showTotal: (t) => `Total ${t} items`, onChange: (p, size) => onTableChange(p, size) } : true}
         size="small"
         onRow={(record) => ({
           onClick: () => {

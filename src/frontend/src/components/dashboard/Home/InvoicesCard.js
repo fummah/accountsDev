@@ -9,7 +9,7 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
 }).format(number); 
 };
 
-const InvoicesCard = ({Report,title='1'}) => {
+const InvoicesCard = ({ Report, title = '1' }) => {
   return (
     <Widget
     title={
@@ -21,19 +21,19 @@ const InvoicesCard = ({Report,title='1'}) => {
     <div style={{paddingRight:20,paddingLeft:20}}>
       <Row justify="space-between" className='gx-mr-5 gx-mb-3'>
         <Text>
-          <Text className='h4' strong>${formattedNumber(Report?.open_invoice[0].open_total_amount)} Unpaid</Text> <Text type="secondary">Last 365 days</Text>
+          <Text className='h4' strong>${formattedNumber(Report?.open_invoice?.[0]?.open_total_amount)} Unpaid</Text> <Text type="secondary">Last 365 days</Text>
         </Text>
       </Row>
 
       {/* Overdue and Not Due Yet amounts */}
       <Row justify="space-between">
         <Col>
-          <Text strong>${formattedNumber(Report?.due_invoice[0].due_total_amount)}</Text>
+          <Text strong>${formattedNumber(Report?.due_invoice?.[0]?.due_total_amount)}</Text>
           <br />
           <Text type="secondary">Overdue</Text>
         </Col>
         <Col>
-          <Text strong>${formattedNumber(Report?.open_invoice[0].open_total_amount - Report?.due_invoice[0].due_total_amount)}</Text>
+          <Text strong>${formattedNumber((Report?.open_invoice?.[0]?.open_total_amount || 0) - (Report?.due_invoice?.[0]?.due_total_amount || 0))}</Text>
           <br />
           <Text type="secondary">Not due yet</Text>
         </Col>
@@ -50,7 +50,7 @@ const InvoicesCard = ({Report,title='1'}) => {
       {/* Paid Section */}
       <Row justify="space-between" className='gx-mr-5 gx-mb-3'>
         <Text>
-          <Text className='h4' strong>${formattedNumber(Report?.paid_invoice[0].paid_total_amount)} Paid</Text> <Text type="secondary">Last 30 days</Text>
+          <Text className='h4' strong>${formattedNumber(Report?.paid_invoice?.[0]?.paid_total_amount)} Paid</Text> <Text type="secondary">Last 30 days</Text>
         </Text>
       </Row>
 
@@ -62,7 +62,7 @@ const InvoicesCard = ({Report,title='1'}) => {
           <Text type="secondary">Not deposited</Text>
         </Col>
         <Col>
-          <Text strong>${formattedNumber(Report?.open_invoice[0].open_total_amount)}</Text>
+          <Text strong>${formattedNumber(Report?.open_invoice?.[0]?.open_total_amount)}</Text>
           <br />
           <Text type="secondary">Deposited</Text>
         </Col>

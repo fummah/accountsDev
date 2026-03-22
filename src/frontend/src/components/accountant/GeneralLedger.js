@@ -27,7 +27,7 @@ const GeneralLedger = () => {
   const loadAccounts = async () => {
     try {
       const accountsData = await window.electronAPI.getChartOfAccounts();
-      setAccounts(accountsData);
+      setAccounts(Array.isArray(accountsData) ? accountsData : []);
     } catch (error) {
       console.error('Failed to load accounts:', error);
     }
@@ -35,7 +35,8 @@ const GeneralLedger = () => {
 
   const loadLedger = async () => {
     try {
-      const ledgerData = await window.electronAPI.getLedger();
+      const raw = await window.electronAPI.getLedger();
+      const ledgerData = Array.isArray(raw) ? raw : [];
       // Filter ledger data based on selected account and date range
       const filteredData = ledgerData.filter(entry => 
         entry.accountId === selectedAccount &&

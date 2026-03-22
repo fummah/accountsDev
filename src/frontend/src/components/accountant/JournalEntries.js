@@ -8,6 +8,10 @@ const { Option } = Select;
 const JournalEntries = () => {
   const [entries, setEntries] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [entities, setEntities] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [form] = Form.useForm();
 
@@ -17,12 +21,26 @@ const JournalEntries = () => {
 
   const loadData = async () => {
     try {
-      const [journalData, accountsData] = await Promise.all([
+      const [journalData, accountsData, entitiesData, cls, locs, deps] = await Promise.all([
         window.electronAPI.getJournal(),
-        window.electronAPI.getChartOfAccounts()
+        window.electronAPI.getChartOfAccounts(),
+        window.electronAPI.listEntities ? window.electronAPI.listEntities() : [],
+        window.electronAPI.listClasses ? window.electronAPI.listClasses() : [],
+        window.electronAPI.listLocations ? window.electronAPI.listLocations() : [],
+        window.electronAPI.listDepartments ? window.electronAPI.listDepartments() : []
       ]);
-      setEntries(journalData);
+      const rows = Array.isArray(journalData) ? journalData.map(e => {
+        const lines = Array.isArray(e.lines) ? e.lines : [];
+        const debitTotal = lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
+        const creditTotal = lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
+        return { ...e, debitTotal, creditTotal };
+      }) : [];
+      setEntries(rows);
       setAccounts(accountsData);
+      setEntities(Array.isArray(entitiesData) ? entitiesData : []);
+      setClasses(Array.isArray(cls) ? cls : []);
+      setLocations(Array.isArray(locs) ? locs : []);
+      setDepartments(Array.isArray(deps) ? deps : []);
     } catch (error) {
       message.error('Failed to load data');
     }
@@ -30,22 +48,40 @@ const JournalEntries = () => {
 
   const handleSubmit = async (values) => {
     try {
-      const journalEntry = {
-        ...values,
+      const lines = (values.entries || []).map(entry => {
+        const accountObj = Array.isArray(accounts) ? accounts.find(a => a.id === entry.accountId) : null;
+        const accountLabel = accountObj
+          ? (accountObj.accountName || accountObj.name || accountObj.account_number || accountObj.number || String(accountObj.id))
+          : String(entry.accountId);
+        const amount = Number(entry.amount) || 0;
+        return {
+          account: accountLabel,
+          debit: entry.type === 'debit' ? amount : 0,
+          credit: entry.type === 'credit' ? amount : 0,
+        };
+      });
+
+      const payload = {
         date: values.date.format('YYYY-MM-DD'),
-        entryLines: values.entries.map(entry => ({
-          ...entry,
-          amount: parseFloat(entry.amount)
-        }))
+        description: values.description,
+        entered_by: 'ui',
+        lines,
+        entity_id: values.entity_id || null
+        , class: values.class || null
+        , location: values.location || null
+        , department: values.department || null
       };
 
-      await window.electronAPI.insertJournal(journalEntry);
+      const res = await window.electronAPI.insertJournal(payload);
+      if (res && res.error) {
+        throw new Error(res.error);
+      }
       message.success('Journal entry created successfully');
       setIsModalVisible(false);
       form.resetFields();
       loadData();
     } catch (error) {
-      message.error('Failed to create journal entry');
+      message.error(error?.message || 'Failed to create journal entry');
     }
   };
 
@@ -70,14 +106,32 @@ const JournalEntries = () => {
       title: 'Debit Total',
       dataIndex: 'debitTotal',
       key: 'debitTotal',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      render: (amount) => {
+        const n = Number(amount);
+        return Number.isFinite(n) ? `$${n.toFixed(2)}` : '';
+      },
     },
     {
       title: 'Credit Total',
       dataIndex: 'creditTotal',
       key: 'creditTotal',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      render: (amount) => {
+        const n = Number(amount);
+        return Number.isFinite(n) ? `$${n.toFixed(2)}` : '';
+      },
     },
+    {
+      title: 'Anchor',
+      key: 'anchor',
+      render: (_, r) => (
+        <Button size="small" onClick={async () => {
+          try {
+            const res = await window.electronAPI.journalAnchor?.(r.id);
+            if (res?.success) message.success('Anchor queued'); else message.error(res?.error || 'Failed');
+          } catch (e) { message.error(e?.message || 'Error'); }
+        }}>Anchor</Button>
+      )
+    }
   ];
 
   return (
@@ -114,6 +168,34 @@ const JournalEntries = () => {
           layout="vertical"
           onFinish={handleSubmit}
         >
+          <Form.Item
+            name="entity_id"
+            label="Entity"
+          >
+            <Select placeholder="Select entity (optional)">
+              {entities.map(e => (
+                <Option key={e.id} value={e.id}>{e.name}</Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="class" label="Class">
+            <Select allowClear placeholder="Select class">
+              {classes.map(c => <Option key={c.id} value={c.name}>{c.name}</Option>)}
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="location" label="Location">
+            <Select allowClear placeholder="Select location">
+              {locations.map(l => <Option key={l.id} value={l.name}>{l.name}</Option>)}
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="department" label="Department">
+            <Select allowClear placeholder="Select department">
+              {departments.map(d => <Option key={d.id} value={d.name}>{d.name}</Option>)}
+            </Select>
+          </Form.Item>
           <Form.Item
             name="date"
             label="Date"

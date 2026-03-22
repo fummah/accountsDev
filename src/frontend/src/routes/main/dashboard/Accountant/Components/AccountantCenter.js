@@ -66,8 +66,9 @@ const AccountantCenter = () => {
       // Fixed Assets
       let fixedAssets = 0;
       try {
-        const assets = await window.electronAPI.getFixedAssets();
-        fixedAssets = Array.isArray(assets) ? assets.length : 0;
+        const res = await window.electronAPI.getFixedAssets();
+        const list = res && res.success && Array.isArray(res.data) ? res.data : (Array.isArray(res) ? res : []);
+        fixedAssets = list.length;
       } catch {}
       // Transactions
       let transactions = 0;

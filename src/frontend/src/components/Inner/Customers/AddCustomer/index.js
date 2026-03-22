@@ -100,16 +100,12 @@ useEffect(() => {
      
       <Drawer
        title={`${user ? 'Edit' : 'Add'} ${type}`}
-        size='medium'
-        width={400}
+        size='large'
+        placement='top'
         onClose={onUserClose}
         onCancel={onUserClose}
         open={open}
-        styles={{
-          body: {
-            paddingBottom: 80,
-          },
-        }}
+        style={{width:'100% !important'}}
         footer={
           <div
             style={{
@@ -145,9 +141,24 @@ useEffect(() => {
          {visible1 && (
          <>
           <Row gutter={2}>           
-            <Col span={3}>
-              <Form.Item name="title" label="Title" rules={[{ required: true, message: 'Title', },]}>
-                   <Input/> 
+             <Col span={3}>
+              <Form.Item
+                name="title"
+                label="Title"
+                rules={[{ required: true, message: 'Please select a title', }]}
+              >
+                <Select placeholder="Select">
+                  <Option value="Mr">Mr</Option>
+                  <Option value="Mrs">Mrs</Option>
+                  <Option value="Ms">Ms</Option>
+                  <Option value="Miss">Miss</Option>
+                  <Option value="Dr">Dr</Option>
+                  <Option value="Prof">Prof</Option>
+                  <Option value="Rev">Rev</Option>
+                  <Option value="Sir">Sir</Option>
+                  <Option value="Madam">Madam</Option>
+                  <Option value="Mx">Mx</Option>
+                </Select>
               </Form.Item>
               </Col>
               <Col span={6}>

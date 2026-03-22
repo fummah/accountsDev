@@ -21,7 +21,14 @@ const RunPayroll = () => {
   const loadEmployees = async () => {
     try {
       const data = await window.electronAPI.getEmployees();
-      setEmployees(data);
+      // backend may return { success: true, data: [...] } or raw array
+      if (data && data.success) {
+        setEmployees(Array.isArray(data.data) ? data.data : []);
+      } else if (Array.isArray(data)) {
+        setEmployees(data);
+      } else {
+        setEmployees([]);
+      }
     } catch (error) {
       message.error('Failed to load employees');
     }
@@ -73,7 +80,7 @@ const RunPayroll = () => {
       title: 'Name',
       dataIndex: 'name',
       key: 'name',
-      render: (_, record) => `${record.firstName} ${record.lastName}`,
+      render: (_, record) => `${record.first_name || record.firstName || ''} ${record.last_name || record.lastName || ''}`,
     },
     {
       title: 'Department',
@@ -89,7 +96,7 @@ const RunPayroll = () => {
       title: 'Base Pay',
       dataIndex: 'basePay',
       key: 'basePay',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      render: (_, record) => `$${Number(record.salary || record.basePay || 0).toFixed(2)}`,
     },
     {
       title: 'Last Paid',

@@ -1,81 +1,33 @@
-import React,{useRef, useState, useEffect}  from "react";
-import {  Row, Col, Alert, Button } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import React,{useState, useEffect, useCallback}  from "react";
+import {  Row, Col, Alert, Button, Spin } from 'antd';
+import { ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
+import { useHistory } from 'react-router-dom';
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
 import InvoicesCard from "components/dashboard/Home/InvoicesCard";
 import InvoicesList from "components/Inner/Sales/Invoices/InvoicesList";
-import AddInvoice from 'components/Inner/Sales/Invoices/AddInvoice';
 import InvoiceDetails from 'components/Inner/Sales/Invoices/InvoiceDetails';
 import Toast from "components/AppNotification/toast.js";
-import dayjs from 'dayjs';
 import {TypeContext} from "appContext/TypeContext.js";
 
+const PAGE_SIZE = 25;
 
 const InvoicesTab = () => {
-  const addInvoiceRef = useRef();
-  const [loadings, setLoadings] = useState([]);
-  const [addUserState, setAddUserState] = useState(false); 
+  const history = useHistory();
   const [isSuccess, setIsSuccess] = useState(null);
   const [message, setMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [invoices, setInvoices] = useState([]);
-  const [invoicesSearched, setInvoicesSearched] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [reportLoading, setReportLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [details, setDetails] = useState(0);
   const [report, setReport] = useState(null);
-  
-  const onSaveUser = async(userData) => {
-    console.log("User Data Saved:", userData);
-    console.log(userData);
-    try {
-      const status = userData.status;
-      const customer = userData.customer;
-      const customer_email = userData.customer_email;
-      const islater = userData.islater ? "1" : "0";
-      const billing_address = userData.billing_address;
-      const terms = userData.terms;
-      const entered_by = "1";
-      const start_date = userData.start_date ? dayjs(userData.start_date).format('YYYY-MM-DD') : null;
-      const last_date = userData.last_date ? dayjs(userData.last_date).format('YYYY-MM-DD') : null;
-      const message = userData.message;
-      const statement_message = userData.statement_message;
-      const number = userData.number;
-      const vat = userData.vat;
-      const lines = userData.lines;
-      let result;
-        
-      if (userData.id) {
-        const id = userData.id;
-        const invoiceData = {id,status,customer, customer_email, islater, billing_address, terms, entered_by, start_date, last_date,last_date, last_date, message, statement_message, number, vat, lines};
-        result = await window.electronAPI.updateInvoice(invoiceData);   
-      }
-      else{
-        result = await window.electronAPI.insertInvoice(customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by, vat, status, lines);  
-           }         
-       setIsSuccess(result.success);
-  
-      if (result.success) {
-        setMessage('Invoice saved successfully!');
-        fetchInvoices();
-        if (addInvoiceRef.current) {
-          addInvoiceRef.current.resetForm();
-          handleUserClose();
-      }
-      } else {
-        setMessage(`Failed to save invoice. Please try again. ${result.error}`);
-        setShowError(true);
-      }       
-        
-    } catch (error) {
-      setIsSuccess(false);  
-      const errorMessage = error.message || "An unknown error occurred.";    
-      setMessage(`An error occurred. Please try again later. ${errorMessage}`);
-      setShowError(true);
-      console.log(error);
-    }
-    
-  };
   const deleteRecord = async(id) => {
 
     const userConfirmed = window.confirm("Are you sure you want to delete this record?");
@@ -89,7 +41,7 @@ const InvoicesTab = () => {
       setIsSuccess(result.success);  
       if (result.success) {
         setMessage('Record deleted successfully!');
-        fetchInvoices();
+        fetchInvoices(page, pageSize, search);
       
       } else {
         setMessage('Failed to delete. Please try again.');
@@ -104,56 +56,74 @@ const InvoicesTab = () => {
   };
   
   
-    const fetchInvoices = async () => {
+    const fetchReport = useCallback(async () => {
+      try {
+        setReportLoading(true);
+        const res = await window.electronAPI.getInvoiceReport();
+        if (res && !res.error) setReport(res);
+      } catch (e) {
+        console.error('Error fetching invoice report:', e);
+      } finally {
+        setReportLoading(false);
+      }
+    }, []);
+
+    const fetchInvoices = useCallback(async (p = page, size = pageSize, searchTerm = search, status = statusFilter) => {
         try {
-            const response = await await window.electronAPI.getAllInvoices();          
-            setInvoices(response.all);
-            setReport(response.report);
-            setInvoicesSearched(response.all);
+            setLoading(true);
+            const res = await window.electronAPI.getInvoicesPaginated(p, size, searchTerm, status || '');
+            if (res && res.error) {
+              setMessage(`Error fetching invoices: ${res.error}`);
+              setShowError(true);
+              return;
+            }
+            setInvoices(res.data || []);
+            setTotal(res.total || 0);
+            setPage(p);
+            setPageSize(size);
         } catch (error) {
           const errorMessage = error.message || "An unknown error occurred.";
-    setMessage(`Error fetching invoices: ${errorMessage}`);
+          setMessage(`Error fetching invoices: ${errorMessage}`);
           setShowError(true);
+        } finally {
+          setLoading(false);
         }
-    };
+    }, [page, pageSize, search, statusFilter]);
 
     useEffect(() => {
-      fetchInvoices();
-  }, []);
+      fetchReport();
+    }, [fetchReport]);
 
-  const handleUserClose = () => {
-    setAddUserState(false);
-  };
-  const showDrawer = () => {
-    setSelectedInvoice(null);
-    setAddUserState(true);
-  };
+    useEffect(() => {
+      fetchInvoices(1, PAGE_SIZE, '');
+    }, []);
+
+    const handleTableChange = (p, size) => {
+      fetchInvoices(p, size, search, statusFilter);
+    };
+
+    const handleSearch = (value) => {
+      setSearch(value);
+      fetchInvoices(1, pageSize, value, statusFilter);
+    };
+
+    const handleStatusFilterChange = (value) => {
+      const v = value || '';
+      setStatusFilter(v);
+      fetchInvoices(1, pageSize, search, v);
+    };
+
   const onBack = () =>{
     setSelectedInvoice(null);
     setDetails(0);
   }
 
-  const handleSearchedTxt = (event) => {
-    const value = event.target.value.toLowerCase();
-    if (value.trim() !== '')
-    {
-      const filtered = invoices.filter(
-        (item) =>
-          (item.customer_name && item.customer_name.toLowerCase().includes(value)) ||
-        (item.number && item.number.toLowerCase().includes(value)) 
-      );
-      setInvoicesSearched(filtered);
-    }
-    else{
-      setInvoicesSearched(invoices);
-    }
-  };
   return (
     <TypeContext.Provider value="Invoice">
     <Auxiliary>   
        <Toast title="Error" message={message} setShowError={setShowError} show={showError} /> 
        {!details && (
-<InvoicesCard title="" Report = {report}/>  
+        reportLoading ? <Spin tip="Loading report..." /> : <InvoicesCard title="" Report = {report}/>  
        )}
 <Widget
    title={
@@ -170,17 +140,9 @@ const InvoicesTab = () => {
    } 
    
    extra={
-    <AddInvoice 
-    type="Invoice"
-    item={selectedInvoice}
-    open={addUserState} 
-    onSaveUser={onSaveUser} // Pass the function
-    onUserClose={handleUserClose} 
-    showDrawer={showDrawer}
-    setShowError={setShowError}
-    setMessage={setMessage}
-    ref={addInvoiceRef}
-  />
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => history.push('/main/customers/invoices/new')}>
+      New Invoice
+    </Button>
    }>  
        {isSuccess !== null && (
         <Alert message={message} type={isSuccess?'success':'error'} closable/>
@@ -193,7 +155,21 @@ const InvoicesTab = () => {
    </Col>
 ):(   
        <Col xs={24} sm={24} md={24}>
-       <InvoicesList dataList={invoicesSearched} onSelectInvoice={setSelectedInvoice} setAddUserState={setAddUserState} setDetails={setDetails} handleSearchedTxt={handleSearchedTxt} onDelete={deleteRecord}/>
+       <InvoicesList 
+         dataList={invoices} 
+         loading={loading} 
+         total={total} 
+         page={page} 
+         pageSize={pageSize} 
+         onTableChange={handleTableChange}
+         onSearch={handleSearch}
+         statusFilter={statusFilter}
+         onStatusFilterChange={handleStatusFilterChange}
+         onSelectInvoice={setSelectedInvoice} 
+         setAddUserState={() => history.push('/main/customers/invoices/new')} 
+         setDetails={setDetails} 
+         onDelete={deleteRecord}
+       />
        </Col>
 )}
       </Row> 

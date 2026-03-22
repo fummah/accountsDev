@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   Form,
@@ -23,20 +23,72 @@ const ReceivePaymentsTab = () => {
   const [form] = Form.useForm();
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [invoices, setInvoices] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  const onCustomerChange = (customerId) => {
-    const customer = dummyCustomers.find((c) => c.id === customerId);
-    setSelectedCustomer(customer);
-    setInvoices(customer?.invoices || []);
-    form.setFieldsValue({ invoiceId: undefined, amount: undefined });
+  useEffect(() => {
+    loadCustomers();
+  }, []);
+
+  const loadCustomers = async () => {
+    try {
+      const response = await window.electronAPI.getAllCustomers();
+      setCustomers(response.all || []);
+    } catch (error) {
+      message.error('Failed to load customers');
+      console.error('Error loading customers:', error);
+    }
   };
 
-  const onFinish = (values) => {
-    console.log("Received Payment:", values);
-    message.success("Payment recorded successfully.");
-    form.resetFields();
-    setInvoices([]);
-    setSelectedCustomer(null);
+  const onCustomerChange = async (customerId) => {
+    try {
+      setLoading(true);
+      const response = await window.electronAPI.getUnpaidInvoices(customerId);
+      const customer = customers.find(c => c.id === customerId);
+      setSelectedCustomer(customer);
+      setInvoices(response || []);
+      form.setFieldsValue({ invoiceId: undefined, amount: undefined });
+    } catch (error) {
+      message.error('Failed to load customer invoices');
+      console.error('Error loading invoices:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onFinish = async (values) => {
+    try {
+      setLoading(true);
+      const paymentData = {
+        customerId: values.customerId,
+        invoiceId: values.invoiceId,
+        amount: values.amount,
+        paymentDate: values.paymentDate.format('YYYY-MM-DD'),
+        paymentMethod: values.paymentMethod,
+        notes: values.notes,
+        entered_by: "1" // TODO: Get from current user context
+      };
+
+      const response = await window.electronAPI.recordPayment(paymentData);
+      
+      if (response.success) {
+        message.success("Payment recorded successfully");
+        form.resetFields();
+        setInvoices([]);
+        setSelectedCustomer(null);
+        // Refresh the invoices list
+        if (values.customerId) {
+          onCustomerChange(values.customerId);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to record payment');
+      }
+    } catch (error) {
+      message.error(error.message || 'Failed to record payment');
+      console.error('Payment error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const invoiceOptions = invoices.map((inv) => (
@@ -60,10 +112,19 @@ const ReceivePaymentsTab = () => {
           label="Customer"
           rules={[{ required: true, message: "Please select a customer" }]}
         >
-          <Select placeholder="Select customer" onChange={onCustomerChange}>
-            {dummyCustomers.map((c) => (
+          <Select 
+            placeholder="Select customer" 
+            onChange={onCustomerChange}
+            loading={loading}
+            showSearch
+            optionFilterProp="children"
+            filterOption={(input, option) =>
+              option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+            }
+          >
+            {customers.map((c) => (
               <Option key={c.id} value={c.id}>
-                {c.name}
+                {c.company_name || `${c.first_name} ${c.last_name}`}
               </Option>
             ))}
           </Select>

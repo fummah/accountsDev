@@ -10,7 +10,7 @@ import MainApp from "./MainApp";
 import SignIn from "../SignIn";
 import SignUp from "../SignUp";
 import {setInitUrl} from "appRedux/actions/Auth";
-import {onLayoutTypeChange, onNavStyleChange, setThemeType} from "appRedux/actions/Setting";
+import {onLayoutTypeChange, onNavStyleChange, setThemeType, setThemeColor} from "appRedux/actions/Setting";
 
 import {
   LAYOUT_TYPE_BOXED,
@@ -20,7 +20,7 @@ import {
   NAV_STYLE_BELOW_HEADER,
   NAV_STYLE_DARK_HORIZONTAL,
   NAV_STYLE_DEFAULT_HORIZONTAL,
-  NAV_STYLE_INSIDE_HEADER_HORIZONTAL, THEME_TYPE_DARK
+  NAV_STYLE_INSIDE_HEADER_HORIZONTAL, THEME_TYPE_DARK, THEME_TYPE_LITE
 } from "../../constants/ThemeSetting";
 
 const RestrictedRoute = ({component: Component, location, authUser, ...rest}) =>
@@ -86,6 +86,26 @@ const App = () => {
   const location = useLocation();
   const history = useHistory();
   const match = useRouteMatch();
+
+  // Load UI theme/accessibility from settings
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await window.electronAPI.settingsGet?.('ui.theme');
+        if (cfg) {
+          // theme type & color mapping
+          const t = (cfg.theme === 'dark') ? THEME_TYPE_DARK : THEME_TYPE_LITE;
+          dispatch(setThemeType(t));
+          const colorMap = { blue: 'blue', purple: 'light_purple', red: 'red', orange: 'orange', green: 'light_blue', corporate: 'dark_blue' };
+          const col = colorMap[cfg.theme] || colorMap[cfg.accentColor] || 'blue';
+          dispatch(setThemeColor(col));
+          // accessibility classes
+          document.body.classList.toggle('contrast-high', !!cfg.contrastHigh);
+          document.body.classList.toggle('font-large', cfg.fontScale === 'large');
+        }
+      } catch {}
+    })();
+  }, [dispatch]);
 
   useEffect(() => {
     if (isDirectionRTL) {

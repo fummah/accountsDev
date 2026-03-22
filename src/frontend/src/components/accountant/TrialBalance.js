@@ -1,11 +1,21 @@
-import React, { useState } from 'react';
-import { Card, Table, DatePicker, Select, Button, Alert, Form, Row, Col } from 'antd';
+import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
+import { Card, Table, DatePicker, Select, Button, Alert, Form, Row, Col, message } from 'antd';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 
 const TrialBalance = () => {
   const [loading, setLoading] = useState(false);
+  const [data, setData] = useState([]);
+
+  useEffect(() => {
+    // Load default trial balance on mount
+    (async () => {
+      // load an initial full-range trial balance (no dates => all)
+      await loadTrialBalance();
+    })();
+  }, []);
 
   const columns = [
     {
@@ -32,36 +42,206 @@ const TrialBalance = () => {
     },
   ];
 
-  const data = [
-    {
-      key: '1',
-      accountCode: '1000',
-      accountName: 'Cash',
-      debit: '10,000.00',
-      credit: '0.00',
-    },
-    {
-      key: '2',
-      accountCode: '2000',
-      accountName: 'Accounts Payable',
-      debit: '0.00',
-      credit: '5,000.00',
-    },
-    {
-      key: '3',
-      accountCode: '4000',
-      accountName: 'Sales Revenue',
-      debit: '0.00',
-      credit: '15,000.00',
-    },
-  ];
+  // load trial balance from backend (chart of accounts balances)
+  const loadTrialBalance = async (params) => {
+    try {
+      setLoading(true);
+      // If params contains dateRange, call backend trial-balance by date.
+      if (params && params.dateRange) {
+        try {
+          const [startMoment, endMoment] = params.dateRange;
+          const start = (startMoment && startMoment.format) ? startMoment.format('YYYY-MM-DD') : null;
+          const end = (endMoment && endMoment.format) ? endMoment.format('YYYY-MM-DD') : null;
+          const tb = await window.electronAPI.getTrialBalance(start, end);
+          if (!tb || tb.error) {
+            message.error(tb?.error || 'Failed to load trial balance');
+            setData([]);
+          } else {
+            const rows = tb.map((r, idx) => ({
+              key: r.accountId || idx,
+              accountCode: r.accountCode || r.accountNumber || '',
+              accountName: r.accountName || '',
+              debit: (Number(r.debit) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+              credit: (Number(r.credit) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+              _raw: r
+            }));
+            setData(rows);
+          }
+        } catch (err) {
+          console.error('Failed to load trial balance by date:', err);
+          message.error('Failed to load trial balance');
+          setData([]);
+        }
+      } else {
+        // fallback: load chart of accounts snapshot if no dates were provided
+        const accounts = await window.electronAPI.getChartOfAccounts();
+        if (!accounts || accounts.error) {
+          message.error(accounts?.error || 'Failed to load trial balance');
+          setData([]);
+          return;
+        }
 
-  const onFinish = (values) => {
-    setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
+        const rows = Array.isArray(accounts) ? accounts.map((acc, idx) => {
+          const balance = Number(acc.balance) || 0;
+          const type = (acc.accountType || acc.type || '').toLowerCase();
+
+          let debit = 0;
+          let credit = 0;
+
+          // Basic rule: assets & expenses are debit-normal; liabilities, equity, income are credit-normal
+          const debitNormal = type.includes('asset') || type.includes('expense');
+
+          if (balance >= 0) {
+            if (debitNormal) debit = balance; else credit = balance;
+          } else {
+            // negative balance flips side
+            if (debitNormal) credit = Math.abs(balance); else debit = Math.abs(balance);
+          }
+
+          return {
+            key: acc.id || idx,
+            accountCode: acc.accountNumber || acc.number || acc.accountCode || acc.accountCode || '',
+            accountName: acc.accountName || acc.name || acc.accountName || '',
+            debit: debit.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+            credit: credit.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+          };
+        }) : [];
+
+        setData(rows);
+      }
+    } catch (error) {
+      console.error('Failed to load trial balance:', error);
+      message.error('Failed to load trial balance');
+      setData([]);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
+  };
+
+  const onFinish = async (values) => {
+    // TODO: pass dateRange and balanceType to backend when supported
+    await loadTrialBalance(values);
+  };
+
+  // Export current data to CSV
+  const handleExport = () => {
+    try {
+      if (!data || data.length === 0) {
+        message.warning('No data to export');
+        return;
+      }
+
+      const headers = ['Account Code', 'Account Name', 'Debit', 'Credit'];
+      const csvRows = [headers.join(',')];
+      data.forEach(r => {
+        const row = [
+          `"${(r.accountCode || '').toString().replace(/"/g, '""')}"`,
+          `"${(r.accountName || '').toString().replace(/"/g, '""')}"`,
+          `${(r.debit || '0').toString().replace(/,/g, '')}`,
+          `${(r.credit || '0').toString().replace(/,/g, '')}`,
+        ];
+        csvRows.push(row.join(','));
+      });
+
+      const csvContent = csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trial-balance-${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export failed', err);
+      message.error('Export failed');
+    }
+  };
+
+  // Export to XLSX using sheetjs
+  const handleExportXLSX = () => {
+    try {
+      if (!data || data.length === 0) {
+        message.warning('No data to export');
+        return;
+      }
+
+      // Prepare sheet data preserving numeric values
+      const sheetData = data.map(r => ({
+        'Account Code': r.accountCode || '',
+        'Account Name': r.accountName || '',
+        'Debit': parseFloat((r.debit || '0').toString().replace(/,/g, '')) || 0,
+        'Credit': parseFloat((r.credit || '0').toString().replace(/,/g, '')) || 0,
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(sheetData);
+      XLSX.utils.book_append_sheet(wb, ws, 'Trial Balance');
+
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([wbout], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trial-balance-${new Date().toISOString().slice(0,10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('XLSX export failed', err);
+      message.error('Export failed');
+    }
+  };
+
+  // Print current data (opens new window and triggers print)
+  const handlePrint = () => {
+    try {
+      if (!data || data.length === 0) {
+        message.warning('No data to print');
+        return;
+      }
+
+      const rowsHtml = data.map(r => `
+        <tr>
+          <td>${r.accountCode || ''}</td>
+          <td>${r.accountName || ''}</td>
+          <td style="text-align:right">${r.debit || '0.00'}</td>
+          <td style="text-align:right">${r.credit || '0.00'}</td>
+        </tr>
+      `).join('');
+
+      const html = `
+        <html>
+          <head>
+            <title>Trial Balance</title>
+            <style>table{width:100%;border-collapse:collapse}td,th{border:1px solid #ccc;padding:8px}</style>
+          </head>
+          <body>
+            <h2>Trial Balance</h2>
+            <table>
+              <thead>
+                <tr><th>Account Code</th><th>Account Name</th><th>Debit</th><th>Credit</th></tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+          </body>
+        </html>
+      `;
+
+      const printWindow = window.open('', '_blank');
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => { printWindow.print(); }, 300);
+    } catch (err) {
+      console.error('Print failed', err);
+      message.error('Print failed');
+    }
   };
 
   return (
@@ -109,8 +289,10 @@ const TrialBalance = () => {
           let totalCredit = 0;
 
           pageData.forEach(({ debit, credit }) => {
-            totalDebit += parseFloat(debit.replace(',', ''));
-            totalCredit += parseFloat(credit.replace(',', ''));
+            const d = parseFloat((debit || '0').toString().replace(/,/g, '')) || 0;
+            const c = parseFloat((credit || '0').toString().replace(/,/g, '')) || 0;
+            totalDebit += d;
+            totalCredit += c;
           });
 
           return (
@@ -135,9 +317,16 @@ const TrialBalance = () => {
         }}
       />
 
-      <div style={{ marginTop: 16 }}>
-        <Button type="primary" style={{ marginRight: 8 }}>Export to Excel</Button>
-        <Button>Print</Button>
+      <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+        <Button type="primary" style={{ marginRight: 8 }} onClick={handleExport} disabled={!data || data.length === 0}>
+          Export to CSV
+        </Button>
+        <Button type="default" style={{ marginRight: 8 }} onClick={handleExportXLSX} disabled={!data || data.length === 0}>
+          Export to XLSX
+        </Button>
+        <Button onClick={handlePrint} disabled={!data || data.length === 0}>
+          Print
+        </Button>
       </div>
     </Card>
   );

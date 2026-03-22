@@ -1,0 +1,24 @@
+/* Accessibility helpers */
+body.font-large {
+  font-size: 16px;
+}
+
+/* High contrast mode - increase text contrast and link/button visibility */
+body.contrast-high, body.contrast-high * {
+  text-shadow: none !important;
+}
+body.contrast-high {
+  --a11y-text: #000;
+  --a11y-bg: #fff;
+  --a11y-primary: #0000ee;
+  background-color: var(--a11y-bg) !important;
+  color: var(--a11y-text) !important;
+}
+body.contrast-high a { color: var(--a11y-primary) !important; text-decoration: underline; }
+body.contrast-high .ant-btn-primary { background-color: #000 !important; border-color: #000 !important; color: #fff !important; }
+
+/* Focus outlines for keyboard navigation */
+*:focus-visible {
+  outline: 2px solid #1890ff !important;
+  outline-offset: 2px;
+}

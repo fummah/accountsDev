@@ -1,7 +1,7 @@
-import React,{useState, useEffect} from "react";
-import {Col, Row} from "antd";
+import React, { useState, useEffect, Suspense, lazy } from "react";
+import { Col, Row, Spin, Skeleton } from "antd";
 
-import {Area, AreaChart, Line, LineChart, ResponsiveContainer, Tooltip} from "recharts";
+import { Area, AreaChart, Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
 import ChartCard from "components/dashboard/Home/ChartCard";
 import Auxiliary from "util/Auxiliary";
 import WelComeCard from "components/dashboard/Home/WelComeCard";
@@ -11,12 +11,17 @@ import CashFlowTrend from "components/dashboard/Home/CashFlowTrend";
 import InvoicesCard from "components/dashboard/Home/InvoicesCard";
 import AccountsPayable from "components/dashboard/Home/AccountsPayable";
 import AccountsReceivable from "components/dashboard/Home/AccountsReceivable";
-import CompanySnapshot from "components/dashboard/Home/CompanySnapshot";
 import Sales from "components/dashboard/Home/Sales";
 import Toast from "components/AppNotification/toast.js";
 
+import FinancialHealth from "components/dashboard/Home/FinancialHealth";
+
+// Lazy load heavy below-the-fold component so it doesn't block first paint
+const CompanySnapshot = lazy(() => import("components/dashboard/Home/CompanySnapshot"));
+
 const HomeTab = () => {
-  const [isSuccess, setIsSuccess] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [chartsReady, setChartsReady] = useState(false);
   const [message, setMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [openinvoice, setOpenInvoice] = useState(0);
@@ -33,64 +38,92 @@ const HomeTab = () => {
   const [suppliertrend, setSupplierTrend] = useState([]);
   const [expenselist, setExpenseList] = useState([]);
   const [report, setReport] = useState(null);
+  const [dashboardSummary, setDashboardSummary] = useState(null);
 
-  const fetchInitials = async () => {
-    try {
-      const response = await window.electronAPI.getDashboardSummary();
+  useEffect(() => {
+    let cancelled = false;
 
-      if (!response || response.error) {
-        const errorMessage = response?.error || 'No dashboard data returned';
-        setMessage(`Error fetching summary: ${errorMessage}`);
-        setShowError(true);
-        return;
+    const fetchInitials = async () => {
+      try {
+        const response = await window.electronAPI.getDashboardSummary();
+        if (cancelled) return;
+
+        if (!response || response.error) {
+          setMessage(response?.error || 'No dashboard data returned');
+          setShowError(true);
+          setLoading(false);
+          return;
+        }
+
+        // Phase 1: set counts and report so top/mid sections render quickly (no charts)
+        const openInv = (response.open_invoice?.[0] && Number(response.open_invoice[0].open_invoice)) || 0;
+        const dueInv = (response.due_invoice?.[0] && Number(response.due_invoice[0].due_invoice)) || 0;
+        const dueQ = (response.due_quote?.[0] && Number(response.due_quote[0].due_quote)) || 0;
+        const openInvMoney = (response.open_invoice?.[0] && Number(response.open_invoice[0].open_total_amount)) || 0;
+        const dueInvMoney = (response.due_invoice?.[0] && Number(response.due_invoice[0].due_total_amount)) || 0;
+        const openExp = (response.open_expense?.[0] && Number(response.open_expense[0].open_expense)) || 0;
+        const dueExp = (response.due_expense?.[0] && Number(response.due_expense[0].due_expense)) || 0;
+        const openExpMoney = (response.open_expense?.[0] && Number(response.open_expense[0].open_total_amount_expense)) || 0;
+        const dueExpMoney = (response.due_expense?.[0] && Number(response.due_expense[0].due_total_amount_expense)) || 0;
+
+        setOpenInvoice(openInv);
+        setDueInvoice(dueInv);
+        setDueQuote(dueQ);
+        setOpenInvoiceMoney(openInvMoney);
+        setDueInvoiceMoney(dueInvMoney);
+        setOpenExpense(openExp);
+        setDueExpense(dueExp);
+        setOpenExpenseMoney(openExpMoney);
+        setDueExpenseMoney(dueExpMoney);
+        setExpenseList(Array.isArray(response.expenseAnalysis) ? response.expenseAnalysis : (Array.isArray(response.expenselist) ? response.expenselist : []));
+        setReport(response.report || null);
+        setDashboardSummary(response);
+        setLoading(false);
+
+        // Phase 2: set trend data on next tick so charts render after first paint
+        requestAnimationFrame(() => {
+          if (cancelled) return;
+          setInvoicePaidTrend(Array.isArray(response.invoicetrend) ? response.invoicetrend : []);
+          setCustomerTrend(Array.isArray(response.customertrend) ? response.customertrend : []);
+          setSupplierTrend(Array.isArray(response.suppliertrend) ? response.suppliertrend : []);
+          setChartsReady(true);
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(error?.message || "An unknown error occurred.");
+          setShowError(true);
+          setLoading(false);
+        }
       }
+    };
 
-      // Safely read fields with fallbacks
-      const openInv = (response.open_invoice && response.open_invoice[0] && Number(response.open_invoice[0].open_invoice)) || 0;
-      const dueInv = (response.due_invoice && response.due_invoice[0] && Number(response.due_invoice[0].due_invoice)) || 0;
-      const dueQ = (response.due_quote && response.due_quote[0] && Number(response.due_quote[0].due_quote)) || 0;
-      const openInvMoney = (response.open_invoice && response.open_invoice[0] && Number(response.open_invoice[0].open_total_amount)) || 0;
-      const dueInvMoney = (response.due_invoice && response.due_invoice[0] && Number(response.due_invoice[0].due_total_amount)) || 0;
-      const openExp = (response.open_expense && response.open_expense[0] && Number(response.open_expense[0].open_expense)) || 0;
-      const dueExp = (response.due_expense && response.due_expense[0] && Number(response.due_expense[0].due_expense)) || 0;
-      const openExpMoney = (response.open_expense && response.open_expense[0] && Number(response.open_expense[0].open_total_amount_expense)) || 0;
-      const dueExpMoney = (response.due_expense && response.due_expense[0] && Number(response.due_expense[0].due_total_amount_expense)) || 0;
+    fetchInitials();
+    return () => { cancelled = true; };
+  }, []);
 
-      setOpenInvoice(openInv);
-      setDueInvoice(dueInv);
-      setDueQuote(dueQ);
-      setOpenInvoiceMoney(openInvMoney);
-      setDueInvoiceMoney(dueInvMoney);
-      setOpenExpense(openExp);
-      setDueExpense(dueExp);
-      setOpenExpenseMoney(openExpMoney);
-      setDueExpenseMoney(dueExpMoney);
 
-      setInvoicePaidTrend(Array.isArray(response.invoicetrend) ? response.invoicetrend : []);
-      setCustomerTrend(Array.isArray(response.customertrend) ? response.customertrend : []);
-      setSupplierTrend(Array.isArray(response.suppliertrend) ? response.suppliertrend : []);
-      setExpenseList(Array.isArray(response.expenseAnalysis) ? response.expenseAnalysis : (Array.isArray(response.expenselist) ? response.expenselist : []));
-      setReport(response.report || null);
-    } catch (error) {
-      const errorMessage = error.message || "An unknown error occurred.";
-      setMessage(`Error fetching summary: ${errorMessage}`);
-      setShowError(true);
-    }
-  };
-
-useEffect(() => {
-  const initialize = async () => {
-    await fetchInitials(); // Fetch initial data   
-  }; 
-
-  initialize();
-}, []);
-
+  if (loading) {
+    return (
+      <Auxiliary>
+        <Toast title="Error" message={message} setShowError={setShowError} show={showError} />
+        <div className="gx-flex-column gx-align-items-center gx-justify-content-center" style={{ minHeight: 320, padding: 48 }}>
+          <Spin size="large" tip="Loading dashboard..." />
+          <div style={{ marginTop: 16 }}>
+            <Skeleton active paragraph={{ rows: 2 }} />
+            <Skeleton active paragraph={{ rows: 2 }} style={{ marginTop: 16 }} />
+          </div>
+        </div>
+      </Auxiliary>
+    );
+  }
 
   return (
     <Auxiliary>   
       <Toast title="Error" message={message} setShowError={setShowError} show={showError} /> 
       <Row>
+      <Col span={24}>
+        <FinancialHealth summary={dashboardSummary} />
+      </Col>
       <Col span={24}>
           <div className="gx-card">
             <div className="gx-card-body">
@@ -100,6 +133,7 @@ useEffect(() => {
                 </Col>
 
                 <Col xl={6} lg={12} md={12} sm={12} xs={24}>
+          {chartsReady ? (
           <ChartCard prize={invoicepaidtrend.length > 0 ? invoicepaidtrend[invoicepaidtrend.length - 1]?.number || 0 : 0} title="0" icon="crm"
                      children={<ResponsiveContainer width="100%" height={100}>
                        <AreaChart data={invoicepaidtrend}
@@ -117,8 +151,12 @@ useEffect(() => {
                        </AreaChart>
                      </ResponsiveContainer>}
                      styleName="up" desc="Paid Invoices"/>
+          ) : (
+            <ChartCard prize={0} title="0" icon="crm" styleName="up" desc="Paid Invoices" children={<Skeleton active paragraph={{ rows: 1 }} />} />
+          )}
         </Col>
         <Col xl={6} lg={12} md={12} sm={12} xs={24}>
+          {chartsReady ? (
           <ChartCard prize={customertrend.length > 0 ? customertrend[customertrend.length - 1]?.number || 0 : 0}  title="0" icon="user"
                      children={<ResponsiveContainer width="100%" height={100}>
                        <AreaChart data={customertrend}
@@ -135,8 +173,12 @@ useEffect(() => {
                        </AreaChart>
                      </ResponsiveContainer>}
                      styleName="down" desc="Total Customers"/>
+          ) : (
+            <ChartCard prize={0} title="0" icon="user" styleName="down" desc="Total Customers" children={<Skeleton active paragraph={{ rows: 1 }} />} />
+          )}
         </Col>
         <Col xl={6} lg={12} md={12} sm={12} xs={24}>
+          {chartsReady ? (
           <ChartCard prize={suppliertrend.length > 0 ? suppliertrend[suppliertrend.length - 1]?.number || 0 : 0} title="0" icon="card"
                      children={<ResponsiveContainer width="100%" height={100}>
 
@@ -147,6 +189,9 @@ useEffect(() => {
                        </LineChart>
                      </ResponsiveContainer>}
                      styleName="down" desc="Total Suppliers"/>
+          ) : (
+            <ChartCard prize={0} title="0" icon="card" styleName="down" desc="Total Suppliers" children={<Skeleton active paragraph={{ rows: 1 }} />} />
+          )}
         </Col>
               </Row>
             </div>
@@ -164,7 +209,7 @@ useEffect(() => {
         </Col>
 
         <Col xl={14} lg={24} md={14} sm={24} xs={24}>
-          <CashFlowTrend/>
+          <CashFlowTrend summary={dashboardSummary}/>
         </Col>
         <Col xl={10} lg={24} md={10} sm={24} xs={24}>
           <InvoicesCard Report = {report}/>
@@ -180,7 +225,9 @@ useEffect(() => {
         </Col>
               
       </Row>
-<CompanySnapshot/>
+<Suspense fallback={<div style={{ padding: 24 }}><Spin tip="Loading company snapshot..." /><Skeleton active paragraph={{ rows: 4 }} style={{ marginTop: 16 }} /></div>}>
+        <CompanySnapshot summary={dashboardSummary} />
+      </Suspense>
     </Auxiliary>
   );
 };

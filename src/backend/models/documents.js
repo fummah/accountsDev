@@ -19,6 +19,11 @@ const Documents = {
       )
     `;
     db.prepare(stmt).run();
+    try {
+      db.prepare('ALTER TABLE documents ADD COLUMN file_path TEXT').run();
+    } catch (e) {
+      // ignore if already exists
+    }
   },
 
   // Insert a new Documents
@@ -42,6 +47,15 @@ const Documents = {
   getAllDocuments: () => {
     const stmt = db.prepare('SELECT * FROM documents');
     return stmt.all();
+  },
+
+  getDocumentById: (id) => {
+    return db.prepare('SELECT * FROM documents WHERE id = ?').get(id);
+  },
+
+  deleteDocument: (id) => {
+    const stmt = db.prepare('DELETE FROM documents WHERE id = ?');
+    return stmt.run(id);
   },
 };
 

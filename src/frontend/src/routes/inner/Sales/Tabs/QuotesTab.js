@@ -1,89 +1,60 @@
-import React,{useRef, useState, useEffect} from "react";
-import {  Row, Col,Alert,Button } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useCallback } from "react";
+import {  Row, Col, Alert, Button } from 'antd';
+import { ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
+import { useHistory } from 'react-router-dom';
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
 import InvoicesList from "components/Inner/Sales/Invoices/InvoicesList";
-import AddInvoice from 'components/Inner/Sales/Invoices/AddInvoice';
 import InvoiceDetails from 'components/Inner/Sales/Invoices/InvoiceDetails';
 import Toast from "components/AppNotification/toast.js";
-import dayjs from 'dayjs';
 import {TypeContext} from "appContext/TypeContext.js";
 
-  const QuotesTab = () => {
-  const addQuoteRef = useRef();
-  const [loadings, setLoadings] = useState([]);
-  const [addUserState, setAddUserState] = useState(false); 
+const PAGE_SIZE = 25;
+
+const QuotesTab = () => {
+  const history = useHistory();
   const [isSuccess, setIsSuccess] = useState(null);
   const [message, setMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [quotes, setQuotes] = useState([]);
-  const [quotesSearched, setQuotesSearched] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [loading, setLoading] = useState(true);
   const [selectedQuote, setSelectedQuote] = useState(null);
   const [details, setDetails] = useState(0);
   
-  const onSaveUser = async(userData) => {
-    console.log("User Data Saved:", userData);
-    console.log(userData);
-    try {
-           
-      const status = userData.status;
-      const customer = userData.customer;
-      const customer_email = userData.customer_email;
-      const islater = userData.islater ? "1" : "0";
-      const billing_address = userData.billing_address;
-      const entered_by = "1";
-      const start_date = userData.start_date ? dayjs(userData.start_date).format('YYYY-MM-DD') : null;
-      const last_date = userData.last_date ? dayjs(userData.last_date).format('YYYY-MM-DD') : null;
-      const message = userData.message;
-      const statement_message = userData.statement_message;
-      const number = userData.number;
-      const vat = userData.vat;
-      const lines = userData.lines;
-
-      let result;
-        
-      if (userData.id) {
-        const id = userData.id;
-        const quoteData = {id,status,customer, customer_email, islater, billing_address, entered_by, start_date, last_date,last_date, last_date, message, statement_message, number, vat, lines};
-        result = await window.electronAPI.updateQuote(quoteData);   
-      }
-      else{
-        result = await window.electronAPI.insertQuote(status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat, lines);  
-           }         
-        setIsSuccess(result.success);
   
-      if (result.success) {
-        setMessage('Quote saved successfully!');
-        fetchQuotes();
-        if (addQuoteRef.current) {
-          addQuoteRef.current.resetForm();
-          handleUserClose();
-      }
-      } else {
-        setMessage('Failed to save quote. Please try again.');
-        setShowError(true);
-      }
-        
-        
-    } catch (error) {
-      setIsSuccess(false);      
-      setMessage('An error occurred. Please try again later.');
-      setShowError(true);
-      console.log(error);
-    }
-    
-  };
-  
-    const fetchQuotes = async () => {
+    const fetchQuotes = useCallback(async (p = 1, size = PAGE_SIZE, searchTerm = '', status = statusFilter) => {
         try {
-            const response = await await window.electronAPI.getAllQuotes();          
-            setQuotes(response);
-            setQuotesSearched(response);
+            setLoading(true);
+            const res = await window.electronAPI.getQuotesPaginated(p, size, searchTerm, status || '');
+            if (res && res.error) {
+              setMessage(`Error fetching quotes: ${res.error}`);
+              setShowError(true);
+              return;
+            }
+            setQuotes(res.data || []);
+            setTotal(res.total || 0);
+            setPage(p);
+            setPageSize(size);
         } catch (error) {
-          setMessage("Error fetching quotes:", error);
+          setMessage("Error fetching quotes: " + (error.message || error));
           setShowError(true);
+        } finally {
+          setLoading(false);
         }
+    }, [statusFilter]);
+
+    const handleTableChange = (p, size) => { fetchQuotes(p, size, search, statusFilter); };
+    const handleSearch = (value) => { setSearch(value); fetchQuotes(1, pageSize, value, statusFilter); };
+
+    const handleStatusFilterChange = (value) => {
+      const v = value || '';
+      setStatusFilter(v);
+      fetchQuotes(1, pageSize, search, v);
     };
 
     const onConvertToInvoice = async (quote_id) => {
@@ -95,10 +66,10 @@ import {TypeContext} from "appContext/TypeContext.js";
       try { 
     
           const result = await window.electronAPI.convertToInvoice(quote_id);          
-          if (result.success) {
-            setIsSuccess(true);
+      if (result.success) {
+        setIsSuccess(true);
             setMessage('Quote successfully converted!');
-            fetchQuotes(); 
+            fetchQuotes(page, pageSize, search); 
             setSelectedQuote(null);
             setDetails(0);      
           } else {
@@ -124,8 +95,8 @@ import {TypeContext} from "appContext/TypeContext.js";
           
         setIsSuccess(result.success);  
         if (result.success) {
-          setMessage('Record deleted successfully!');
-          fetchQuotes();
+        setMessage('Record deleted successfully!');
+        fetchQuotes(page, pageSize, search);
         
         } else {
           setMessage('Failed to delete. Please try again.');
@@ -140,37 +111,14 @@ import {TypeContext} from "appContext/TypeContext.js";
     };
 
     useEffect(() => {
-      fetchQuotes();
-  }, []);
+      fetchQuotes(1, PAGE_SIZE, '');
+    }, []);
 
-  const handleUserClose = () => {
-    setAddUserState(false);
-  };
-  const showDrawer = () => {
-    setSelectedQuote(null);
-    setAddUserState(true);
-  };
   const onBack = () =>{
     setSelectedQuote(null);
     setDetails(0);
   }
 
-  const handleSearchedTxt = (event) => {
-    const value = event.target.value.toLowerCase();
-    if (value.trim() !== '')
-    {
-      const filtered = quotes.filter(
-        (item) =>
-          (item.customer_name && item.customer_name.toLowerCase().includes(value)) ||
-        (item.number && item.number.toLowerCase().includes(value)) 
-      );
-      setQuotesSearched(filtered);
-    }
-    else{
-      setQuotesSearched(quotes);
-    }
-  };
- 
   return (
     <TypeContext.Provider value="Quote">
     <Auxiliary>   
@@ -189,17 +137,9 @@ import {TypeContext} from "appContext/TypeContext.js";
    } 
    
    extra={
-    <AddInvoice 
-    type="Quote"
-    item={selectedQuote}
-    open={addUserState} 
-    onSaveUser={onSaveUser} // Pass the function
-    onUserClose={handleUserClose} 
-    showDrawer={showDrawer}
-    setShowError={setShowError}
-    setMessage={setMessage}
-    ref={addQuoteRef}
-  />
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => history.push('/main/customers/quotes/new')}>
+      New Quote
+    </Button>
    }>
        {isSuccess !== null && (
         <Alert message={message} type={isSuccess?'success':'error'} closable/>
@@ -213,7 +153,21 @@ import {TypeContext} from "appContext/TypeContext.js";
    </Col>
 ):(   
        <Col xs={24} sm={24} md={24}>
-       <InvoicesList dataList={quotesSearched} onSelectInvoice={setSelectedQuote} setAddUserState={setAddUserState} setDetails={setDetails} handleSearchedTxt={handleSearchedTxt} onDelete={deleteRecord}/>
+       <InvoicesList 
+         dataList={quotes} 
+         loading={loading} 
+         total={total} 
+         page={page} 
+         pageSize={pageSize} 
+         onTableChange={handleTableChange} 
+         onSearch={handleSearch}
+         statusFilter={statusFilter}
+         onStatusFilterChange={handleStatusFilterChange}
+         onSelectInvoice={setSelectedQuote} 
+         setAddUserState={() => history.push('/main/customers/quotes/new')} 
+         setDetails={setDetails} 
+         onDelete={deleteRecord}
+       />
        </Col>
 )}
       </Row> 

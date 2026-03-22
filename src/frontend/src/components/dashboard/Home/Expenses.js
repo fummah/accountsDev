@@ -18,7 +18,7 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
 };
 
 
-const Expenses = ({Expensed, ExpenseList}) => {
+const Expenses = ({ Expensed, ExpenseList }) => {
   const redirectToItem = useRedirectToItem();
 const columns = [
   {

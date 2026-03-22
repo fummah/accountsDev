@@ -76,16 +76,12 @@ useEffect(() => {
      
       <Drawer
         title='Product/Service information'
-        size='medium'
-        width={400}
+        size='large'
+        placement='top'
         onClose={onUserClose}
         onCancel={onUserClose}
         open={open}
-        styles={{
-          body: {
-            paddingBottom: 80,
-          },
-        }}
+        style={{width:'100% !important'}}
         footer={
           <div
             style={{

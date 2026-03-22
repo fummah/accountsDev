@@ -1,0 +1,29 @@
+const db = require('./dbmgr');
+
+const Classes = {
+  createTable() {
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS classes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        code TEXT,
+        status TEXT DEFAULT 'Active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
+  },
+  list() {
+    return db.prepare(`SELECT * FROM classes WHERE status IS NULL OR status='Active' ORDER BY name`).all();
+  },
+  create({ name, code }) {
+    if (!name) throw new Error('name required');
+    const res = db.prepare(`INSERT INTO classes (name, code) VALUES (?, ?)`)
+      .run(name, code || null);
+    return { success: true, id: res.lastInsertRowid };
+  }
+};
+
+Classes.createTable();
+module.exports = Classes;
+
+

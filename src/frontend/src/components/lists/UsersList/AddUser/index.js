@@ -31,7 +31,8 @@ const AddUser = ({ onSaveUser, onUserClose, open, user }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const result = await window.electronAPI.insertEmployee(first_name, last_name, mi, email, date_hired, entered_by);   
+      const employeeData = { first_name, last_name, mi, email, date_hired, entered_by };
+      const result = await window.electronAPI.insertEmployee(employeeData);
       setIsSuccess(result.success);
       if (result.success) {
         setMessage('Employee added successfully!');

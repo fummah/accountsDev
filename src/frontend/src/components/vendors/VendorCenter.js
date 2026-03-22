@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message } from 'antd';
+import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Modal, Form, Input } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { ShopOutlined, DollarOutlined, FileTextOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import moment from 'moment';
@@ -21,26 +22,83 @@ const VendorCenter = () => {
     loadData();
   }, []);
 
+  const [activeKey, setActiveKey] = useState('vendors');
+
+  const [showAddVendor, setShowAddVendor] = React.useState(false);
+  const [vendorForm] = Form.useForm();
+
+  const onCreateVendor = async (values) => {
+    try {
+      const title = '';
+      const first_name = values.first_name || '';
+      const middle_name = '';
+      const last_name = '';
+      const suffix = '';
+      const email = values.email || '';
+      const display_name = values.display_name || values.first_name || '';
+      const company_name = '';
+      const phone_number = '';
+      const mobile_number = values.mobile_number || '';
+      const fax = '';
+      const other = '';
+      const website = '';
+      const address1 = '';
+      const address2 = '';
+      const city = '';
+      const state = '';
+      const postal_code = '';
+      const country = '';
+      const supplier_terms = '';
+      const business_number = '';
+      const account_number = '';
+      const expense_category = '';
+      const opening_balance = values.opening_balance || 0;
+      const as_of = null;
+      const entered_by = 'system';
+      const notes = '';
+
+      const res = await window.electronAPI.insertSupplier(title, first_name, middle_name, last_name, suffix, email, display_name, company_name, phone_number, mobile_number, fax, other, website, address1, address2, city, state, postal_code, country, supplier_terms, business_number, account_number, expense_category, opening_balance, as_of, entered_by, notes);
+      if (res && res.success) {
+        message.success('Vendor added');
+        setShowAddVendor(false);
+        vendorForm.resetFields();
+        await loadData();
+      } else {
+        message.error('Failed to add vendor');
+      }
+    } catch (err) {
+      console.error('Error adding vendor', err);
+      message.error('Error adding vendor');
+    }
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
       const [vendorsData, billsData] = await Promise.all([
-        window.electronAPI.getSuppliers(),
-        window.electronAPI.getExpenses()
+        window.electronAPI.getAllSuppliers(),
+        window.electronAPI.getAllExpenses()
       ]);
 
-      setVendors(vendorsData);
-      setBills(billsData);
+  // normalize backend response shapes
+  const vendorsList = Array.isArray(vendorsData) ? vendorsData : (vendorsData && vendorsData.all) ? vendorsData.all : (vendorsData && vendorsData.data) ? vendorsData.data : [];
+  const billsList = Array.isArray(billsData) ? billsData : (billsData && billsData.all) ? billsData.all : (billsData && billsData.data) ? billsData.data : [];
+
+  setVendors(vendorsList);
+  setBills(billsList);
 
       // Calculate statistics
-      const totalPayables = billsData.reduce((sum, bill) => 
-        sum + (bill.status === 'Unpaid' ? bill.amount : 0), 0);
-      const overdueAmount = billsData.reduce((sum, bill) => 
-        sum + (bill.status === 'Unpaid' && moment(bill.dueDate).isBefore(moment()) ? bill.amount : 0), 0);
-      const unpaidBills = billsData.filter(bill => bill.status === 'Unpaid').length;
+      const isUnpaid = (b) => ((b.approval_status || '').toLowerCase() !== 'paid');
+      const totalPayables = billsList.reduce((sum, bill) => sum + (isUnpaid(bill) ? Number(bill.amount || 0) : 0), 0);
+      const overdueAmount = billsList.reduce((sum, bill) => {
+        const date = bill.payment_date || bill.dueDate;
+        const isOverdue = isUnpaid(bill) && date && moment(date).isBefore(moment(), 'day');
+        return sum + (isOverdue ? Number(bill.amount || 0) : 0);
+      }, 0);
+      const unpaidBills = billsList.filter(isUnpaid).length;
 
       setStats({
-        totalVendors: vendorsData.length,
+        totalVendors: vendorsList.length,
         totalPayables,
         overdueAmount,
         unpaidBills
@@ -92,7 +150,7 @@ const VendorCenter = () => {
     },
   ];
 
-  const billColumns = [
+    const billColumns = [
     {
       title: 'Bill #',
       dataIndex: 'ref_no',
@@ -103,7 +161,7 @@ const VendorCenter = () => {
     },
     {
       title: 'Vendor',
-      dataIndex: 'payee',
+      dataIndex: 'payee_name',
       key: 'vendor',
     },
     {
@@ -114,7 +172,7 @@ const VendorCenter = () => {
     },
     {
       title: 'Due Date',
-      dataIndex: 'due_date',
+      dataIndex: 'payment_date',
       key: 'dueDate',
       render: (date) => moment(date).format('MM/DD/YYYY'),
     },
@@ -122,8 +180,8 @@ const VendorCenter = () => {
       title: 'Amount',
       key: 'amount',
       render: (_, record) => {
-        const total = record.expenseLines.reduce((sum, line) => sum + line.amount, 0);
-        return `$${total.toFixed(2)}`;
+        const total = record.amount || 0;
+        return `$${Number(total).toFixed(2)}`;
       },
     },
     {
@@ -180,10 +238,10 @@ const VendorCenter = () => {
       </Row>
 
       <Card>
-        <Tabs defaultActiveKey="vendors">
+        <Tabs activeKey={activeKey} onChange={setActiveKey} destroyInactiveTabPane>
           <TabPane tab="Vendors" key="vendors">
             <div style={{ marginBottom: '16px' }}>
-              <Button type="primary" href="/main/vendors/new">
+              <Button type="primary" onClick={() => setShowAddVendor(true)}>
                 Add Vendor
               </Button>
             </div>
@@ -193,6 +251,34 @@ const VendorCenter = () => {
               rowKey="id"
               loading={loading}
             />
+            <div style={{ marginTop: 16 }}>
+              <Button icon={<ArrowLeftOutlined />} onClick={() => window.history.back()}>Back</Button>
+            </div>
+              <Modal
+                title="Add Vendor"
+                open={showAddVendor}
+                onCancel={() => { setShowAddVendor(false); vendorForm.resetFields(); }}
+                onOk={() => vendorForm.submit()}
+                okText="Create"
+              >
+                <Form form={vendorForm} layout="vertical" onFinish={onCreateVendor}>
+                  <Form.Item name="first_name" label="Name" rules={[{ required: true, message: 'Please enter vendor name' }]}>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item name="display_name" label="Display Name">
+                    <Input />
+                  </Form.Item>
+                  <Form.Item name="email" label="Email">
+                    <Input />
+                  </Form.Item>
+                  <Form.Item name="mobile_number" label="Mobile Number">
+                    <Input />
+                  </Form.Item>
+                  <Form.Item name="opening_balance" label="Opening Balance">
+                    <Input />
+                  </Form.Item>
+                </Form>
+              </Modal>
           </TabPane>
 
           <TabPane tab="Bills" key="bills">
@@ -207,6 +293,9 @@ const VendorCenter = () => {
               rowKey="id"
               loading={loading}
             />
+            <div style={{ marginTop: 16 }}>
+              <Button icon={<ArrowLeftOutlined />} onClick={() => window.history.back()}>Back</Button>
+            </div>
           </TabPane>
         </Tabs>
       </Card>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Select, Input, InputNumber, DatePicker, Button, Card, Table, message, Space } from 'antd';
+import { Form, Select, Input, InputNumber, DatePicker, Button, Card, Table, message, Space, Modal } from 'antd';
 import { PlusOutlined, SaveOutlined, DeleteOutlined } from '@ant-design/icons';
 import moment from 'moment';
 
@@ -8,6 +8,8 @@ const { Option } = Select;
 const Deposits = () => {
   const [form] = Form.useForm();
   const [accounts, setAccounts] = useState([]);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [accountForm] = Form.useForm();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -18,9 +20,10 @@ const Deposits = () => {
   const loadAccounts = async () => {
     try {
       const data = await window.electronAPI.getChartOfAccounts();
+      const list = Array.isArray(data) ? data : [];
       // Filter only bank accounts
-      const bankAccounts = data.filter(account => 
-        account.accountType.toLowerCase().includes('bank')
+      const bankAccounts = list.filter(account => 
+        (account.accountType || '').toLowerCase().includes('bank')
       );
       setAccounts(bankAccounts);
     } catch (error) {
@@ -171,13 +174,16 @@ const Deposits = () => {
               rules={[{ required: true, message: 'Please select account' }]}
               style={{ flex: 1 }}
             >
-              <Select placeholder="Select account">
-                {accounts.map(account => (
-                  <Option key={account.id} value={account.id}>
-                    {account.accountName}
-                  </Option>
-                ))}
-              </Select>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Select style={{ flex: 1 }} placeholder={accounts.length ? 'Select account' : 'No bank accounts'}>
+                  {accounts.map(account => (
+                    <Option key={account.id} value={account.id}>
+                      {account.accountName}
+                    </Option>
+                  ))}
+                </Select>
+                <Button icon={<PlusOutlined />} onClick={() => setShowAddAccount(true)} />
+              </div>
             </Form.Item>
 
             <Form.Item
@@ -234,6 +240,52 @@ const Deposits = () => {
           </div>
         </Form>
       </Card>
+
+      {/* Add Account Modal */}
+      <Modal
+        title="Add Bank Account"
+        open={showAddAccount}
+        onCancel={() => { setShowAddAccount(false); accountForm.resetFields(); }}
+        okText="Create"
+        onOk={async () => {
+          try {
+            const values = await accountForm.validateFields();
+            const res = await window.electronAPI.insertChartAccount(values.name, values.type, values.number, 'current_user');
+            if (res && res.success) {
+              message.success('Account created');
+              setShowAddAccount(false);
+              accountForm.resetFields();
+              // reload accounts and set newly created as selected
+              await loadAccounts();
+              if (res.id) {
+                form.setFieldsValue({ accountId: res.id });
+              }
+            } else {
+              message.error(res?.error || 'Failed to create account');
+            }
+          } catch (err) {
+            // validation errors will be thrown here; log for debugging
+            if (err.errorFields) {
+              // validation failed — let Antd show the messages
+              return;
+            }
+            console.error('Add account error', err);
+            message.error('Failed to create account');
+          }
+        }}
+      >
+        <Form form={accountForm} layout="vertical" initialValues={{ type: 'Bank' }}>
+          <Form.Item name="name" label="Account Name"> <Input autoFocus /> </Form.Item>
+          <Form.Item name="type" label="Account Type" rules={[{ required: true }]}> 
+            <Select>
+              <Option value="Bank">Bank</Option>
+              <Option value="Cash">Cash</Option>
+              <Option value="Other">Other</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="number" label="Account Number"> <Input/> </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

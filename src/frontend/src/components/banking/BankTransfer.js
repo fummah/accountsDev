@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Select, Input, InputNumber, DatePicker, Button, Card, message } from 'antd';
+import { Form, Select, Input, InputNumber, DatePicker, Button, Card, message, Statistic, Space } from 'antd';
 import { SwapOutlined } from '@ant-design/icons';
 import moment from 'moment';
 
@@ -9,6 +9,8 @@ const BankTransfer = () => {
   const [form] = Form.useForm();
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [fromBalance, setFromBalance] = useState(0);
+  const [toBalance, setToBalance] = useState(0);
 
   useEffect(() => {
     loadAccounts();
@@ -24,6 +26,39 @@ const BankTransfer = () => {
       setAccounts(bankAccounts);
     } catch (error) {
       message.error('Failed to load bank accounts');
+    }
+  };
+
+  const refreshBalance = async (accountId, setter) => {
+    try {
+      if (!accountId) { setter(0); return; }
+      const trial = await window.electronAPI.getTrialBalance();
+      const row = Array.isArray(trial) ? trial.find(r => Number(r.accountId) === Number(accountId)) : null;
+      const bal = row ? Number(row.balance || 0) : 0;
+      setter(bal);
+    } catch (e) {
+      setter(0);
+    }
+  };
+
+  const exportTransfersCSV = async () => {
+    try {
+      const txs = await window.electronAPI.getTransactions();
+      const transfers = (txs || []).filter(t => ['transfer_in','transfer_out'].includes((t.type || '').toLowerCase()));
+      const headers = ['id','date','accountId','type','reference','description','debit','credit'];
+      const rows = transfers.map(d => headers.map(h => `"${(d[h] ?? '').toString().replace(/"/g,'""')}"`).join(','));
+      const csv = [headers.join(','), ...rows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transfers_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      message.error('Failed to export CSV');
     }
   };
 
@@ -50,7 +85,7 @@ const BankTransfer = () => {
     <div style={{ padding: '24px' }}>
       <h2>Bank Transfer</h2>
 
-      <Card style={{ maxWidth: 600, margin: '0 auto' }}>
+      <Card style={{ maxWidth: 700, margin: '0 auto' }} title="Bank Transfer" extra={<Button onClick={exportTransfersCSV}>Export CSV</Button>}>
         <Form
           form={form}
           layout="vertical"
@@ -64,7 +99,7 @@ const BankTransfer = () => {
             label="From Account"
             rules={[{ required: true, message: 'Please select source account' }]}
           >
-            <Select placeholder="Select source account">
+            <Select placeholder="Select source account" onChange={(val)=> refreshBalance(val, setFromBalance)}>
               {accounts.map(account => (
                 <Option key={account.id} value={account.id}>
                   {account.accountName}
@@ -72,6 +107,10 @@ const BankTransfer = () => {
               ))}
             </Select>
           </Form.Item>
+
+          <div style={{ marginBottom: 16 }}>
+            <Statistic title="From Account Balance" prefix="$" value={Number(fromBalance).toFixed(2)} />
+          </div>
 
           <div style={{ textAlign: 'center', margin: '16px 0' }}>
             <SwapOutlined style={{ fontSize: '24px' }} />
@@ -92,7 +131,7 @@ const BankTransfer = () => {
               }),
             ]}
           >
-            <Select placeholder="Select destination account">
+            <Select placeholder="Select destination account" onChange={(val)=> refreshBalance(val, setToBalance)}>
               {accounts.map(account => (
                 <Option key={account.id} value={account.id}>
                   {account.accountName}
@@ -100,6 +139,10 @@ const BankTransfer = () => {
               ))}
             </Select>
           </Form.Item>
+
+          <div style={{ marginBottom: 16 }}>
+            <Statistic title="To Account Balance" prefix="$" value={Number(toBalance).toFixed(2)} />
+          </div>
 
           <Form.Item
             name="amount"

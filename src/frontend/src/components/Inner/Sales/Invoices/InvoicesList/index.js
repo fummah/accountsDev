@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import {Table,Dropdown,Menu,Col, Row} from "antd";
+import React, { useState, useContext } from 'react';
+import { Table, Dropdown, Menu, Col, Row, Select, Input } from "antd";
+import { useHistory } from 'react-router-dom';
 import { useRedirectToItem } from 'util/navigation';
-import { Input, Space } from 'antd';
-import { SearchOutlined,PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
+import { TypeContext } from 'appContext/TypeContext.js';
+import { SearchOutlined, PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
+import StatusBadge from "components/StatusBadge";
 
 const options = [
   'Edit',
@@ -33,8 +35,11 @@ let withvat = amount + (amount*vat/100);
 return formattedNumber(withvat);
 }
 
-const InvoicesList = ({dataList, onSelectInvoice,setAddUserState, setDetails,handleSearchedTxt, onDelete}) => {
+const InvoicesList = ({ dataList, loading = false, total = 0, page = 1, pageSize = 25, onTableChange, onSearch, statusFilter, onStatusFilterChange, onSelectInvoice, setAddUserState, setDetails, onDelete }) => {
   const redirectToItem = useRedirectToItem();
+  const history = useHistory();
+  const docType = useContext(TypeContext) || 'Invoice';
+  const [searchInput, setSearchInput] = useState('');
   const columns = [
     {
       title: 'Date',
@@ -71,14 +76,10 @@ const InvoicesList = ({dataList, onSelectInvoice,setAddUserState, setDetails,han
         },
   
     },
-    ,
-      {
-        title: 'Status',
-        dataIndex: 'status',
-        render: (text, record) => {
-          return <span className="gx-text-grey">{record.status}</span>
-        },
-  
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      render: (text, record) => <StatusBadge status={record.status} />,
     },
     {
       title: 'Action',
@@ -89,10 +90,11 @@ const InvoicesList = ({dataList, onSelectInvoice,setAddUserState, setDetails,han
           <span
             className="gx-text-primary gx-pointer gx-d-inline-flex"
             onClick={(event) => {
-              event.stopPropagation(); // Prevent row click
-              setDetails(0);
-              onSelectInvoice(record);
-              setAddUserState(true);
+              event.stopPropagation();
+              const editPath = docType === 'Quote'
+                ? `/main/customers/quotes/edit/${record.id}`
+                : `/main/customers/invoices/edit/${record.id}`;
+              history.push(editPath);
             }}
           >
             <i className="gx-ml-2 icon icon-edit" />
@@ -113,13 +115,9 @@ const InvoicesList = ({dataList, onSelectInvoice,setAddUserState, setDetails,han
   
   ];
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
-  const [loading, setLoading] = useState(false);
   const start = () => {
-    setLoading(true);
-    // ajax request after empty completing
     setTimeout(() => {
       setSelectedRowKeys([]);
-      setLoading(false);
     }, 1000);
   };
   const onSelectChange = (newSelectedRowKeys) => {
@@ -137,12 +135,38 @@ const InvoicesList = ({dataList, onSelectInvoice,setAddUserState, setDetails,han
   
   return (
 <>
-    <Row>
-    <Col xs={24} sm={8} md={8}>
-    <Input placeholder="search..." suffix={<SearchOutlined />} onKeyUp={handleSearchedTxt}/>
+    <Row gutter={8}>
+    <Col xs={24} sm={10} md={8}>
+      <Input 
+        placeholder="Search by customer or number (press Enter)" 
+        suffix={<SearchOutlined />} 
+        allowClear
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
+        onPressEnter={() => typeof onSearch === 'function' && onSearch(searchInput)}
+        onClear={() => { setSearchInput(''); typeof onSearch === 'function' && onSearch(''); }}
+      />
     </Col>
-      <Col xs={24} sm={16} md={16}>
-         <div style={{ display: 'flex', gap: '10px',float:"right" }}>
+      <Col xs={24} sm={6} md={6}>
+        <Select
+          allowClear
+          placeholder="Filter by status"
+          style={{ width: '100%' }}
+          value={statusFilter || undefined}
+          onChange={(value) =>
+            typeof onStatusFilterChange === 'function' && onStatusFilterChange(value)
+          }
+        >
+          <Select.Option value="Pending">Pending</Select.Option>
+          <Select.Option value="Paid">Paid</Select.Option>
+          <Select.Option value="Partially Paid">Partially Paid</Select.Option>
+          <Select.Option value="Cancelled">Cancelled</Select.Option>
+          <Select.Option value="Rejected">Rejected</Select.Option>
+          <Select.Option value="Invoiced">Invoiced</Select.Option>
+        </Select>
+      </Col>
+      <Col xs={24} sm={8} md={10}>
+         <div style={{ display: 'flex', gap: '10px', float:"right" }}>
       <PrinterOutlined style={{ fontSize: '24px', cursor: 'pointer' }} onClick={() => window.print()} />
       <DownloadOutlined style={{ fontSize: '24px', cursor: 'pointer' }} onClick={() => alert("Exporting...")} />
     </div>
@@ -154,8 +178,17 @@ const InvoicesList = ({dataList, onSelectInvoice,setAddUserState, setDetails,han
         rowSelection={rowSelection} 
         className="gx-table-no-bordered" 
         columns={columns} 
-        dataSource={dataList} 
-        pagination={true} 
+        dataSource={dataList || []} 
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '25', '50', '100'],
+          showTotal: (t) => `Total ${t} items`,
+          onChange: typeof onTableChange === 'function' ? (p, size) => onTableChange(p, size) : undefined,
+        }}
         size="small"
         onRow={(record) => ({
           onClick: () => {

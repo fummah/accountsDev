@@ -1,0 +1,45 @@
+@media print {
+  /* Hide everything except our print component */
+  body * {
+    visibility: hidden;
+  }
+  
+  /* Show only our printable content */
+  .printable-content,
+  .printable-content * {
+    visibility: visible !important;
+  }
+
+  /* Position the printable content at the top */
+  .printable-content {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+
+  /* Table styling for print */
+  .ant-table {
+    font-size: 12pt;
+  }
+
+  .ant-table-thead > tr > th {
+    background-color: #f0f0f0 !important;
+    color: #000000 !important;
+    border: 1px solid #000000 !important;
+  }
+
+  .ant-table-tbody > tr > td {
+    border: 1px solid #000000 !important;
+  }
+
+  /* Remove any background colors */
+  .ant-table-row {
+    background-color: transparent !important;
+  }
+
+  /* Ensure text is black for better printing */
+  .ant-typography {
+    color: #000000 !important;
+  }
+}

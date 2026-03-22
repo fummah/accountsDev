@@ -1,1 +1,56 @@
-/node_modules
+# Dependencies
+node_modules/
+src/frontend/node_modules/
+
+# Frontend build output
+src/frontend/build/
+
+# Electron builder output
+dist/
+out/
+release/
+
+# Database files (contain user data, not source code)
+src/backend/db/*.db
+src/backend/db/*.db-journal
+src/backend/db/*.db-wal
+src/backend/db/*.db-shm
+
+# Uploaded attachments
+src/backend/db/attachments/*
+!src/backend/db/attachments/.gitkeep
+
+# Environment variables
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Coverage & testing
+coverage/
+.nyc_output/
+
+# Misc
+*.tgz
+.cache/
+.temp/
+.tmp/

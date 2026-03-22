@@ -299,15 +299,22 @@ const EmployeeCenter = () => {
       <Card
         title="Employee Management"
         extra={
-          <Button 
-            type="primary" 
-            onClick={() => {
-              setEditingEmployee(null);
-              setShowAddDrawer(true);
-            }}
-          >
-            Add Employee
-          </Button>
+          <Space>
+            <Button 
+              onClick={() => history.push('/main/employees/payroll')}
+            >
+              Run Payroll
+            </Button>
+            <Button 
+              type="primary" 
+              onClick={() => {
+                setEditingEmployee(null);
+                setShowAddDrawer(true);
+              }}
+            >
+              Add Employee
+            </Button>
+          </Space>
         }
       >
         <Space style={{ marginBottom: 16 }}>

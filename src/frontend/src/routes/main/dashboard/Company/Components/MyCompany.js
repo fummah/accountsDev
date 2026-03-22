@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Card, Tabs, Form, Input, Button, Upload, message, Row, Col, Select } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 
@@ -7,6 +7,7 @@ const { Option } = Select;
 
 const MyCompany = () => {
   const [form] = Form.useForm();
+  const [activeKey, setActiveKey] = useState("1");
 
   useEffect(() => {
     async function load() {
@@ -63,8 +64,20 @@ const MyCompany = () => {
   // single form instance shared across all tabs so validateFields() works everywhere
   return (
     <Card title="My Company Settings" bordered={false} style={{ margin: 24 }}>
-      <Tabs defaultActiveKey="1">
-        <TabPane tab="Company Info" key="1">
+      <div style={{ marginBottom: 16 }}>
+        <Button type={activeKey === '1' ? 'primary' : 'default'} style={{ marginRight: 8 }} onClick={() => setActiveKey('1')}>
+          Company Info
+        </Button>
+        <Button type={activeKey === '2' ? 'primary' : 'default'} style={{ marginRight: 8 }} onClick={() => setActiveKey('2')}>
+          Financial Settings
+        </Button>
+        <Button type={activeKey === '3' ? 'primary' : 'default'} onClick={() => setActiveKey('3')}>
+          Banking Details
+        </Button>
+      </div>
+
+      {activeKey === '1' && (
+        <div>
           <Form layout="vertical" form={form}>
             <Row gutter={16}>
               <Col span={12}>
@@ -149,9 +162,11 @@ const MyCompany = () => {
               }}>Save Company Info</Button>
             </Form.Item>
           </Form>
-        </TabPane>
+        </div>
+      )}
 
-        <TabPane tab="Financial Settings" key="2">
+      {activeKey === '2' && (
+        <div>
           <Form layout="vertical" form={form}>
             <Row gutter={16}>
               <Col span={12}>
@@ -208,9 +223,11 @@ const MyCompany = () => {
               }}>Save Financial Settings</Button>
             </Form.Item>
           </Form>
-        </TabPane>
+        </div>
+      )}
 
-        <TabPane tab="Banking Details" key="3">
+      {activeKey === '3' && (
+        <div>
           <Form layout="vertical" form={form}>
             <Row gutter={16}>
               <Col span={12}>
@@ -267,9 +284,8 @@ const MyCompany = () => {
               }}>Save Banking Info</Button>
             </Form.Item>
           </Form>
-        </TabPane>
-
-      </Tabs>
+        </div>
+      )}
     </Card>
   );
 };

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Form, Input, Modal, message } from 'antd';
+import { Table, Button, Form, Input, Modal, message, Select, Space } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+
+const { Option } = Select;
 
 const ChartOfAccounts = () => {
   const [accounts, setAccounts] = useState([]);
@@ -14,57 +16,85 @@ const ChartOfAccounts = () => {
 
   const loadAccounts = async () => {
     try {
-      const accounts = await window.electronAPI.getChartOfAccounts();
-      setAccounts(accounts);
+      const response = await window.electronAPI.getChartOfAccounts();
+      if (!response || response.error) {
+        message.error(response?.error || 'Failed to load chart of accounts');
+        return;
+      }
+      const formattedAccounts = Array.isArray(response) ? response.map(account => ({
+        ...account,
+        accountCode: account.accountCode || account.accountNumber || account.number
+      })) : [];
+      setAccounts(formattedAccounts);
     } catch (error) {
+      console.error('Load accounts error:', error);
       message.error('Failed to load chart of accounts');
     }
   };
 
   const handleAddEdit = async (values) => {
     try {
+      let response;
       if (editingId) {
-        await window.electronAPI.updateAccount({ ...values, id: editingId });
-        message.success('Account updated successfully');
+        response = await window.electronAPI.updateChartAccount({ 
+          id: editingId,
+          accountName: values.accountName,
+          accountType: values.accountType,
+          accountNumber: values.accountCode
+        });
       } else {
-        await window.electronAPI.createAccount(values);
-        message.success('Account created successfully');
+        response = await window.electronAPI.insertChartAccount(
+          values.accountName,
+          values.accountType, 
+          values.accountCode,
+          'system'
+        );
       }
+      
+      if (!response.success) {
+        message.error(response.message || 'Operation failed');
+        return;
+      }
+
+      message.success(response.message || (editingId ? 'Account updated successfully' : 'Account created successfully'));
       setIsModalVisible(false);
       form.resetFields();
       loadAccounts();
     } catch (error) {
-      message.error('Operation failed');
+      message.error('Operation failed: ' + (error.message || 'Unknown error'));
     }
   };
 
   const columns = [
     {
-      title: 'Account Code',
+      title: 'Account Number',
       dataIndex: 'accountCode',
-      key: 'accountCode',
+      key: 'accountNumber',
+      render: (text, record) => record.accountNumber || record.accountCode || record.number || '-'
     },
     {
       title: 'Account Name',
       dataIndex: 'accountName',
       key: 'accountName',
+      render: (text) => text || '-'
     },
     {
       title: 'Type',
       dataIndex: 'accountType',
       key: 'accountType',
+      render: (text) => text || '-'
     },
     {
       title: 'Balance',
       dataIndex: 'balance',
       key: 'balance',
-      render: (balance) => `$${balance.toFixed(2)}`,
+      render: (balance) => typeof balance === 'number' ? `$${balance.toFixed(2)}` : '$0.00',
     },
     {
       title: 'Actions',
       key: 'actions',
       render: (_, record) => (
-        <>
+        <Space>
           <Button 
             icon={<EditOutlined />} 
             onClick={() => {
@@ -78,16 +108,33 @@ const ChartOfAccounts = () => {
             danger 
             onClick={() => handleDelete(record.id)}
           />
-        </>
+        </Space>
       ),
     },
   ];
 
   const handleDelete = async (id) => {
     try {
-      await window.electronAPI.deleteAccount(id);
-      message.success('Account deleted successfully');
-      loadAccounts();
+      Modal.confirm({
+        title: 'Delete Account',
+        content: 'Are you sure you want to delete this account? This action cannot be undone.',
+        okText: 'Yes',
+        okType: 'danger',
+        cancelText: 'No',
+        onOk: async () => {
+          try {
+            const response = await window.electronAPI.deleteChartAccount(id);
+            if (!response.success) {
+              message.error(response.message || 'Failed to delete account');
+              return;
+            }
+            message.success(response.message || 'Account deleted successfully');
+            loadAccounts();
+          } catch (error) {
+            message.error(error.message || 'Failed to delete account');
+          }
+        }
+      });
     } catch (error) {
       message.error('Failed to delete account');
     }
@@ -132,10 +179,9 @@ const ChartOfAccounts = () => {
         >
           <Form.Item
             name="accountCode"
-            label="Account Code"
-            rules={[{ required: true, message: 'Please input account code!' }]}
+            label="Account Number"
           >
-            <Input />
+            <Input placeholder="Optional" />
           </Form.Item>
           <Form.Item
             name="accountName"
@@ -149,7 +195,15 @@ const ChartOfAccounts = () => {
             label="Account Type"
             rules={[{ required: true, message: 'Please select account type!' }]}
           >
-            <Input />
+            <Select placeholder="Select account type">
+              <Option value="Asset">Asset</Option>
+              <Option value="Liability">Liability</Option>
+              <Option value="Equity">Equity</Option>
+              <Option value="Income">Income</Option>
+              <Option value="Expense">Expense</Option>
+              <Option value="Bank">Bank</Option>
+              <Option value="Cash">Cash</Option>
+            </Select>
           </Form.Item>
         </Form>
       </Modal>

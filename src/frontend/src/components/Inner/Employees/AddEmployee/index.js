@@ -71,11 +71,11 @@ useEffect(() => {
      
       <Drawer
         title={`${employee ? 'Edit' : 'Add'} Employee`}
-        size="large"
-        width={1000}
+        placement="top"
+        height="100%"
         onClose={onUserClose}
-        onCancel={onUserClose}
         open={open}
+        destroyOnClose={true}
         bodyStyle={{ paddingBottom: 80 }}
         footer={
           <div

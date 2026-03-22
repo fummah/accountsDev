@@ -1,5 +1,5 @@
-import React, { useState, useEffect,useRef } from 'react';
-import {Col, Row,Card, Progress,Alert, Button} from "antd";
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Col, Row, Card, Progress, Alert, Button, Spin } from "antd";
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
 import styled from 'styled-components';
@@ -10,6 +10,8 @@ import CustomerDetails from 'components/Inner/Customers/CustomerDetails';
 import Toast from "components/AppNotification/toast.js";
 import dayjs from 'dayjs';
 import {CategoryContext} from "appContext/TypeContext.js";
+
+const PAGE_SIZE = 25;
 
 
 const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
@@ -33,7 +35,12 @@ const CustomersTab = () => {
   const [message, setMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [customers, setCustomers] = useState([]);
-  const [customersSearched, setCustomersSearched] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [reportLoading, setReportLoading] = useState(true);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [details, setDetails] = useState(0);
   const [report, setReport] = useState([]);
@@ -90,7 +97,7 @@ const CustomersTab = () => {
   
       if (result.success) {
         setMessage('Customer saved successfully!');
-        fetchCustomers();
+        fetchCustomers(page, pageSize, search);
         if (addCustomerRef.current) {
           addCustomerRef.current.resetForm();
           handleUserClose();
@@ -121,7 +128,7 @@ const CustomersTab = () => {
       setIsSuccess(result.success);  
       if (result.success) {
         setMessage('Record deleted successfully!');
-        fetchCustomers();
+        fetchCustomers(page, pageSize, search);
       
       } else {
         setMessage('Failed to delete. Please try again.');
@@ -135,47 +142,39 @@ const CustomersTab = () => {
     
   };
   
-    const fetchCustomers = async () => {
-        try {
-            const response = await await window.electronAPI.getAllCustomers();          
-            setCustomers(response.all);
-            setCustomersSearched(response.all);
-            setReport([
-              { 
-                  title: `$${formattedNumber(response.report.due_quote[0].due_total_amount)}`, 
-                  description: `${response.report.due_quote[0].due_quote} Estimates`, 
-                  color: '#40a9ff', 
-                  wd: 6 
-              },
-              { 
-                  title: `$${formattedNumber(response.report.due_invoice[0].due_total_amount)}`, 
-                  description: `${response.report.due_invoice[0].due_invoice} Overdue Invoices`, 
-                  color: '#fa8c16', 
-                  wd: 6 
-              },
-              { 
-                  title: `$${formattedNumber(response.report.open_invoice[0].open_total_amount)}`, 
-                  description: `${response.report.open_invoice[0].open_invoice} Open Invoices / Credits`, 
-                  color: '#d9d9d9', 
-                  wd: 6 
-              },
-              { 
-                  title: `$${formattedNumber(response.report.paid_invoice[0].paid_total_amount)}`, 
-                  description: `${response.report.paid_invoice[0].paid_invoice} Recently Paid`, 
-                  color: '#52c41a', 
-                  wd: 6 
-              },
-          ]);
-          
-        } catch (error) {
-          setMessage("Error fetching customers:", error);
-          setShowError(true);
-        }
-    };
+    const fetchReport = useCallback(async () => {
+      try {
+        setReportLoading(true);
+        const res = await window.electronAPI.getCustomerReport();
+        if (res && !res.error) setReport([
+          { title: `$${formattedNumber(res.due_quote?.[0]?.due_total_amount || 0)}`, description: `${res.due_quote?.[0]?.due_quote || 0} Estimates`, color: '#40a9ff', wd: 6 },
+          { title: `$${formattedNumber(res.due_invoice?.[0]?.due_total_amount || 0)}`, description: `${res.due_invoice?.[0]?.due_invoice || 0} Overdue Invoices`, color: '#fa8c16', wd: 6 },
+          { title: `$${formattedNumber(res.open_invoice?.[0]?.open_total_amount || 0)}`, description: `${res.open_invoice?.[0]?.open_invoice || 0} Open Invoices / Credits`, color: '#d9d9d9', wd: 6 },
+          { title: `$${formattedNumber(res.paid_invoice?.[0]?.paid_total_amount || 0)}`, description: `${res.paid_invoice?.[0]?.paid_invoice || 0} Recently Paid`, color: '#52c41a', wd: 6 },
+        ]);
+      } catch (e) { console.error(e); } finally { setReportLoading(false); }
+    }, []);
 
-    useEffect(() => {
-      fetchCustomers();
-  }, []);
+    const fetchCustomers = useCallback(async (p = 1, size = PAGE_SIZE, searchTerm = '') => {
+        try {
+            setLoading(true);
+            const res = await window.electronAPI.getCustomersPaginated(p, size, searchTerm);
+            if (res && res.error) { setMessage("Error fetching customers: " + res.error); setShowError(true); return; }
+            setCustomers(res.data || []);
+            setTotal(res.total || 0);
+            setPage(p);
+            setPageSize(size);
+        } catch (error) {
+          setMessage("Error fetching customers: " + (error.message || error));
+          setShowError(true);
+        } finally { setLoading(false); }
+    }, []);
+
+    useEffect(() => { fetchReport(); }, [fetchReport]);
+    useEffect(() => { fetchCustomers(1, PAGE_SIZE, ''); }, []);
+
+    const handleTableChange = (p, size) => { fetchCustomers(p, size, search); };
+    const handleSearch = (value) => { setSearch(value); fetchCustomers(1, pageSize, value); };
 
   const handleUserClose = () => {
     setAddUserState(false);
@@ -189,24 +188,6 @@ const CustomersTab = () => {
     setSelectedCustomer(null);
     setDetails(0);
   }
-
-  const handleSearchedTxt = (event) => {
-    const value = event.target.value.toLowerCase();
-    if (value.trim() !== '')
-    {
-      const filtered = customers.filter(
-        (item) =>
-          (item.first_name && item.first_name.toLowerCase().includes(value)) ||
-        (item.middle_name && item.middle_name.toLowerCase().includes(value)) ||
-        (item.last_name && item.last_name.toLowerCase().includes(value)) ||
-        (item.company_name && item.company_name.toLowerCase().includes(value))
-      );
-      setCustomersSearched(filtered);
-    }
-    else{
-      setCustomersSearched(customers);
-    }
-  };
 
   return (
     <CategoryContext.Provider value="Customer">
@@ -251,7 +232,8 @@ const CustomersTab = () => {
       ) : 
         (
         <>
-        {report.map((item, index) => (
+        {reportLoading ? <Spin tip="Loading report..." /> : null}
+        {!reportLoading && report.map((item, index) => (
           <Col key={index} xs={24} sm={12} md={item.wd}>
             <Card bordered={false}>
               <h3>{item.title}</h3>
@@ -267,7 +249,19 @@ const CustomersTab = () => {
         ))}
        
        <Col xs={24} sm={24} md={24}> 
-          <CustomersList customers={customersSearched} onSelectCustomer={setSelectedCustomer} setAddUserState={setAddUserState} setDetails={setDetails} handleSearchedTxt={handleSearchedTxt} onDelete={deleteRecord}/>
+          <CustomersList 
+            customers={customers} 
+            loading={loading} 
+            total={total} 
+            page={page} 
+            pageSize={pageSize} 
+            onTableChange={handleTableChange}
+            onSearch={handleSearch}
+            onSelectCustomer={setSelectedCustomer} 
+            setAddUserState={setAddUserState} 
+            setDetails={setDetails} 
+            onDelete={deleteRecord}
+          />
        </Col>
        </>
         )}

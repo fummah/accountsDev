@@ -1,0 +1,20 @@
+.ant-drawer {
+    width: 100% !important;
+}
+
+.ant-drawer .ant-drawer-content-wrapper {
+    width: 100% !important;
+}
+
+.ant-drawer-right .ant-drawer-content-wrapper {
+    width: 100% !important;
+}
+
+.ant-drawer.ant-drawer-open .ant-drawer-content-wrapper {
+    width: 100% !important;
+}
+
+.ant-drawer-content-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+}

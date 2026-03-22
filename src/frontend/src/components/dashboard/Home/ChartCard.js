@@ -2,7 +2,7 @@ import React from "react";
 
 import Widget from "components/Widget/index";
 
-const ChartCard = ({prize, title, children, styleName, desc, icon}) => {
+const ChartCard = ({ prize, title, children, styleName, desc, icon }) => {
   return (
     <Widget styleName="gx-card-full">
 

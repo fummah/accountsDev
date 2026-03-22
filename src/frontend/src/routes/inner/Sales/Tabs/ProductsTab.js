@@ -1,21 +1,27 @@
-import React,{useState, useRef, useEffect} from "react";
-import {Col, Row, Alert} from "antd";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { Col, Row, Alert, Spin } from "antd";
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
 import ProductsList from "components/Inner/Sales/Products/ProductsList";
 import AddProduct from 'components/Inner/Sales/Products/AddProduct';
 import Toast from "components/AppNotification/toast.js";
 
+const PAGE_SIZE = 25;
+
 const ProductsTab = () => {
   const addProductRef = useRef();
-  const [loadings, setLoadings] = useState([]);
   const [addUserState, setAddUserState] = useState(false);
   const [isSuccess, setIsSuccess] = useState(null);
   const [message, setMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [products, setProducts] = useState([]);
-  const [productsSearched, setProductsSearched] = useState([]);
-   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [selectedProduct, setSelectedProduct] = useState(null);
   
   const onSaveUser = async(userData) => {
     console.log("User Data Saved:", userData);
@@ -48,7 +54,7 @@ const ProductsTab = () => {
   
       if (result.success) {
         setMessage('Details successfully saved!');
-        fetchProducts();
+        fetchProducts(page, pageSize, search);
         if (addProductRef.current) {
           addProductRef.current.resetForm();
           handleUserClose();
@@ -78,7 +84,7 @@ const ProductsTab = () => {
       setIsSuccess(result.success);  
       if (result.success) {
         setMessage('Record deleted successfully!');
-        fetchProducts();
+        fetchProducts(page, pageSize, search);
       
       } else {
         setMessage('Failed to delete. Please try again.');
@@ -92,20 +98,31 @@ const ProductsTab = () => {
     
   };
   
-    const fetchProducts = async () => {
+    const fetchProducts = useCallback(async (p = 1, size = PAGE_SIZE, searchTerm = '', type = typeFilter) => {
         try {
-            const response = await await window.electronAPI.getAllProducts();          
-            setProducts(response);
-            setProductsSearched(response);
+            setLoading(true);
+            const res = await window.electronAPI.getProductsPaginated(p, size, searchTerm, type || '');
+            if (res && res.error) { setMessage("Error fetching products: " + res.error); setShowError(true); return; }
+            setProducts(res.data || []);
+            setTotal(res.total || 0);
+            setPage(p);
+            setPageSize(size);
         } catch (error) {
-          setMessage("Error fetching products:", error);
+          setMessage("Error fetching products: " + (error.message || error));
           setShowError(true);
-        }
-    };
+        } finally { setLoading(false); }
+    }, [typeFilter]);
 
-    useEffect(() => {
-      fetchProducts();
-  }, []);
+    useEffect(() => { fetchProducts(1, PAGE_SIZE, ''); }, []);
+
+    const handleTableChange = (p, size) => { fetchProducts(p, size, search, typeFilter); };
+    const handleSearch = (value) => { setSearch(value); fetchProducts(1, pageSize, value, typeFilter); };
+
+    const handleTypeFilterChange = (value) => {
+      const v = value || '';
+      setTypeFilter(v);
+      fetchProducts(1, pageSize, search, v);
+    };
 
   const handleUserClose = () => {
     setAddUserState(false);
@@ -115,22 +132,6 @@ const ProductsTab = () => {
     setAddUserState(true);
   };
 
-  const handleSearchedTxt = (event) => {
-    const value = event.target.value.toLowerCase();
-    if (value.trim() !== '')
-    {
-      const filtered = products.filter(
-        (item) =>
-          (item.name && item.name.toLowerCase().includes(value)) ||
-        (item.sku && item.sku.toLowerCase().includes(value)) 
-      );
-      setProductsSearched(filtered);
-    }
-    else{
-      setProductsSearched(products);
-    }
-  };
- 
   return (
     <Auxiliary> 
       <Toast title="Error" message={message} setShowError={setShowError} show={showError} />
@@ -157,7 +158,20 @@ const ProductsTab = () => {
       }  
       <Row>
       <Col span={24}>
-      <ProductsList products={productsSearched} onSelectProduct={setSelectedProduct} setAddUserState={setAddUserState} handleSearchedTxt={handleSearchedTxt} onDelete={deleteRecord}/>
+      <ProductsList
+        products={products}
+        loading={loading}
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onTableChange={handleTableChange}
+        onSearch={handleSearch}
+        typeFilter={typeFilter}
+        onTypeFilterChange={handleTypeFilterChange}
+        onSelectProduct={setSelectedProduct}
+        setAddUserState={setAddUserState}
+        onDelete={deleteRecord}
+      />
         </Col>
               
       </Row><hr/>

@@ -28,7 +28,8 @@ const ManageFixedAssets = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await window.electronAPI.getFixedAssets();
+      const res = await window.electronAPI.getFixedAssets();
+      const data = res && res.success && Array.isArray(res.data) ? res.data : (Array.isArray(res) ? res : []);
       if (Array.isArray(data)) {
         setAssets(data.map((a, idx) => ({
           key: a.id || idx,
@@ -61,8 +62,17 @@ const ManageFixedAssets = () => {
   const handleAddAsset = async (values) => {
     // Calculate depreciation locally for display
     const depreciation = ((values.purchasePrice - (values.salvageValue || 0)) / (values.usefulLife || 1)).toFixed(2);
+    const asset = {
+      assetName: values.name,
+      purchaseDate: values.purchaseDate ? values.purchaseDate.format('YYYY-MM-DD') : '',
+      purchaseCost: Number(values.purchasePrice) || 0,
+      currentValue: Number(values.purchasePrice) || 0,
+      depreciationMethod: 'Straight Line',
+      status: 'Active',
+      entered_by: 'system'
+    };
     try {
-      const res = await window.electronAPI.insertFixedAsset(values.name, values.category, values.purchasePrice, 'system');
+      const res = await window.electronAPI.insertFixedAsset(asset);
       if (res && res.success) {
         message.success('Asset added');
       } else {

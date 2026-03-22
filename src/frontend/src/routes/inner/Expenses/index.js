@@ -26,10 +26,12 @@ const Expenses = () => {
     <Auxiliary>
              <Row>
        <Col span={24}>
-       <Tabs className='gx-tabs-left' 
-       activeKey={activeKey}
-       onChange={(key) => setActiveKey(key)}
-       >
+  <Tabs className='gx-tabs-left' 
+  activeKey={activeKey}
+  onChange={(key) => setActiveKey(key)}
+  destroyInactiveTabPane
+  animated={false}
+  >
           <TabPane tab="Expenses" key="1">
             <div className="gx-mb-2">
              <ExpensesTab/>

@@ -18,24 +18,44 @@ const CashflowProjections = {
   },
 
   getProjections: (year) => {
-    year = year || new Date().getFullYear();
-    const stmt = db.prepare('SELECT month, inflow, outflow FROM cashflow_projections WHERE year = ? ORDER BY rowid');
-    const rows = stmt.all(year);
-    return rows;
+    try {
+      year = year || new Date().getFullYear();
+      console.log('Fetching projections for year:', year);
+      const stmt = db.prepare('SELECT month, inflow, outflow FROM cashflow_projections WHERE year = ? ORDER BY rowid');
+      const rows = stmt.all(year);
+      console.log('Found projections:', rows);
+      return { success: true, data: rows };
+    } catch (error) {
+      console.error('Error getting projections:', error);
+      return { success: false, error: error.message };
+    }
   },
 
   saveProjections: (projections, year) => {
     year = year || new Date().getFullYear();
-    const del = db.prepare('DELETE FROM cashflow_projections WHERE year = ?');
-    const insert = db.prepare('INSERT INTO cashflow_projections (year, month, inflow, outflow) VALUES (?, ?, ?, ?)');
-    const transaction = db.transaction((rows) => {
+    
+    // Get raw database instance for transaction support
+    const rawDb = db.raw;
+    
+    const del = rawDb.prepare('DELETE FROM cashflow_projections WHERE year = ?');
+    const insert = rawDb.prepare('INSERT INTO cashflow_projections (year, month, inflow, outflow) VALUES (?, ?, ?, ?)');
+    
+    // Create transaction function
+    const transaction = rawDb.transaction((rows) => {
       del.run(year);
       for (const r of rows) {
         insert.run(year, r.month, r.inflow || 0, r.outflow || 0);
       }
     });
-    transaction(projections || []);
-    return { success: true };
+
+    try {
+      // Execute transaction with data
+      transaction(projections || []);
+      return { success: true };
+    } catch (error) {
+      console.error('Error in saveProjections transaction:', error);
+      return { success: false, error: error.message };
+    }
   }
 };
 

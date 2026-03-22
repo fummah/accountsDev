@@ -66,14 +66,31 @@ const Suppliers = {
     const stmt = db.prepare('SELECT * FROM suppliers ORDER BY id DESC');
     return stmt.all();
   },
+
+  getPaginated: (page = 1, pageSize = 25, search = '') => {
+    const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
+    const limit = Math.max(1, Math.min(500, pageSize));
+    const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
+    let total;
+    let data;
+    if (searchParam) {
+      total = db.prepare('SELECT COUNT(*) AS total FROM suppliers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?)').get(searchParam, searchParam, searchParam).total;
+      data = db.prepare('SELECT * FROM suppliers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?').all(searchParam, searchParam, searchParam, limit, offset);
+    } else {
+      total = db.prepare('SELECT COUNT(*) AS total FROM suppliers').get().total;
+      data = db.prepare('SELECT * FROM suppliers ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
+    }
+    return { data, total };
+  },
   // Retrieve single customer
   getSingleSupplier: (supplier_id) => {
-   const stmt = db.prepare('SELECT *FROM suppliers WHERE id=?');    
+   const stmt = db.prepare('SELECT * FROM suppliers WHERE id=?');    
    const stmt_due = db.prepare("SELECT SUM(expense_lines.amount) AS due_amount FROM expense_lines INNER JOIN expenses ON expense_lines.expense_id = expenses.id WHERE expenses.payee = ? AND expenses.approval_status IN ('Pending') AND expenses.category IN ('supplier') GROUP BY expenses.id");
    const stmt_expenses = db.prepare("SELECT expenses.id, expenses.payment_account, expenses.approval_status, ref_no, SUM(expense_lines.amount) AS amount FROM expense_lines INNER JOIN expenses ON expense_lines.expense_id = expenses.id WHERE expenses.payee = ? AND expenses.category IN ('supplier') GROUP BY expenses.id, expenses.approval_status, expenses.payment_account");
    const supplier = stmt.get(supplier_id);
-   supplier.expenses = stmt_expenses.all(supplier_id);
-   supplier.due_amount = stmt_due.get(supplier_id); 
+   if (!supplier) return null;
+   supplier.expenses = stmt_expenses.all(supplier_id) || [];
+   supplier.due_amount = stmt_due.get(supplier_id) || { due_amount: 0 };
    return supplier;
  },
   updateSupplier : async (supplierData) => {

@@ -3,43 +3,41 @@ import {Bar, BarChart, ResponsiveContainer, Tooltip, XAxis} from "recharts";
 import Widget from "components/Widget/index";
 import {Badge} from "antd";
 
-const CashFlowTrend = () => {
+const CashFlowTrend = ({ summary: summaryProp }) => {
   const [trendData, setTrendData] = useState([]);
 
   useEffect(() => {
+    const buildTrendData = (response) => {
+      if (!response || !response.invoicetrend) return;
+      const chartData = response.invoicetrend.map(item => ({
+        name: item.name,
+        moneyin: Number(item.revenue_total_amount || item.revenue || 0),
+        moneyout: 0
+      }));
+      const expenseList = response.expenseAnalysis || response.expenselist || [];
+      if (Array.isArray(expenseList) && expenseList.length > 0) {
+        chartData.forEach(item => {
+          const monthExpenses = expenseList.find(exp => exp.name === item.name || exp.month === item.name);
+          if (monthExpenses) item.moneyout = Number(monthExpenses.value || monthExpenses.monthlyAverage || 0);
+        });
+      }
+      setTrendData(chartData);
+    };
+
+    if (summaryProp) {
+      buildTrendData(summaryProp);
+      return;
+    }
     const fetchTrendData = async () => {
       try {
         const response = await window.electronAPI.getDashboardSummary();
-        if (response && response.invoicetrend) {
-          // Map invoice trend data to chart format
-          const chartData = response.invoicetrend.map(item => ({
-            name: item.name,
-            moneyin: Number(item.revenue_total_amount || item.revenue || 0),
-            moneyout: 0 // We'll add expense data here
-          }));
-
-          // Use either enhanced expenseAnalysis or legacy expenselist
-          const expenseList = response.expenseAnalysis || response.expenselist || [];
-
-          // Update with expense data if available
-          if (Array.isArray(expenseList) && expenseList.length > 0) {
-            chartData.forEach(item => {
-              const monthExpenses = expenseList.find(exp => exp.name === item.name || exp.month === item.name);
-              if (monthExpenses) {
-                item.moneyout = Number(monthExpenses.value || monthExpenses.monthlyAverage || 0);
-              }
-            });
-          }
-
-          setTrendData(chartData);
-        }
+        buildTrendData(response);
       } catch (err) {
         console.error('Error fetching cashflow trend data:', err);
       }
     };
-
     fetchTrendData();
-  }, []);
+  }, [summaryProp]);
 
   return (
     <Widget>

@@ -74,6 +74,31 @@ const columns = [
   },
 ];
 
+  const [activeKey, setActiveKey] = useState('all');
+  const items = [
+    {
+      key: 'all',
+      label: 'All Accounts',
+      children: (
+        <Table columns={columns} dataSource={data} pagination={{ pageSize: 5 }} loading={loading} />
+      ),
+    },
+    {
+      key: 'cash',
+      label: 'Cash',
+      children: (
+        <Table columns={columns} dataSource={data.filter((item) => item.account === "Cash")} pagination={{ pageSize: 5 }} loading={loading} />
+      ),
+    },
+    {
+      key: 'ar',
+      label: 'Accounts Receivable',
+      children: (
+        <Table columns={columns} dataSource={data.filter((item) => item.account === "Accounts Receivable")} pagination={{ pageSize: 5 }} loading={loading} />
+      ),
+    },
+  ];
+
   return (
     <Card
       title="General Ledger"
@@ -85,27 +110,7 @@ const columns = [
       }
     >
       {error && <div style={{ color: 'red', margin: 8 }}>{error}</div>}
-      <Tabs defaultActiveKey="1">
-        <TabPane tab="All Accounts" key="1">
-          <Table columns={columns} dataSource={data} pagination={{ pageSize: 5 }} loading={loading} />
-        </TabPane>
-        <TabPane tab="Cash" key="2">
-          <Table
-            columns={columns}
-            dataSource={data.filter((item) => item.account === "Cash")}
-            pagination={{ pageSize: 5 }}
-            loading={loading}
-          />
-        </TabPane>
-        <TabPane tab="Accounts Receivable" key="3">
-          <Table
-            columns={columns}
-            dataSource={data.filter((item) => item.account === "Accounts Receivable")}
-            pagination={{ pageSize: 5 }}
-            loading={loading}
-          />
-        </TabPane>
-      </Tabs>
+      <Tabs activeKey={activeKey} onChange={setActiveKey} items={items} />
     </Card>
   );
 };

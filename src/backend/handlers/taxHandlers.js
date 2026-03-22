@@ -1,6 +1,7 @@
+const { ipcMain } = require('electron');
 const Tax = require('../models/tax');
 
-const registerTaxHandlers = (ipcMain) => {
+const registerTaxHandlers = () => {
     // Create the tax_filings table when handlers are registered
     Tax.createTable();
 
@@ -35,4 +36,4 @@ const registerTaxHandlers = (ipcMain) => {
     });
 };
 
-module.exports = { registerTaxHandlers };
+module.exports = registerTaxHandlers;

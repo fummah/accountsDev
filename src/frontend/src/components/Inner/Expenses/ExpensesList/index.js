@@ -27,8 +27,9 @@ const menus = () => (<Menu onClick={(e) => {
   )}
 </Menu>);
 
-const ExpensesList = ({expenses, onSelectExpense, setAddUserState, setDetails, handleSearchedTxt, onDelete}) => {
+const ExpensesList = ({ expenses, loading = false, total = 0, page = 1, pageSize = 25, onTableChange, onSearch, onSelectExpense, setAddUserState, setDetails, onDelete }) => {
   const redirectToItem = useRedirectToItem();
+  const [searchInput, setSearchInput] = useState('');
   const columns = [
     {
       title: 'Date',
@@ -120,10 +121,10 @@ const ExpensesList = ({expenses, onSelectExpense, setAddUserState, setDetails, h
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
 
   const rowSelection = {
-    type: 'radio', // Set to 'radio' for single selection
+    type: 'radio',
     onSelect: (record) => {
-      setDetails(0);
-      onSelectExpense(record); // Trigger when a row is selected
+      if (setDetails) setDetails(0);
+      onSelectExpense(record);
       setAddUserState(true);
     },
   };
@@ -132,7 +133,7 @@ const ExpensesList = ({expenses, onSelectExpense, setAddUserState, setDetails, h
 <>
     <Row>
     <Col xs={24} sm={8} md={8}>
-    <Input placeholder="search..." suffix={<SearchOutlined />} onKeyUp={handleSearchedTxt}/>
+    <Input placeholder="Search (press Enter)" suffix={<SearchOutlined />} allowClear value={searchInput} onChange={(e) => setSearchInput(e.target.value)} onPressEnter={() => typeof onSearch === 'function' && onSearch(searchInput)} onClear={() => { setSearchInput(''); typeof onSearch === 'function' && onSearch(''); }} />
     </Col>
       <Col xs={24} sm={16} md={16}>
          <div style={{ display: 'flex', gap: '10px',float:"right" }}>
@@ -145,8 +146,9 @@ const ExpensesList = ({expenses, onSelectExpense, setAddUserState, setDetails, h
         <Table rowSelection={rowSelection} 
         className="gx-table-no-bordered" 
         columns={columns} 
-        dataSource={expenses} 
-        pagination={true} 
+        dataSource={expenses || []} 
+        loading={loading}
+        pagination={typeof onTableChange === 'function' ? { current: page, pageSize, total, showSizeChanger: true, pageSizeOptions: ['10', '25', '50', '100'], showTotal: (t) => `Total ${t} items`, onChange: (p, size) => onTableChange(p, size) } : true}
         size="small"
         onRow={(record) => ({
           onClick: () => {

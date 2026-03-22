@@ -43,7 +43,9 @@ const PlanningBudgeting = () => {
   useEffect(() => {
     const loadBudgets = async () => {
       try {
+       
         const response = await window.electronAPI.getBudgets();
+        
         if (Array.isArray(response)) {
           const mapped = response.map((b, idx) => ({ key: b.id || idx + 1, ...b }));
           setBudgets(mapped);

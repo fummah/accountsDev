@@ -1,8 +1,12 @@
-import React, { useState } from 'react';
-import {Table,Dropdown,Menu,Col, Row, List} from "antd";
+import React, { useState, useRef, useEffect } from 'react';
+import {Table, Dropdown, Menu, Col, Row, List, Typography, message, Button} from "antd";
 import { useRedirectToItem } from 'util/navigation';
 import { Input } from 'antd';
-import { SearchOutlined,PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
+import { SearchOutlined, PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
+import { useReactToPrint } from 'react-to-print';
+import './print.css';
+
+const { Title } = Typography;
 
 const options = [
   'Edit',
@@ -24,8 +28,64 @@ const menus = () => (<Menu onClick={(e) => {
 </Menu>);
 
 
+// Printable component
+const PrintableContent = React.forwardRef(({ vat, companyName = "Your Company" }, ref) => {
+  const printColumns = [
+    {
+      title: 'VAT Name',
+      dataIndex: 'vat_name',
+    },
+    {
+      title: 'Percentage',
+      dataIndex: 'vat_percentage',
+      render: (text) => text ? `${text}%` : '-',
+    }
+  ];
+
+  return (
+    <div ref={ref} className="printable-content" style={{ padding: '30px' }}>
+      <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+        <Title level={2} style={{ marginBottom: '10px' }}>{companyName}</Title>
+      <Title level={2} style={{ textAlign: 'center', marginBottom: 20 }}>VAT Rates List</Title>
+        <div style={{ fontSize: '14px', marginBottom: '20px' }}>
+          Generated on: {new Date().toLocaleString()}
+        </div>
+      </div>
+      <Table
+        columns={printColumns}
+        dataSource={vat}
+        pagination={false}
+        rowKey="id"
+        bordered
+        style={{ marginBottom: '30px' }}
+      />
+      <div style={{ marginTop: '30px', fontSize: '12px', textAlign: 'right' }}>
+        Page 1 of 1
+      </div>
+    </div>
+  );
+});
+
 const VatList = ({vat, onSelectVat, setAddUserState, handleSearch, onDelete}) => {
   const redirectToItem = useRedirectToItem();
+  const componentRef = useRef();
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const handlePrint = useReactToPrint({
+    content: () => componentRef.current,
+    documentTitle: 'VAT_Rates_List',
+    onBeforeGetContent: () => {
+      setIsPrinting(true);
+      console.log('Preparing print content...');
+    },
+    onAfterPrint: () => {
+      setIsPrinting(false);
+      console.log('Print completed');
+      message.success('Document printed successfully');
+    },
+    removeAfterPrint: true
+  });
+
   const columns = [
     {
       title: 'Vat Name',
@@ -86,10 +146,28 @@ const VatList = ({vat, onSelectVat, setAddUserState, handleSearch, onDelete}) =>
     <Input placeholder="search..." suffix={<SearchOutlined/>} onKeyUp={handleSearch}/>
     </Col>
       <Col xs={24} sm={16} md={16}>
-         <div style={{ display: 'flex', gap: '10px',float:"right" }}>
-      <PrinterOutlined style={{ fontSize: '24px', cursor: 'pointer' }} onClick={() => window.print()} />
-      <DownloadOutlined style={{ fontSize: '24px', cursor: 'pointer' }} onClick={() => alert("Exporting...")} />
-    </div>
+        <div style={{ display: 'flex', gap: '10px', float: "right" }}>
+          <Button
+            type="default"
+            icon={<PrinterOutlined />}
+            onClick={() => {
+              if (!isPrinting && vat && vat.length > 0) {
+                handlePrint();
+              } else if (!vat || vat.length === 0) {
+                message.warning('No VAT data to print');
+              }
+            }}
+          >
+            Print
+          </Button>
+          <Button
+            type="default"
+            icon={<DownloadOutlined />}
+            onClick={() => alert("Exporting...")}
+          >
+            Export
+          </Button>
+        </div>
         </Col>
      </Row>
      {hasSelected ? `Selected ${selectedRowKeys.length} items` : null}
@@ -115,6 +193,9 @@ const VatList = ({vat, onSelectVat, setAddUserState, handleSearch, onDelete}) =>
       
       </div>
 
+      <div style={{ position: 'fixed', left: '-10000px', top: 0, width: '100%' }}>
+        <PrintableContent ref={componentRef} vat={vat} />
+      </div>
       </>
   );
 };

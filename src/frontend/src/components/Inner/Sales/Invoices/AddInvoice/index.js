@@ -200,19 +200,18 @@ const handleVatChange = (value) => {
                    
           <Col span={4}>
               <Form.Item
-      name="status"
-      label="Status"      
-    >
-      <Select mode="single" placeholder="Select status" rules={[{ required: true, message: 'Select status', },]}>   
-         
-        {statuslist.map((item, index) => (
-          <Option key={index} value={item.value}>
-            {item.label}
-          </Option>
-        ))}
-        
-      </Select>
-    </Form.Item>
+                name="status"
+                label="Status"
+                rules={[{ required: true, message: 'Select status' }]}
+              >
+                <Select mode="single" placeholder="Select status">
+                  {statuslist.map((item, index) => (
+                    <Option key={index} value={item.value}>
+                      {item.label}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
               </Col> 
                   
             <Col span={4}>

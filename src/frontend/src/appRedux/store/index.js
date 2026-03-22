@@ -5,10 +5,10 @@ import thunk from 'redux-thunk';
 import rootSaga from "../sagas/index";
 import createRootReducer from '../reducers'
 
-const createBrowserHistory = require('history').createBrowserHistory;
+const createHashHistory = require('history').createHashHistory;
 
 
-export const history = createBrowserHistory();
+export const history = createHashHistory();
 
 const routeMiddleware = routerMiddleware(history);
 const sagaMiddleware = createSagaMiddleware();

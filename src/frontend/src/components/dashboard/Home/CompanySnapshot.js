@@ -15,8 +15,8 @@ import {
 
 const { Title, Text } = Typography;
 
-const CompanySnapshot = () => {
-  const [loading, setLoading] = useState(true);
+const CompanySnapshot = ({ summary: summaryProp }) => {
+  const [loading, setLoading] = useState(!summaryProp);
   const [revenueData, setRevenueData] = useState([]);
   const [expenseData, setExpenseData] = useState([]);
   const [totals, setTotals] = useState({ totalRevenue: 0, totalExpenses: 0, netProfit: 0 });
@@ -24,57 +24,57 @@ const CompanySnapshot = () => {
   useEffect(() => {
     let mounted = true;
 
+    const applySummary = (response) => {
+      if (!response || response.error) return;
+      const monthly = Array.isArray(response.monthlyPerformance) ? response.monthlyPerformance.slice().reverse() : [];
+      const months = monthly.map(m => {
+        const label = m.month || m.name || '';
+        let monthLabel = label;
+        if (/^\d{4}-\d{2}$/.test(label)) {
+          const parts = label.split('-');
+          const date = new Date(parts[0], Number(parts[1]) - 1, 1);
+          monthLabel = date.toLocaleString(undefined, { month: 'short' });
+        }
+        return { month: monthLabel, revenue: Number(m.revenue) || 0 };
+      });
+      const expenseAnalysis = Array.isArray(response.expenseAnalysis) ? response.expenseAnalysis : (Array.isArray(response.expenselist) ? response.expenselist : []);
+      const expenseBars = expenseAnalysis.slice(0, 6).map(item => ({ category: item.name || item.category || '', value: Number(item.value || item.amount || 0) }));
+      const totalExpenses = expenseAnalysis.reduce((s, it) => s + (Number(it.value) || 0), 0);
+      const totalRevenue = monthly.reduce((s, it) => s + (Number(it.revenue) || 0), 0);
+      const netProfit = totalRevenue - totalExpenses;
+      if (mounted) {
+        setRevenueData(months);
+        setExpenseData(expenseBars);
+        setTotals({ totalRevenue, totalExpenses, netProfit });
+      }
+    };
+
+    if (summaryProp) {
+      setLoading(false);
+      applySummary(summaryProp);
+      return () => { mounted = false; };
+    }
+
+    setLoading(true);
     const fetchSummary = async () => {
-      setLoading(true);
       try {
         const response = await window.electronAPI.getDashboardSummary();
+        if (!mounted) return;
         if (!response || response.error) {
-          console.error('No dashboard data or error returned', response);
           setLoading(false);
           return;
         }
-
-        // monthlyPerformance is returned from backend as array of {month, revenue, ...}
-        const monthly = Array.isArray(response.monthlyPerformance) ? response.monthlyPerformance.slice().reverse() : [];
-        // map to {month: 'Jan', revenue: number}
-        const months = monthly.map(m => {
-          const label = m.month || m.name || m.month || '';
-          // try to format YYYY-MM to short month label
-          let monthLabel = label;
-          if (/^\d{4}-\d{2}$/.test(label)) {
-            const parts = label.split('-');
-            const date = new Date(parts[0], Number(parts[1]) - 1, 1);
-            monthLabel = date.toLocaleString(undefined, { month: 'short' });
-          }
-          return { month: monthLabel, revenue: Number(m.revenue) || 0 };
-        });
-
-        // For expenses, use expenseAnalysis which contains categories and values
-        const expenseAnalysis = Array.isArray(response.expenseAnalysis) ? response.expenseAnalysis : (Array.isArray(response.expenselist) ? response.expenselist : []);
-        const expenseBars = expenseAnalysis.slice(0, 6).map(item => ({ category: item.name || item.category || '', value: Number(item.value || item.value || item.amount || 0) }));
-
-        const totalExpenses = expenseAnalysis.reduce((s, it) => s + (Number(it.value) || 0), 0);
-        const totalRevenue = monthly.reduce((s, it) => s + (Number(it.revenue) || 0), 0);
-        const netProfit = totalRevenue - totalExpenses;
-
-        if (mounted) {
-          setRevenueData(months);
-          setExpenseData(expenseBars);
-          setTotals({ totalRevenue, totalExpenses, netProfit });
-        }
+        applySummary(response);
       } catch (error) {
         console.error('Error fetching dashboard summary for CompanySnapshot:', error);
+        if (mounted) setLoading(false);
       } finally {
         if (mounted) setLoading(false);
       }
     };
-
     fetchSummary();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    return () => { mounted = false; };
+  }, [summaryProp]);
 
   return (
     <div style={{ padding: 24 }}>

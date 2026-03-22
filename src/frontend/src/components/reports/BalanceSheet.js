@@ -26,8 +26,10 @@ const BalanceSheet = () => {
   const loadBalanceSheet = async () => {
     try {
       setLoading(true);
-      const data = await window.electronAPI.getBalanceSheet(date.format('YYYY-MM-DD'));
-      setBalanceSheet(data);
+      // Use unified financial report API and extract balanceSheet for the selected date range (same day)
+      const report = await window.electronAPI.getFinancialReport(date.startOf('day').format('YYYY-MM-DD'), date.endOf('day').format('YYYY-MM-DD'));
+      const data = report && report.balanceSheet ? report.balanceSheet : null;
+      if (data) setBalanceSheet(data);
     } catch (error) {
       console.error('Failed to load balance sheet:', error);
     } finally {
@@ -93,10 +95,33 @@ const BalanceSheet = () => {
             onChange={setDate}
             style={{ marginRight: '16px' }}
           />
-          <Button icon={<PrinterOutlined />} style={{ marginRight: '8px' }}>
+          <Button icon={<PrinterOutlined />} style={{ marginRight: '8px' }} onClick={() => {
+            try {
+              const w = window.open('', '_blank');
+              const assets = Array.isArray(balanceSheet?.assets) ? balanceSheet.assets : [];
+              const liabilities = Array.isArray(balanceSheet?.liabilities) ? balanceSheet.liabilities : [];
+              const equity = Array.isArray(balanceSheet?.equity) ? balanceSheet.equity : [];
+              const summary = balanceSheet?.summary || { totalAssets: 0, totalLiabilities: 0, totalEquity: 0 };
+              const section = (title, rows) => `<h3>${title}</h3><table><thead><tr><th style="text-align:left">Category</th><th>Amount</th></tr></thead><tbody>${rows.map(r => `<tr><td style="text-align:left">${r.category}</td><td style="text-align:right">${Number(r.amount||0).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
+              const html = `<!doctype html><html><head><title>Balance Sheet</title><style>table{width:100%;border-collapse:collapse;margin-bottom:12px}td,th{border:1px solid #ddd;padding:6px}</style></head><body><h2>Balance Sheet</h2><p>Date: ${date.format('YYYY-MM-DD')}</p>${section('Assets', assets)}${section('Liabilities', liabilities)}${section('Equity', equity)}<h3>Totals</h3><p>Total Assets: $${Number(summary.totalAssets||0).toFixed(2)}<br/>Total Liabilities: $${Number(summary.totalLiabilities||0).toFixed(2)}<br/>Total Equity: $${Number(summary.totalEquity||0).toFixed(2)}</p></body></html>`;
+              w.document.open(); w.document.write(html); w.document.close(); setTimeout(() => w.print(), 300);
+            } catch (e) { /* noop */ }
+          }}>
             Print
           </Button>
-          <Button icon={<DownloadOutlined />}>
+          <Button icon={<DownloadOutlined />} onClick={() => {
+            try {
+              const headers = ['section','category','amount'];
+              const rows = [];
+              (balanceSheet.assets||[]).forEach(r => rows.push(['Assets', r.category, r.amount]));
+              (balanceSheet.liabilities||[]).forEach(r => rows.push(['Liabilities', r.category, r.amount]));
+              (balanceSheet.equity||[]).forEach(r => rows.push(['Equity', r.category, r.amount]));
+              const csvRows = rows.map(r => r.map(v => `"${(v ?? '').toString().replace(/"/g,'""')}"`).join(','));
+              const csv = [headers.join(','), ...csvRows].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `balance_sheet_${date.format('YYYYMMDD')}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+            } catch (e) { /* noop */ }
+          }}>
             Export
           </Button>
         </div>
@@ -107,7 +132,7 @@ const BalanceSheet = () => {
           <Card>
             <Statistic
               title="Total Assets"
-              value={balanceSheet.summary.totalAssets}
+              value={Number(balanceSheet?.summary?.totalAssets ?? 0)}
               precision={2}
               prefix="$"
             />
@@ -117,7 +142,7 @@ const BalanceSheet = () => {
           <Card>
             <Statistic
               title="Total Liabilities"
-              value={balanceSheet.summary.totalLiabilities}
+              value={Number(balanceSheet?.summary?.totalLiabilities ?? 0)}
               precision={2}
               prefix="$"
             />
@@ -127,7 +152,7 @@ const BalanceSheet = () => {
           <Card>
             <Statistic
               title="Total Equity"
-              value={balanceSheet.summary.totalEquity}
+              value={Number(balanceSheet?.summary?.totalEquity ?? 0)}
               precision={2}
               prefix="$"
             />
@@ -140,7 +165,7 @@ const BalanceSheet = () => {
           <Card title="Assets" className="balance-sheet-card">
             <Table
               columns={assetColumns}
-              dataSource={balanceSheet.assets}
+              dataSource={Array.isArray(balanceSheet?.assets) ? balanceSheet.assets : []}
               pagination={false}
               rowKey="category"
               loading={loading}
@@ -148,7 +173,7 @@ const BalanceSheet = () => {
                 <Table.Summary.Row>
                   <Table.Summary.Cell><strong>Total Assets</strong></Table.Summary.Cell>
                   <Table.Summary.Cell align="right">
-                    <strong>${balanceSheet.summary.totalAssets.toFixed(2)}</strong>
+                    <strong>${Number(balanceSheet?.summary?.totalAssets ?? 0).toFixed(2)}</strong>
                   </Table.Summary.Cell>
                 </Table.Summary.Row>
               )}
@@ -160,7 +185,7 @@ const BalanceSheet = () => {
           <Card title="Liabilities" className="balance-sheet-card">
             <Table
               columns={liabilityColumns}
-              dataSource={balanceSheet.liabilities}
+              dataSource={Array.isArray(balanceSheet?.liabilities) ? balanceSheet.liabilities : []}
               pagination={false}
               rowKey="category"
               loading={loading}
@@ -168,7 +193,7 @@ const BalanceSheet = () => {
                 <Table.Summary.Row>
                   <Table.Summary.Cell><strong>Total Liabilities</strong></Table.Summary.Cell>
                   <Table.Summary.Cell align="right">
-                    <strong>${balanceSheet.summary.totalLiabilities.toFixed(2)}</strong>
+                    <strong>${Number(balanceSheet?.summary?.totalLiabilities ?? 0).toFixed(2)}</strong>
                   </Table.Summary.Cell>
                 </Table.Summary.Row>
               )}
@@ -178,7 +203,7 @@ const BalanceSheet = () => {
           <Card title="Equity" className="balance-sheet-card" style={{ marginTop: '16px' }}>
             <Table
               columns={equityColumns}
-              dataSource={balanceSheet.equity}
+              dataSource={Array.isArray(balanceSheet?.equity) ? balanceSheet.equity : []}
               pagination={false}
               rowKey="category"
               loading={loading}
@@ -186,7 +211,7 @@ const BalanceSheet = () => {
                 <Table.Summary.Row>
                   <Table.Summary.Cell><strong>Total Equity</strong></Table.Summary.Cell>
                   <Table.Summary.Cell align="right">
-                    <strong>${balanceSheet.summary.totalEquity.toFixed(2)}</strong>
+                    <strong>${Number(balanceSheet?.summary?.totalEquity ?? 0).toFixed(2)}</strong>
                   </Table.Summary.Cell>
                 </Table.Summary.Row>
               )}

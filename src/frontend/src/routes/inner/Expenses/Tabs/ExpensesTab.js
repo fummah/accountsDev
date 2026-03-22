@@ -1,5 +1,5 @@
-import React, {useRef, useState, useEffect} from "react";
-import {Col, Row, Alert} from "antd";
+import React, { useRef, useState, useEffect, useCallback } from "react";
+import { Col, Row, Alert } from "antd";
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
 import AddExpense from 'components/Inner/Expenses/AddExpense';
@@ -8,18 +8,22 @@ import Toast from "components/AppNotification/toast.js";
 import dayjs from 'dayjs';
 
 
+const PAGE_SIZE = 25;
+
 const ExpensesTab = () => {
   const addExpenseRef = useRef();
-  const [loadings, setLoadings] = useState([]);
   const [addUserState, setAddUserState] = useState(false); 
   const [isSuccess, setIsSuccess] = useState(null);
   const [message, setMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [expenses, setExpenses] = useState([]);
-  const [expensesSearched, setExpensesSearched] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
   const [selectedExpense, setSelectedExpense] = useState(null);
-  
-  
+
   const onSaveUser = async(userData) => {
     console.log("User Data Saved:", userData);
     console.log(userData);
@@ -49,7 +53,7 @@ const ExpensesTab = () => {
   
       if (result.success) {
         setMessage('Expense saved successfully!');
-        fetchExpenses();
+        fetchExpenses(page, pageSize, search);
         if (addExpenseRef.current) {
           addExpenseRef.current.resetForm();
           handleUserClose();
@@ -80,7 +84,7 @@ const ExpensesTab = () => {
       setIsSuccess(result.success);  
       if (result.success) {
         setMessage('Record deleted successfully!');
-        fetchExpenses();
+        fetchExpenses(page, pageSize, search);
       
       } else {
         setMessage('Failed to delete. Please try again.');
@@ -94,20 +98,25 @@ const ExpensesTab = () => {
     
   };
   
-    const fetchExpenses = async () => {
+    const fetchExpenses = useCallback(async (p = 1, size = PAGE_SIZE, searchTerm = '') => {
         try {
-            const response = await await window.electronAPI.getAllExpenses();          
-            setExpenses(response);
-            setExpensesSearched(response);
+            setLoading(true);
+            const res = await window.electronAPI.getExpensesPaginated(p, size, searchTerm);
+            if (res && res.error) { setMessage("Error fetching expenses: " + res.error); setShowError(true); return; }
+            setExpenses(res.data || []);
+            setTotal(res.total || 0);
+            setPage(p);
+            setPageSize(size);
         } catch (error) {
-          setMessage("Error fetching expenses:", error);
+          setMessage("Error fetching expenses: " + (error.message || error));
           setShowError(true);
-        }
-    };
+        } finally { setLoading(false); }
+    }, []);
 
-    useEffect(() => {
-      fetchExpenses();
-  }, []);
+    useEffect(() => { fetchExpenses(1, PAGE_SIZE, ''); }, []);
+
+    const handleTableChange = (p, size) => { fetchExpenses(p, size, search); };
+    const handleSearch = (value) => { setSearch(value); fetchExpenses(1, pageSize, value); };
 
   const handleUserClose = () => {
     setAddUserState(false);
@@ -117,22 +126,6 @@ const ExpensesTab = () => {
     setAddUserState(true);
   };
 
-  const handleSearchedTxt = (event) => {
-    const value = event.target.value.toLowerCase();
-    if (value.trim() !== '')
-    {
-      const filtered = expenses.filter(
-        (item) =>
-          (item.payment_method && item.payment_method.toLowerCase().includes(value)) ||
-        (item.ref_no && item.ref_no.toLowerCase().includes(value)) ||
-        (item.payee_name && item.payee_name.toLowerCase().includes(value))
-      );
-      setExpensesSearched(filtered);
-    }
-    else{
-      setExpensesSearched(expenses);
-    }
-  };
  
   return (
     <Auxiliary> 
@@ -160,7 +153,7 @@ const ExpensesTab = () => {
       }
    <Row>
    <Col span={24}>
-<ExpensesList expenses={expensesSearched} onSelectExpense={setSelectedExpense} setAddUserState={setAddUserState} handleSearchedTxt={handleSearchedTxt} onDelete={deleteRecord}/>
+<ExpensesList expenses={expenses} loading={loading} total={total} page={page} pageSize={pageSize} onTableChange={handleTableChange} onSearch={handleSearch} onSelectExpense={setSelectedExpense} setAddUserState={setAddUserState} setDetails={() => {}} onDelete={deleteRecord}/>
 
      </Col>
            

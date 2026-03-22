@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from "react";
-import {Col, Row, DatePicker} from "antd";
+import {Col, Row, DatePicker, message} from "antd";
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
 import ProfitAndLossSection from "./Sections/ProfitAndLossSection";
@@ -19,12 +19,21 @@ const [dateRange, setDateRange] = useState([currentMonthStart, currentMonthEnd])
 
    const fetchFinancialReports = async (start_date,last_date) => {
         try {
-            const response = await await window.electronAPI.getFinancialReport(start_date,last_date);   
-               
+            const response = await window.electronAPI.getFinancialReport(start_date,last_date);
+            if (!response) {
+              message.error('No data returned from backend');
+              return;
+            }
+            if (response.error) {
+              message.error(response.error || 'Error fetching financial report');
+              return;
+            }
+            // Response expected to be object with profitLoss, balanceSheet, cashFlow
             setDummyData(response);
         } catch (error) {
           const errorMessage = error.message || "An unknown error occurred.";
          console.log(errorMessage);
+         message.error(errorMessage);
         }
     };
 

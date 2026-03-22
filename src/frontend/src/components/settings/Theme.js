@@ -1,18 +1,49 @@
-import React, { useState } from 'react';
-import { Card, Radio, Switch, Row, Col, Button, message } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Card, Radio, Switch, Row, Col, Button, message, Select } from 'antd';
 
 const Theme = () => {
-  const [theme, setTheme] = useState('light');
+  const [theme, setTheme] = useState('light'); // light | dark | blue | corporate | system
   const [accentColor, setAccentColor] = useState('blue');
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [contrastHigh, setContrastHigh] = useState(false);
+  const [fontScale, setFontScale] = useState('normal'); // normal | large
   const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    try {
+      const cfg = await window.electronAPI.settingsGet?.('ui.theme');
+      if (cfg) {
+        setTheme(cfg.theme || 'light');
+        setAccentColor(cfg.accentColor || 'blue');
+        setIsDarkMode(cfg.theme === 'dark');
+        setContrastHigh(!!cfg.contrastHigh);
+        setFontScale(cfg.fontScale || 'normal');
+      }
+    } catch {}
+  };
+  useEffect(() => { load(); }, []);
+
+  const applyToDom = (cfg) => {
+    try {
+      const body = document.body;
+      body.classList.toggle('contrast-high', !!cfg.contrastHigh);
+      body.classList.toggle('font-large', cfg.fontScale === 'large');
+      // legacy theme system hooks
+      if (cfg.theme === 'dark' || isDarkMode) {
+        body.classList.add('dark-theme');
+      } else {
+        body.classList.remove('dark-theme');
+      }
+    } catch {}
+  };
 
   const handleSave = async () => {
     setLoading(true);
     try {
-      // TODO: Implement save theme to backend
-      console.log('Theme settings:', { theme, accentColor, isDarkMode });
-      message.success('Theme settings saved successfully');
+      const cfg = { theme, accentColor, contrastHigh, fontScale };
+      await window.electronAPI.settingsSet?.('ui.theme', cfg);
+      applyToDom(cfg);
+      message.success('Theme settings saved');
     } catch (error) {
       message.error('Failed to save theme settings');
     } finally {
@@ -21,13 +52,15 @@ const Theme = () => {
   };
 
   return (
-    <Card title="Theme Settings">
+    <Card title="Theme & Accessibility">
       <Row gutter={[16, 24]}>
         <Col span={24}>
           <h3>Color Theme</h3>
-          <Radio.Group value={theme} onChange={e => setTheme(e.target.value)}>
+          <Radio.Group value={theme} onChange={e => { setTheme(e.target.value); setIsDarkMode(e.target.value==='dark'); }}>
             <Radio.Button value="light">Light</Radio.Button>
             <Radio.Button value="dark">Dark</Radio.Button>
+            <Radio.Button value="blue">Blue</Radio.Button>
+            <Radio.Button value="corporate">Corporate</Radio.Button>
             <Radio.Button value="system">System</Radio.Button>
           </Radio.Group>
         </Col>
@@ -47,10 +80,20 @@ const Theme = () => {
           <h3>Dark Mode</h3>
           <Switch
             checked={isDarkMode}
-            onChange={setIsDarkMode}
+            onChange={(v) => { setIsDarkMode(v); setTheme(v ? 'dark' : (theme==='dark' ? 'light' : theme)); }}
             checkedChildren="On"
             unCheckedChildren="Off"
           />
+        </Col>
+
+        <Col span={24}>
+          <h3>Accessibility</h3>
+          <div style={{ display:'flex', alignItems:'center', gap: 16 }}>
+            <span>High Contrast</span>
+            <Switch checked={contrastHigh} onChange={setContrastHigh} />
+            <span>Font Size</span>
+            <Select value={fontScale} onChange={setFontScale} style={{ width: 140 }} options={[{ value:'normal', label:'Normal' }, { value:'large', label:'Large' }]} />
+          </div>
         </Col>
 
         <Col span={24}>

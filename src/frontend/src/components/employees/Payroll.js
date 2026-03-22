@@ -62,7 +62,6 @@ const Payroll = () => {
         processedDate: moment().format('YYYY-MM-DD'),
       };
 
-      // TODO: Implement processPayroll in the backend
       await window.electronAPI.processPayroll(payrollData);
       message.success('Payroll processed successfully');
       setIsModalVisible(false);
@@ -72,6 +71,23 @@ const Payroll = () => {
       message.error('Failed to process payroll');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const exportXml = async (runId) => {
+    try {
+      const { xml, error } = await window.electronAPI.payrollEfileExport({ payrollRunId: runId, country: 'DEFAULT' });
+      if (error) throw new Error(error);
+      const blob = new Blob([xml || ''], { type: 'application/xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payroll-${runId}.xml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      message.success('e-File XML downloaded');
+    } catch (e) {
+      message.error(e?.message || 'Failed to export XML');
     }
   };
 
@@ -101,6 +117,13 @@ const Payroll = () => {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      render: (_, record) => (
+        <Button size="small" onClick={() => exportXml(record.id)}>Export e-File XML</Button>
+      )
     }
   ];
 

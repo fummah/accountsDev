@@ -235,6 +235,7 @@ const TaxFiling = () => {
         columns={columns} 
         dataSource={taxRecords}
         rowKey="id"
+        pagination={{ pageSize: 20, showSizeChanger: true }}
       />
 
       {/* View / Print Modal */}

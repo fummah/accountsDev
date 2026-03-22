@@ -27,6 +27,7 @@ import NoHeaderNotification from "../Topbar/NoHeaderNotification/index";
 import {useRouteMatch} from "react-router-dom";
 import {updateWindowWidth} from "../../appRedux/actions";
 import AppSidebar from "./AppSidebar";
+import CommandPalette from "../../components/CommandPalette";
 
 const {Content, Footer} = Layout;
 
@@ -100,6 +101,7 @@ const MainApp = () => {
         </Content>
       </Layout>
       <Customizer/>
+      <CommandPalette/>
     </Layout>
   )
 };

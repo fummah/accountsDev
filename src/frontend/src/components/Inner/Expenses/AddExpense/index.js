@@ -189,6 +189,9 @@ useEffect(() => {
               Save Details
             </Button>
             <Button onClick={onUserClose}>Cancel</Button>
+            <Button onClick={() => { window.location.hash = '#/main/approvals/center'; }}>
+              Open Approvals Center
+            </Button>
           
           </Space>
         </Col>
@@ -197,24 +200,32 @@ useEffect(() => {
         }
       >
       
-  <Form form={form} layout="" {...layout}>
+  <Form
+    form={form}
+    layout=""
+    {...layout}
+    initialValues={{ approval_status: 'Pending' }}
+  >
   <Widget    
       >
         
           <Row gutter={2}>   
           <Col span={4}>
               <Form.Item
-      name="category"
-      label="Category"      
-    >
-      <Select mode="single" placeholder="Please select category" rules={[{ required: true, message: 'Select Category', },]}
-      onChange={(value) => handleCategoryChange(value)}
-      >
-        <Option value="supplier">Supplier</Option>
-        <Option value="customer">Customer</Option>
-        <Option value="employee">Employee</Option>
-      </Select>
-    </Form.Item>
+                name="category"
+                label="Category"
+                rules={[{ required: true, message: 'Select Category' }]}
+              >
+                <Select
+                  mode="single"
+                  placeholder="Please select category"
+                  onChange={(value) => handleCategoryChange(value)}
+                >
+                  <Option value="supplier">Supplier</Option>
+                  <Option value="customer">Customer</Option>
+                  <Option value="employee">Employee</Option>
+                </Select>
+              </Form.Item>
               </Col>        
             <Col span={4}>
               <Form.Item name="payee" label="Payee" rules={[{ required: true, message: 'Select Payee', },]}>
@@ -274,15 +285,19 @@ useEffect(() => {
               </Col>
               <Col span={4}>
               <Form.Item
-      name="approval_status"
-      label="Status"      
-    >
-      <Select mode="single" placeholder="Select status" value="Pending" defaultValue={`Pending`} rules={[{ required: true, message: 'Select status', },]}>
-        <Option value="Pending">Pending</Option>
-        <Option value="Accepted">Paid</Option>
-        <Option value="Rejected">Rejected</Option>
-      </Select>
-    </Form.Item>
+                name="approval_status"
+                label="Status"
+                rules={[{ required: true, message: 'Select status' }]}
+              >
+                <Select
+                  mode="single"
+                  placeholder="Select status"
+                >
+                  <Option value="Pending">Pending</Option>
+                  <Option value="Accepted">Paid</Option>
+                  <Option value="Rejected">Rejected</Option>
+                </Select>
+              </Form.Item>
               </Col>
               </Row>
 

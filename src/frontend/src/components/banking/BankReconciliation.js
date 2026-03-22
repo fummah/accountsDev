@@ -26,9 +26,10 @@ const BankReconciliation = () => {
   const loadAccounts = async () => {
     try {
       const data = await window.electronAPI.getChartOfAccounts();
+      const list = Array.isArray(data) ? data : [];
       // Filter only bank accounts
-      const bankAccounts = data.filter(account => 
-        account.accountType.toLowerCase().includes('bank')
+      const bankAccounts = list.filter(account => 
+        (account.accountType || '').toLowerCase().includes('bank')
       );
       setAccounts(bankAccounts);
     } catch (error) {
@@ -39,7 +40,8 @@ const BankReconciliation = () => {
   const loadTransactions = async () => {
     try {
       setLoading(true);
-      const data = await window.electronAPI.getTransactions();
+      const raw = await window.electronAPI.getTransactions();
+      const data = Array.isArray(raw) ? raw : [];
       // Filter transactions for selected account and up to statement date
       const filtered = data.filter(tx => 
         tx.accountId === selectedAccount &&

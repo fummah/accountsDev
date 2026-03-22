@@ -15,7 +15,7 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
 };
 
 
-const ProfitAndLoss = ({CurrentBalance, Invoiced, Expensed}) => {
+const ProfitAndLoss = ({ CurrentBalance, Invoiced, Expensed }) => {
 
  
   // Safe percentage calculations. If totals are zero, show 0%.

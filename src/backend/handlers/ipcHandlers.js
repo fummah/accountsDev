@@ -23,21 +23,223 @@ const {
 } = require('./../models');
 
 const Tax = require('../models/tax');
+const Approvals = require('../models/approvals');
 
 const registerIpcHandlers = () => {
-  // Create the tax_filings table when handlers are registered
-  Tax.createTable();
-  // Handler to get all employees
-  ipcMain.handle('get-employees', async () => {
-    try {
-      return await Employees.getAllEmployees();
-    } catch (error) {
-      console.error('Error fetching employees:', error);
-      return { error: error.message };
-    }
-  });
+  console.log('[ipcHandlers] registerIpcHandlers called');
 
-  ipcMain.handle('get-users', async () => {
+  // Helper: skip duplicate handler registrations instead of throwing
+  const registeredChannels = new Set();
+  const safeHandle = (channel, handler) => {
+    try {
+      ipcMain.handle(channel, handler);
+      registeredChannels.add(channel);
+    } catch (e) {
+      if (e.message && e.message.includes('second handler')) {
+        // Already registered by another handler module – skip silently
+      } else {
+        console.error(`[ipcHandlers] Error registering '${channel}':`, e);
+      }
+    }
+  };
+  // Create the tax_filings table when handlers are registered
+  try {
+    Tax.createTable();
+  } catch (err) {
+    console.error('[ipcHandlers] Tax.createTable error:', err);
+  }
+
+  // Fallback lightweight entity handlers (in case accounting handlers haven't registered yet)
+  try {
+    const Entities = require('../models/entities');
+    const Transactions = require('../models/transactions');
+    const Classes = require('../models/classes');
+    const Locations = require('../models/locations');
+    const Departments = require('../models/departments');
+    const ChartOfAccounts = require('../models/chartOfAccounts');
+    const COAVersions = require('../models/coaVersions');
+    try {
+      safeHandle('entities-list', async () => {
+        try {
+          return Entities.listEntities();
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+    try {
+      safeHandle('entities-create', async (_event, payload) => {
+        try {
+          return Entities.createEntity(payload || {});
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+    try {
+      safeHandle('entity-assign-user', async (_event, { userId, entityId, role }) => {
+        try {
+          return Entities.assignUserToEntity({ userId, entityId, role });
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+    try {
+      safeHandle('get-trial-balance-consolidated', async (_event, payload) => {
+        try {
+          const { entityIds, startDate, endDate, eliminateIntercompany } = payload || {};
+          return Transactions.getTrialBalanceByEntities(
+            Array.isArray(entityIds) ? entityIds : [],
+            startDate,
+            endDate,
+            { eliminateIntercompany: eliminateIntercompany !== false }
+          );
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+    try {
+      safeHandle('get-trial-balance-advanced', async (_event, filters) => {
+        try {
+          return Transactions.getTrialBalanceAdvanced(filters || {});
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+
+    // Fallback dimension handlers
+    try {
+      safeHandle('classes-list', async () => {
+        try { return Classes.list(); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+    try {
+      safeHandle('classes-create', async (_e, payload) => {
+        try { return Classes.create(payload || {}); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+    try {
+      safeHandle('locations-list', async () => {
+        try { return Locations.list(); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+    try {
+      safeHandle('locations-create', async (_e, payload) => {
+        try { return Locations.create(payload || {}); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+    try {
+      safeHandle('departments-list', async () => {
+        try { return Departments.list(); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+    try {
+      safeHandle('departments-create', async (_e, payload) => {
+        try { return Departments.create(payload || {}); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+
+    // Fallback COA import/export + versions
+    try {
+      safeHandle('coa-export-template', async () => {
+        try {
+          const header = 'number,name,type,status';
+          const sample = '1000,Cash,Asset,Active';
+          return { success: true, csv: `${header}\n${sample}\n` };
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+    try {
+      safeHandle('coa-export-current', async () => {
+        try {
+          const rows = await ChartOfAccounts.getAllAccounts();
+          const header = 'number,name,type,status';
+          const body = (rows || []).map(r => {
+            const num = r.accountNumber || r.number || '';
+            const name = r.accountName || r.name || '';
+            const type = r.type || '';
+            const status = r.status || 'Active';
+            return [num, name, type, status].map(v => String(v ?? '').replace(/"/g, '""')).join(',');
+          }).join('\n');
+          return { success: true, csv: `${header}\n${body}\n` };
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+    try {
+      safeHandle('coa-import', async (_e, { csvText, note }) => {
+        try {
+          if (!csvText || typeof csvText !== 'string') throw new Error('csvText required');
+          try { COAVersions.createFromCurrent(note || 'Pre-import snapshot'); } catch {}
+
+          const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          if (lines.length <= 1) throw new Error('CSV has no data rows');
+          const header = lines.shift();
+          const cols = header.split(',').map(h => h.trim().toLowerCase());
+          const idxNum = cols.indexOf('number');
+          const idxName = cols.indexOf('name');
+          const idxType = cols.indexOf('type');
+          const idxStatus = cols.indexOf('status');
+          let inserted = 0;
+          for (const line of lines) {
+            const parts = line.split(',').map(p => p.trim());
+            const number = idxNum >= 0 ? parts[idxNum] : null;
+            const name = idxName >= 0 ? parts[idxName] : null;
+            const type = idxType >= 0 ? parts[idxType] : null;
+            if (!name || !type) continue;
+            try { await ChartOfAccounts.insertAccount(name, type, number || null, 'import'); inserted++; } catch {}
+          }
+          try { COAVersions.createFromCurrent(note || 'Post-import snapshot'); } catch {}
+          return { success: true, inserted };
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+    try {
+      safeHandle('coa-versions-list', async () => {
+        try { return COAVersions.list(100); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+    try {
+      safeHandle('coa-version-create', async (_e, note) => {
+        try { return COAVersions.createFromCurrent(note || 'Manual snapshot'); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+    try {
+      safeHandle('coa-version-restore', async (_e, id) => {
+        try { return COAVersions.restore(id); } catch (e) { return { error: e.message }; }
+      });
+    } catch {}
+
+    // Recurring reminders (smart notifications) - recent audit logs
+    try {
+      safeHandle('recurring-reminders', async (_e, { limit = 20 } = {}) => {
+        try {
+          const db = require('../models/dbmgr');
+          const rows = db.prepare(`
+            SELECT id, timestamp, action, entityType, entityId, details
+            FROM audit_logs
+            WHERE action='recurringReminder'
+            ORDER BY timestamp DESC
+            LIMIT ?
+          `).all(limit);
+          return rows;
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+    } catch {}
+  } catch {}
+  
+  // User handlers
+  safeHandle('get-users', async () => {
     try {
       return await Users.getAllUsers();
     } catch (error) {
@@ -45,92 +247,22 @@ const registerIpcHandlers = () => {
       return { error: error.message };
     }
   });
-// Transactions
-ipcMain.handle('get-transactions', async () => {
-  try {
-    return Transactions.getAll();
-  } catch (error) {
-    console.error('Error fetching transactions:', error);
-    return { error: error.message };
-  }
-});
-ipcMain.handle('insert-transaction', async (event, tx) => {
-  try {
-    return Transactions.insert(tx);
-  } catch (error) {
-    console.error('Error inserting transaction:', error);
-    return { error: error.message };
-  }
-});
-ipcMain.handle('void-transaction', async (event, id) => {
-  try {
-    return Transactions.voidTransaction(id);
-  } catch (error) {
-    console.error('Error voiding transaction:', error);
-    return { error: error.message };
-  }
-});
 
-// Journal
-ipcMain.handle('get-journal', async () => {
-  try {
-    return Journal.getAll();
-  } catch (error) {
-    console.error('Error fetching journal:', error);
-    return { error: error.message };
-  }
-});
-ipcMain.handle('insert-journal', async (event, entry) => {
-  try {
-    return Journal.insert(entry);
-  } catch (error) {
-    console.error('Error inserting journal entry:', error);
-    return { error: error.message };
-  }
-});
-
-// Ledger
-ipcMain.handle('get-ledger', async () => {
-  try {
-    return Ledger.getAll();
-  } catch (error) {
-    console.error('Error fetching ledger:', error);
-    return { error: error.message };
-  }
-});
-
-  ipcMain.handle('updateuser', async (event, userData) => {
+  // Handler to update user profile
+  safeHandle('updateuser', async (event, userData) => {
     try {
-      return await Users.updateUser(userData);
+      console.log('Updating user with data:', userData);
+      const result = await Users.updateUser(userData);
+      console.log('Update result:', result);
+      return result;
     } catch (error) {
       console.error('Error updating user:', error);
       return { error: error.message };
     }
   });
 
-  // Handler to insert an employee
-  ipcMain.handle('insert-employee', async (event, employeeData) => {
-    try {
-      const { first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status } = employeeData;
-      return await Employees.insertEmployee(first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status);
-    } catch (error) {
-      console.error('Error inserting employee:', error);
-      return { error: error.message };
-    }
-  });
-
-   // Handler to get all Customers
-   ipcMain.handle('get-customers', async () => {
-    try {
-      return await Customers.getAllCustomers();
-    } catch (error) {
-      console.error('Error fetching cutomers:', error);
-      return { error: error.message };
-    }
-  });
-
   // Handler to insert an customer
-  ipcMain.handle('insert-customer', async (event, title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
+  safeHandle('insert-customer', async (event, title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
     fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes) => {
     try {
       return await Customers.insertCustomer(title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
@@ -142,7 +274,7 @@ ipcMain.handle('get-ledger', async () => {
   });
 
   // Handler to get all Suppliers
-  ipcMain.handle('get-suppliers', async () => {
+  safeHandle('get-suppliers', async () => {
     try {
       return await Suppliers.getAllSuppliers();
     } catch (error) {
@@ -150,12 +282,20 @@ ipcMain.handle('get-ledger', async () => {
       return { error: error.message };
     }
   });
+  safeHandle('get-suppliers-paginated', async (event, page, pageSize, search) => {
+    try {
+      return await Suppliers.getPaginated(page, pageSize, search || '');
+    } catch (error) {
+      console.error('Error fetching suppliers (paginated):', error);
+      return { error: error.message };
+    }
+  });
 
-  // Handler to insert an supplier
-  ipcMain.handle('insert-supplier', async (event, first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
+  // Handler to insert a supplier
+safeHandle('insert-supplier', async (event, title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
     fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes) => {
     try {
-      return await Suppliers.insertSupplier(first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
+      return await Suppliers.insertSupplier(title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
         fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes);
     } catch (error) {
       console.error('Error inserting supplier:', error);
@@ -164,7 +304,7 @@ ipcMain.handle('get-ledger', async () => {
   });
 
 // Handler to get all Expenses
-ipcMain.handle('get-expenses', async () => {
+safeHandle('get-expenses', async () => {
   try {
     return await Expenses.getAllExpenses();
   } catch (error) {
@@ -172,19 +312,57 @@ ipcMain.handle('get-expenses', async () => {
     return { error: error.message };
   }
 });
-
-// Handler to insert an expense
-ipcMain.handle('insert-expense', async (event, payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => {
+safeHandle('get-expenses-paginated', async (event, page, pageSize, search) => {
   try {
-    return await Expenses.insertExpense(payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines);
+    return await Expenses.getPaginated(page, pageSize, search || '');
+  } catch (error) {
+    console.error('Error fetching expenses (paginated):', error);
+    return { error: error.message };
+  }
+});
+
+// Handler to insert an expense (auto-applies approval policy when configured)
+safeHandle('insert-expense', async (event, payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => {
+  try {
+    const totalAmount = Array.isArray(expenseLines) ? expenseLines.reduce((s, l) => s + (Number(l.amount) || 0), 0) : 0;
+    const policy = Approvals.findMatchingPolicy('expense', totalAmount);
+    const statusToUse = policy ? 'Pending' : (approval_status || 'Approved');
+    const res = await Expenses.insertExpense(payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,statusToUse,expenseLines);
+    if (res && res.success && policy) {
+      try {
+        await Approvals.createApproval({
+          policyId: policy.id,
+          entityType: 'expense',
+          entityId: res.expenseId,
+          amount: totalAmount,
+          requestedBy: entered_by,
+          requiredLevels: policy.requiredLevels || 1
+        });
+      } catch {}
+    }
+    return res;
   } catch (error) {
     console.error('Error inserting expense:', error);
     return { error: error.message };
   }
 });
 
+// Mark an expense as paid (simple status update)
+safeHandle('mark-expense-paid', async (event, id) => {
+  try {
+    const stmt = require('./../models').Expenses ? require('./../models').Expenses : require('../models').Expenses;
+    // Use direct DB update for status to avoid changing lines
+  const db = require('../models/dbmgr');
+    const res = db.prepare('UPDATE expenses SET approval_status = ? WHERE id = ?').run('Paid', id);
+    return { success: res.changes > 0 };
+  } catch (error) {
+    console.error('Error marking expense paid:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Handler to get all Quotes
-ipcMain.handle('get-quotes', async () => {
+safeHandle('get-quotes', async () => {
   try {
     return await Quotes.getAllQuotes();
   } catch (error) {
@@ -193,8 +371,17 @@ ipcMain.handle('get-quotes', async () => {
   }
 });
 
+safeHandle('get-quotes-paginated', async (event, page, pageSize, search, status) => {
+  try {
+    return await Quotes.getPaginated(page, pageSize, search || '', status || '');
+  } catch (error) {
+    console.error('Error fetching quotes (paginated):', error);
+    return { error: error.message };
+  }
+});
+
 // Handler to get single Quote
-ipcMain.handle('get-singleQuote', async (event,quote_id) => {
+safeHandle('get-singleQuote', async (event,quote_id) => {
   try {
     return await Quotes.getSingleQuote(quote_id);
   } catch (error) {
@@ -205,7 +392,7 @@ ipcMain.handle('get-singleQuote', async (event,quote_id) => {
 });
 
 // Handler to insert an quote
-ipcMain.handle('insert-quote', async (event, status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines) => {
+safeHandle('insert-quote', async (event, status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines) => {
   try {
     return await Quotes.insertQuote(status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines);
   } catch (error) {
@@ -214,35 +401,10 @@ ipcMain.handle('insert-quote', async (event, status,customer,customer_email, isl
   }
 });
 
-// Handler to get all Invoices
-ipcMain.handle('get-invoices', async () => {
-  try {
-    return await Invoices.getAllInvoices();
-  } catch (error) {
-    console.error('Error fetching invoices:', error);
-    return { error: error.message };
-  }
-});
 
-ipcMain.handle('get-singleInvoice', async (event,invoice_id) => {
-  try {
-    return await Invoices.getSingleInvoice(invoice_id);
-  } catch (error) {    
-    console.error('Error fetching invoice:', error);
-    return { error: error.message };
-  }
-});
+// get-singleCustomer moved to customerHandlers.js
 
-ipcMain.handle('get-singleCustomer', async (event,customer_id) => {
-  try {
-    return await Customers.getSingleCustomer(customer_id);
-  } catch (error) {    
-    console.error('Error fetching customer:', error);
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('get-singleSupplier', async (event,supplier_id) => {
+safeHandle('get-singleSupplier', async (event,supplier_id) => {
   try {
     return await Suppliers.getSingleSupplier(supplier_id);
   } catch (error) {    
@@ -251,37 +413,10 @@ ipcMain.handle('get-singleSupplier', async (event,supplier_id) => {
   }
 });
 
-ipcMain.handle('invoicesummary', async () => {
-  try {
-    return await Invoices.getInvoiceSummary();
-  } catch (error) {    
-    console.error('Error fetching invoice summary:', error);
-    return { error: error.message };
-  }
-});
 
-ipcMain.handle('dashboard', async () => {
-  try {
-    console.log(Invoices.getDashboardSummary());
-    return await Invoices.getDashboardSummary();
-  } catch (error) {    
-    console.error('Error fetching dashboard summary:', error);
-    return { error: error.message };
-  }
-});
-
-// Handler to insert an invoice
-ipcMain.handle('insert-invoice', async (event, customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines) => {
-  try {
-       return await Invoices.insertInvoice(customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines);
-  } catch (error) {
-    console.error('Error inserting invoice:', error);
-    return { error: error.message };
-  }
-});
 
 // Handler to get all Products
-ipcMain.handle('get-products', async () => {
+safeHandle('get-products', async () => {
   try {
     return await Products.getAllProducts();
   } catch (error) {
@@ -290,8 +425,17 @@ ipcMain.handle('get-products', async () => {
   }
 });
 
+safeHandle('get-products-paginated', async (event, page, pageSize, search, typeFilter) => {
+  try {
+    return await Products.getPaginated(page, pageSize, search || '', typeFilter || '');
+  } catch (error) {
+    console.error('Error fetching products (paginated):', error);
+    return { error: error.message };
+  }
+});
+
 // Handler to insert an product
-ipcMain.handle('insert-product', async (event, type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by) => {
+safeHandle('insert-product', async (event, type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by) => {
   try {
     return await Products.insertProduct(type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by);
   } catch (error) {
@@ -301,7 +445,7 @@ ipcMain.handle('insert-product', async (event, type,name,sku, category, descript
 });
 
 // Handler to get all Vat
-ipcMain.handle('get-vat', async () => {
+safeHandle('get-vat', async () => {
   try {
     return await Vat.getAllVat();
   } catch (error) {
@@ -310,8 +454,18 @@ ipcMain.handle('get-vat', async () => {
   }
 });
 
+// Handler to get VAT report
+safeHandle('get-vatreport', async (event, start_date, last_date) => {
+  try {
+    return await Vat.getVatReport(start_date, last_date);
+  } catch (error) {
+    console.error('Error fetching VAT report:', error);
+    return { error: error.message };
+  }
+});
+
 // Handler to insert an vat
-ipcMain.handle('insert-vat', async (event, vat_name,vat_percentage,entered_by) => {
+safeHandle('insert-vat', async (event, vat_name,vat_percentage,entered_by) => {
   try {
     return await Vat.insertVat(vat_name,vat_percentage,entered_by);
   } catch (error) {
@@ -320,104 +474,25 @@ ipcMain.handle('insert-vat', async (event, vat_name,vat_percentage,entered_by) =
   }
 });
 
-// Chart of Accounts handlers
-ipcMain.handle('get-chart-accounts', async () => {
-  try {
-    return await ChartOfAccounts.getAllAccounts();
-  } catch (error) {
-    console.error('Error fetching chart of accounts:', error);
-    return { error: error.message };
-  }
-});
+// Chart of Accounts handlers are provided by accountingHandlers.js
+// Fixed assets handlers (get-fixed-assets, insert-fixed-asset, update-fixed-asset, delete-fixed-asset) are in accountingHandlers.js
 
-ipcMain.handle('insert-chart-account', async (event, name, type, number, entered_by) => {
-  try {
-    return await ChartOfAccounts.insertAccount(name, type, number, entered_by);
-  } catch (error) {
-    console.error('Error inserting chart account:', error);
-    return { error: error.message };
-  }
-});
+// Asset events (revaluation / disposal)
+try {
+  const AssetEvents = require('../models/assetEvents');
+  safeHandle('asset-events-list', async (_e, assetId) => {
+    try { return AssetEvents.list(assetId); } catch (e) { return { error: e.message }; }
+  });
+  safeHandle('asset-event-add', async (_e, payload) => {
+    try { return AssetEvents.add(payload || {}); } catch (e) { return { error: e.message }; }
+  });
+} catch {}
 
-// Fixed assets handlers
-ipcMain.handle('get-fixed-assets', async () => {
-  try {
-    return await FixedAssets.getAllAssets();
-  } catch (error) {
-    console.error('Error fetching fixed assets:', error);
-    return { error: error.message };
-  }
-});
 
-ipcMain.handle('insert-fixed-asset', async (event, name, category, value, entered_by) => {
-  try {
-    return await FixedAssets.insertAsset(name, category, value, entered_by);
-  } catch (error) {
-    console.error('Error inserting fixed asset:', error);
-    return { error: error.message };
-  }
-});
-
-// Handler to get all invoice
-ipcMain.handle('get-initinvoice', async (event,invoice_id, type) => {
-  try {
-    return await Invoices.getInitialInvoice(invoice_id, type);
-  } catch (error) {    
-    console.error(`Error fetching: ${type}`, error);
-    return { error: error.message };
-  }
-});
-
-// Handler to get all Financial Reports
-ipcMain.handle('get-financial', async (event,start_date, last_date) => {
-  try {
-    return await Invoices.getFinancialReport(start_date, last_date);
-  } catch (error) {    
-    console.error(`Error fetching:`, error);
-    return { error: error.message };
-  }
-});
-
-// Handler to get all Management Reports
-ipcMain.handle('get-management', async (event,start_date, last_date) => {
-  try {
-    return await Invoices.getManagementReport(start_date, last_date);
-  } catch (error) {    
-    console.error(`Error fetching:`, error);
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('get-budgets', async () => {
-  try {
-    return await Budgets.getBudgets();
-  } catch (error) {
-    console.error('Error fetching budgets:', error);
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('insert-budget', async (event, department, period, amount, forecast, entered_by) => {
-  try {
-    return await Budgets.insertBudget(department, period, amount, forecast, entered_by);
-  } catch (error) {
-    console.error('Error inserting budget:', error);
-    return { error: error.message };
-  }
-});
+// Invoice handlers moved to invoiceHandlers.js
 
 // Handler update Invoice
-ipcMain.handle('updateinvoice', async (event,invoiceData) => {
-  try {
-    return await Invoices.updateInvoice(invoiceData);
-  } catch (error) {    
-    console.error('Error updating invoice:', error);
-    return { error: error.message };
-  }
-});
-
-// Handler update Invoice
-ipcMain.handle('updatequote', async (event,quoteData) => {
+safeHandle('updatequote', async (event,quoteData) => {
   try {
     return await Quotes.updateQuote(quoteData);
   } catch (error) {    
@@ -427,7 +502,7 @@ ipcMain.handle('updatequote', async (event,quoteData) => {
 });
 
 // Handler update vat
-ipcMain.handle('updatevat', async (event,vatData) => {
+safeHandle('updatevat', async (event,vatData) => {
   try {
     return await Vat.updateVat(vatData);
   } catch (error) {    
@@ -436,28 +511,10 @@ ipcMain.handle('updatevat', async (event,vatData) => {
   }
 });
 
-// Handler update employee
-ipcMain.handle('updateemployee', async (event,employeeData) => {
-  try {
-    return await Employees.updateEmployee(employeeData);
-  } catch (error) {    
-    console.error('Error updating employee:', error);
-    return { error: error.message };
-  }
-});
-
-// Alias with hyphen to support calls using 'update-employee'
-ipcMain.handle('update-employee', async (event, employeeData) => {
-  try {
-    return await Employees.updateEmployee(employeeData);
-  } catch (error) {
-    console.error('Error updating employee (hyphen alias):', error);
-    return { error: error.message };
-  }
-});
+// Removed duplicate employee handlers - now handled in employeeHandlers.js
 
 // Handler update expense
-ipcMain.handle('updateexpense', async (event,expenseData) => {
+safeHandle('updateexpense', async (event,expenseData) => {
   try {
     return await Expenses.updateExpense(expenseData);
   } catch (error) {    
@@ -467,7 +524,7 @@ ipcMain.handle('updateexpense', async (event,expenseData) => {
 });
 
 // Handler update product
-ipcMain.handle('updateproduct', async (event,productData) => {
+safeHandle('updateproduct', async (event,productData) => {
   try {
     return await Products.updateProduct(productData);
   } catch (error) {    
@@ -477,7 +534,7 @@ ipcMain.handle('updateproduct', async (event,productData) => {
 });
 
 // Handler update customer
-ipcMain.handle('updatecustomer', async (event,customerData) => {
+safeHandle('updatecustomer', async (event,customerData) => {
   try {
     return await Customers.updateCustomer(customerData);
   } catch (error) {    
@@ -487,7 +544,7 @@ ipcMain.handle('updatecustomer', async (event,customerData) => {
 });
 
 // Handler update supplier
-ipcMain.handle('updatesupplier', async (event,supplierData) => {
+safeHandle('updatesupplier', async (event,supplierData) => {
   try {
     return await Suppliers.updateSupplier(supplierData);
   } catch (error) {    
@@ -497,7 +554,7 @@ ipcMain.handle('updatesupplier', async (event,supplierData) => {
 });
 
 // Deleting record
-ipcMain.handle('deletingrecord', async (event,id,table) => {
+safeHandle('deletingrecord', async (event,id,table) => {
   try {
     table = (table || '').toLowerCase();
     switch (table) {
@@ -520,18 +577,10 @@ ipcMain.handle('deletingrecord', async (event,id,table) => {
   }
 });
 
-// convert quote
-ipcMain.handle('convertquote', async (event,quote_id) => {
-  try {
-    return await Quotes.convertToInvoice(quote_id);
-  } catch (error) {    
-    console.error('Error converting quote:', error);
-    return { error: error.message };
-  }
-});
+
 
   // Banking handlers
-  ipcMain.handle('reconcile-transactions', async (event, data) => {
+  safeHandle('reconcile-transactions', async (event, data) => {
     try {
       return await Transactions.reconcileTransactions(data);
     } catch (error) {
@@ -540,7 +589,7 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     }
   });
 
-  ipcMain.handle('create-bank-transfer', async (event, data) => {
+  safeHandle('create-bank-transfer', async (event, data) => {
     try {
       return await Transactions.createBankTransfer(data);
     } catch (error) {
@@ -549,7 +598,7 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     }
   });
 
-  ipcMain.handle('create-deposit', async (event, data) => {
+  safeHandle('create-deposit', async (event, data) => {
     try {
       return await Transactions.createDeposit(data);
     } catch (error) {
@@ -558,7 +607,7 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     }
   });
 
-  ipcMain.handle('process-payroll', async (event, data) => {
+  safeHandle('process-payroll', async (event, data) => {
     try {
       return await Transactions.processPayroll(data);
     } catch (error) {
@@ -567,18 +616,8 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     }
   });
 
-  // Handler to get payroll runs/records
-  ipcMain.handle('get-payroll-records', async () => {
-    try {
-      return await Transactions.getPayrollRuns();
-    } catch (error) {
-      console.error('Error fetching payroll runs:', error);
-      return { error: error.message };
-    }
-  });
-
   // Tax Filing handlers
-  ipcMain.handle('get-tax-records', async () => {
+  safeHandle('get-tax-records', async () => {
     console.log('Getting tax records...');
     try {
       return await Tax.getTaxRecords();
@@ -588,7 +627,7 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     }
   });
 
-  ipcMain.handle('submit-tax-filing', async (_, filingData) => {
+  safeHandle('submit-tax-filing', async (_, filingData) => {
     console.log('Submitting tax filing:', filingData);
     try {
       return await Tax.submitTaxFiling(filingData);
@@ -598,7 +637,7 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     }
   });
 
-  ipcMain.handle('update-tax-filing', async (_, { id, updates }) => {
+  safeHandle('update-tax-filing', async (_, { id, updates }) => {
     console.log('Updating tax filing:', id, updates);
     try {
       return await Tax.updateTaxFiling(id, updates);
@@ -609,7 +648,7 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
   });
 
   // Company handlers
-  ipcMain.handle('get-company', async () => {
+  safeHandle('get-company', async () => {
     try {
       return await Company.getInfo();
     } catch (error) {
@@ -618,12 +657,27 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     }
   });
 
-  ipcMain.handle('save-company', async (event, data) => {
+  safeHandle('save-company', async (event, data) => {
     try {
       return await Company.saveInfo(data);
     } catch (error) {
       console.error('Error saving company info:', error);
       return { error: error.message };
+    }
+  });
+
+  // Seed massive dummy data (invoices, customers, quotes, entities, etc.)
+  safeHandle('seed-dummy-data', async (_event, countsOverride) => {
+    try {
+      const path = require('path');
+      const seedPath = path.join(__dirname, '..', '..', 'scripts', 'seed-dummy-data.js');
+      const { runSeed } = require(seedPath);
+      const db = require('../models/dbmgr');
+      const summary = runSeed(db, countsOverride || {});
+      return { success: true, summary };
+    } catch (error) {
+      console.error('Error seeding dummy data:', error);
+      return { success: false, error: error.message };
     }
   });
 };

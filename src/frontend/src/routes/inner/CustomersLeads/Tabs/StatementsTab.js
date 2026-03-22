@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   DatePicker,
@@ -69,27 +69,63 @@ const StatementsTab = () => {
   const [form] = Form.useForm();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [customers, setCustomers] = useState([]);
 
-  const generateStatement = () => {
-    form
-      .validateFields()
-      .then((values) => {
-        setLoading(true);
+  useEffect(() => {
+    loadCustomers();
+  }, []);
 
-        // Simulate API call
-        setTimeout(() => {
-          setData(mockData);
-          setLoading(false);
-          message.success("Statement generated successfully");
-        }, 1000);
-      })
-      .catch(() => {
-        message.error("Please fill in all required fields.");
-      });
+  const loadCustomers = async () => {
+    try {
+      const response = await window.electronAPI.getAllCustomers();
+      setCustomers(response.all || []);
+    } catch (error) {
+      message.error('Failed to load customers');
+      console.error('Error loading customers:', error);
+    }
   };
 
-  const exportPDF = () => {
-    message.info("Export to PDF not implemented yet.");
+  const generateStatement = async () => {
+    try {
+      const values = await form.validateFields();
+      setLoading(true);
+
+      // Convert date range to start_date and last_date format
+      const [startDate, endDate] = values.dateRange;
+      const statementData = {
+        customerId: values.customer,
+        start_date: startDate.format('YYYY-MM-DD'),
+        last_date: endDate.format('YYYY-MM-DD'),
+        email: values.email
+      };
+
+      const response = await window.electronAPI.createStatement(statementData);
+      
+      if (response.success) {
+        setData(response.data);
+        message.success("Statement generated successfully");
+      } else {
+        console.log('Error generating statement:', response);
+        message.error(response.error || "Failed to generate statement");
+      }
+    } catch (error) {
+      console.log('Error generating statement:', error);
+      message.error(error.message || "Please fill in all required fields.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const exportPDF = async () => {
+    try {
+      // You can implement PDF export using the statement data
+      const values = await form.getFieldsValue();
+      // Implement PDF generation logic here
+      message.success("PDF export started...");
+    } catch (error) {
+      message.error("Failed to export PDF");
+      console.error('PDF export error:', error);
+    }
   };
 
   return (
@@ -100,9 +136,19 @@ const StatementsTab = () => {
           label="Customer"
           rules={[{ required: true, message: "Please select a customer" }]}
         >
-          <Select placeholder="Select customer">
-            <Option value="john">John Doe</Option>
-            <Option value="jane">Jane Smith</Option>
+          <Select 
+            placeholder="Select customer"
+            showSearch
+            optionFilterProp="children"
+            filterOption={(input, option) =>
+              option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+            }
+          >
+            {customers.map(customer => (
+              <Option key={customer.id} value={customer.id}>
+                {customer.company_name || `${customer.first_name} ${customer.last_name}`}
+              </Option>
+            ))}
           </Select>
         </Form.Item>
 

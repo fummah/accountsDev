@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import {Table,Dropdown,Menu,Col, Row} from "antd";
+import { Table, Dropdown, Menu, Col, Row, Select, Input } from "antd";
 import { useRedirectToItem } from 'util/navigation';
-import { Input, Space } from 'antd';
-import { SearchOutlined,PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
+import { SearchOutlined, PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
 
 const options = [
   'Edit',
@@ -24,8 +23,9 @@ const menus = () => (<Menu onClick={(e) => {
 </Menu>);
 
 
-const ProductsList = ({products, onSelectProduct, setAddUserState, handleSearchedTxt, onDelete}) => {
+const ProductsList = ({ products, loading = false, total = 0, page = 1, pageSize = 25, onTableChange, onSearch, typeFilter, onTypeFilterChange, onSelectProduct, setAddUserState, onDelete }) => {
   const redirectToItem = useRedirectToItem();
+  const [searchInput, setSearchInput] = useState('');
   const columns = [
     {
       title: 'Name',
@@ -52,18 +52,15 @@ const ProductsList = ({products, onSelectProduct, setAddUserState, handleSearche
       render: (text, record) => {
         return <span className="gx-text-grey">{record.type}</span>
       },
-    }
-    ,
-      {
+    },
+    {
         title: 'Sales description',
         dataIndex: 'description',
         render: (text, record) => {
           return <span className="gx-text-grey">{record.description}</span>
         },
-  
     },
-    ,
-      {
+    {
         title: 'Sales price',
         dataIndex: 'price',
         render: (text, record) => {
@@ -102,7 +99,6 @@ const ProductsList = ({products, onSelectProduct, setAddUserState, handleSearche
   
   ];
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
-  const [loading, setLoading] = useState(false);
 
  
   const rowSelection = {
@@ -115,11 +111,33 @@ const ProductsList = ({products, onSelectProduct, setAddUserState, handleSearche
   const hasSelected = selectedRowKeys.length > 0;
   return (
 <>
-    <Row>
-    <Col xs={24} sm={8} md={8}>
-    <Input placeholder="search..." suffix={<SearchOutlined />} onKeyUp={handleSearchedTxt}/>
+    <Row gutter={8}>
+    <Col xs={24} sm={10} md={8}>
+      <Input
+        placeholder="Search (press Enter)"
+        suffix={<SearchOutlined />}
+        allowClear
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
+        onPressEnter={() => typeof onSearch === 'function' && onSearch(searchInput)}
+        onClear={() => { setSearchInput(''); typeof onSearch === 'function' && onSearch(''); }}
+      />
     </Col>
-      <Col xs={24} sm={16} md={16}>
+      <Col xs={24} sm={6} md={6}>
+        <Select
+          allowClear
+          placeholder="Filter by type"
+          style={{ width: '100%' }}
+          value={typeFilter || undefined}
+          onChange={(value) =>
+            typeof onTypeFilterChange === 'function' && onTypeFilterChange(value)
+          }
+        >
+          <Select.Option value="Product">Product</Select.Option>
+          <Select.Option value="Service">Service</Select.Option>
+        </Select>
+      </Col>
+      <Col xs={24} sm={8} md={10}>
          <div style={{ display: 'flex', gap: '10px',float:"right" }}>
       <PrinterOutlined style={{ fontSize: '24px', cursor: 'pointer' }} onClick={() => window.print()} />
       <DownloadOutlined style={{ fontSize: '24px', cursor: 'pointer' }} onClick={() => alert("Exporting...")} />
@@ -131,8 +149,10 @@ const ProductsList = ({products, onSelectProduct, setAddUserState, handleSearche
         <Table rowSelection={rowSelection} 
         className="gx-table-no-bordered" 
         columns={columns} 
-        dataSource={products} 
-        pagination={true} size="small"
+        dataSource={products || []} 
+        loading={loading}
+        pagination={typeof onTableChange === 'function' ? { current: page, pageSize, total, showSizeChanger: true, pageSizeOptions: ['10', '25', '50', '100'], showTotal: (t) => `Total ${t} items`, onChange: (p, size) => onTableChange(p, size) } : true}
+        size="small"
         onRow={(record) => ({
           onClick: () => {
             onSelectProduct(record); // Trigger selection when row is clicked

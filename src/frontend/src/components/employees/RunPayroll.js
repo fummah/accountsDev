@@ -15,6 +15,7 @@ const RunPayroll = () => {
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [payrollRows, setPayrollRows] = useState([]);
+  const [payrollRecords, setPayrollRecords] = useState([]);
 
   const columns = [
     {
@@ -115,7 +116,24 @@ const RunPayroll = () => {
       }
     }
     fetchEmployees();
+    loadPayrollRecords();
   }, []);
+
+  const loadPayrollRecords = async () => {
+    try {
+      const response = await window.electronAPI.getPayrollRecords();
+      if (response && response.success) {
+        setPayrollRecords(response.data || []);
+      } else if (Array.isArray(response)) {
+        // Fallback if backend returns raw array
+        setPayrollRecords(response);
+      } else {
+        setPayrollRecords([]);
+      }
+    } catch (error) {
+      setPayrollRecords([]);
+    }
+  };
 
   const handleHoursChange = (key, type, value) => {
     setPayrollRows(prev => {
@@ -163,8 +181,8 @@ const RunPayroll = () => {
       if (result && result.success) {
         message.success(result.message || 'Payroll processed successfully');
         setConfirmModalVisible(false);
-        // reload payroll records if needed
-        // loadPayrollRecords(); // optional: call if payroll page shows history
+        // reload payroll records to include newest run
+        loadPayrollRecords();
       } else {
         throw new Error(result?.error || 'Failed to process payroll');
       }
@@ -292,6 +310,49 @@ const RunPayroll = () => {
         <p>Total Net Pay: $6,500.00</p>
         <p>This action cannot be undone.</p>
       </Modal>
+
+      <Card title="Recent Payroll Runs" style={{ marginTop: 24 }}>
+        <Table
+          columns={[
+            {
+              title: 'Run ID',
+              dataIndex: 'id',
+              key: 'id',
+            },
+            {
+              title: 'Pay Period',
+              key: 'payPeriod',
+              render: (_, record) => `${(record.payPeriodStart || record.pay_period_start || '').toString()} - ${(record.payPeriodEnd || record.pay_period_end || '').toString()}`,
+            },
+            {
+              title: 'Processed Date',
+              dataIndex: 'processedDate',
+              key: 'processedDate',
+              render: (d, r) => (d || r.processed_date || r.created_at || '').toString(),
+            },
+            {
+              title: 'Total Net Paid',
+              dataIndex: 'totalNetPay',
+              key: 'totalNetPay',
+              render: (amount, r) => `$${Number(amount ?? r.total_net_pay ?? 0).toFixed(2)}`,
+            },
+            {
+              title: 'Payments',
+              dataIndex: 'paymentsCount',
+              key: 'paymentsCount',
+              render: (v, r) => v ?? r.payments_count ?? 0,
+            },
+            {
+              title: 'Status',
+              dataIndex: 'status',
+              key: 'status',
+            },
+          ]}
+          dataSource={payrollRecords}
+          rowKey="id"
+          pagination={{ pageSize: 10 }}
+        />
+      </Card>
     </Card>
   );
 };

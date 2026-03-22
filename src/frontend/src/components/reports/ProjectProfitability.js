@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Table, DatePicker, Select, Button, Row, Col, Form, Statistic } from 'antd';
-import { DollarOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, Table, DatePicker, Select, Button, Row, Col, Form, Statistic, message } from 'antd';
+import { DollarOutlined, ArrowUpOutlined, ArrowDownOutlined, PrinterOutlined } from '@ant-design/icons';
 import moment from 'moment';
 
 const { RangePicker } = DatePicker;
@@ -11,6 +11,7 @@ const ProjectProfitability = () => {
   const [selectedProject, setSelectedProject] = useState('all');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -69,7 +70,7 @@ const ProjectProfitability = () => {
       key: 'margin',
       align: 'right',
       render: (_, record) => {
-        const margin = (record.revenue - record.costs) / record.revenue * 100;
+        const margin = record.revenue > 0 ? (record.revenue - record.costs) / record.revenue * 100 : 0;
         const color = margin >= 0 ? '#3f8600' : '#cf1322';
         return (
           <span style={{ color }}>
@@ -78,8 +79,8 @@ const ProjectProfitability = () => {
         );
       },
       sorter: (a, b) => {
-        const marginA = (a.revenue - a.costs) / a.revenue;
-        const marginB = (b.revenue - b.costs) / b.revenue;
+        const marginA = a.revenue > 0 ? (a.revenue - a.costs) / a.revenue : 0;
+        const marginB = b.revenue > 0 ? (b.revenue - b.costs) / b.revenue : 0;
         return marginA - marginB;
       }
     }
@@ -89,37 +90,49 @@ const ProjectProfitability = () => {
     setLoading(true);
     setError(null);
     try {
-      // Best-effort: use management report or financial report to derive project-level overview
-      const report = await window.electronAPI.getManagementReport(
-        dateRange[0].format('YYYY-MM-DD'),
-        dateRange[1].format('YYYY-MM-DD')
-      );
-      if (report && Array.isArray(report.chartData)) {
-        // Map chartData (name/value) into projects
-        const rows = report.chartData.map((r, i) => ({
-          key: String(i + 1),
-          projectName: r.name,
-          startDate: dateRange[0].format('YYYY-MM-DD'),
-          revenue: Number(r.value || 0),
-          costs: 0,
-        }));
-        setData(rows);
-      } else if (report && Array.isArray(report.tableData)) {
-        // Fallback use tableData
-        const rows = report.tableData.map((r, i) => {
-          const raw = typeof r.value === 'string' ? Number(String(r.value).replace(/[^0-9.-]+/g, '')) : Number(r.value || 0);
-          return {
-            key: String(i + 1),
-            projectName: r.metric,
-            startDate: dateRange[0].format('YYYY-MM-DD'),
-            revenue: raw,
-            costs: 0,
-          };
-        });
-        setData(rows);
-      } else {
-        setData([]);
-      }
+      // Pull live invoices and expenses within range
+      const [invoicesRes, expensesRes] = await Promise.all([
+        window.electronAPI.getAllInvoices(),
+        window.electronAPI.getAllExpenses()
+      ]);
+      const invoices = Array.isArray(invoicesRes?.all) ? invoicesRes.all : (Array.isArray(invoicesRes) ? invoicesRes : []);
+      const expenses = Array.isArray(expensesRes?.all) ? expensesRes.all : (Array.isArray(expensesRes) ? expensesRes : []);
+
+      // Filter by date range
+      const start = dateRange[0].startOf('day');
+      const end = dateRange[1].endOf('day');
+      const invInRange = invoices.filter(inv => inv.start_date && moment(inv.start_date).isBetween(start, end, null, '[]'));
+      const expInRange = expenses.filter(ex => ex.payment_date && moment(ex.payment_date).isBetween(start, end, null, '[]'));
+
+      // Aggregate revenue by customer (project)
+      const revenueByProject = {};
+      invInRange.forEach(inv => {
+        const name = inv.customer_name || inv.customer || 'Unknown';
+        const amount = Number(inv.amount || 0);
+        const vat = Number(inv.vat || 0);
+        const gross = amount + (amount * vat / 100);
+        revenueByProject[name] = (revenueByProject[name] || 0) + gross;
+      });
+
+      // Aggregate cost by payee (also treat as project if it matches customer)
+      const costByProject = {};
+      expInRange.forEach(ex => {
+        const name = ex.payee_name || ex.payee || 'Unknown';
+        const amt = Number(ex.amount || 0);
+        costByProject[name] = (costByProject[name] || 0) + amt;
+      });
+
+      // Merge into rows
+      const projectNames = Array.from(new Set([...Object.keys(revenueByProject), ...Object.keys(costByProject)]));
+      const rows = projectNames.map((p, i) => ({
+        key: String(i + 1),
+        projectName: p,
+        startDate: dateRange[0].format('YYYY-MM-DD'),
+        revenue: Number(revenueByProject[p] || 0),
+        costs: Number(costByProject[p] || 0),
+      }));
+      setData(rows);
+      setProjects(projectNames);
     } catch (err) {
       console.error('Failed to load project profitability', err);
       setError(err.message || String(err));
@@ -146,6 +159,19 @@ const ProjectProfitability = () => {
   const totalProfit = totalRevenue - totalCosts;
   const averageMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
+  const filteredData = useMemo(() => {
+    if (!selectedProject || selectedProject === 'all') return data;
+    return data.filter(r => (r.projectName || '').toString() === selectedProject);
+  }, [data, selectedProject]);
+
+  const handlePrint = () => {
+    try {
+      const rows = filteredData.map(r => `<tr><td>${r.projectName}</td><td>${moment(dateRange[0]).format('YYYY-MM-DD')}</td><td style="text-align:right">${Number(r.revenue||0).toFixed(2)}</td><td style="text-align:right">${Number(r.costs||0).toFixed(2)}</td><td style="text-align:right">${Number((r.revenue||0)-(r.costs||0)).toFixed(2)}</td></tr>`).join('');
+      const html = `<!doctype html><html><head><title>Project Profitability</title><style>table{width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px}</style></head><body><h2>Project Profitability</h2><p>Period: ${dateRange[0].format('YYYY-MM-DD')} to ${dateRange[1].format('YYYY-MM-DD')}</p><table><thead><tr><th>Project</th><th>Start</th><th>Revenue</th><th>Costs</th><th>Profit</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+      const w = window.open('', '_blank'); w.document.open(); w.document.write(html); w.document.close(); setTimeout(() => w.print(), 300);
+    } catch (e) { /* noop */ }
+  };
+
   return (
     <Card title="Project Profitability Report">
       <Form layout="vertical">
@@ -167,8 +193,7 @@ const ProjectProfitability = () => {
                 style={{ width: '100%' }}
               >
                 <Option value="all">All Projects</Option>
-                <Option value="active">Active Projects</Option>
-                <Option value="completed">Completed Projects</Option>
+                {projects.map(p => (<Option key={p} value={p}>{p}</Option>))}
               </Select>
             </Form.Item>
           </Col>
@@ -177,6 +202,7 @@ const ProjectProfitability = () => {
               <Button type="primary" onClick={handleRefresh} loading={loading}>
                 Refresh Report
               </Button>
+              <Button icon={<PrinterOutlined />} style={{ marginLeft: 8 }} onClick={handlePrint}>Print</Button>
             </Form.Item>
           </Col>
         </Row>
@@ -222,7 +248,7 @@ const ProjectProfitability = () => {
 
       <Table
         columns={columns}
-        dataSource={data}
+        dataSource={filteredData}
         loading={loading}
         pagination={false}
         scroll={{ x: true }}

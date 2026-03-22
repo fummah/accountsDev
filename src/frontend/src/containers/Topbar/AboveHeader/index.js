@@ -7,8 +7,6 @@ import CustomScrollbars from "util/CustomScrollbars";
 import languageData from "../languageData";
 import SearchBox from "components/SearchBox";
 import UserInfo from "components/UserInfo";
-import AppNotification from "components/AppNotification";
-import MailNotification from "components/MailNotification";
 import {switchLanguage, toggleCollapsedSideNav} from "../../../appRedux/actions/Setting";
 
 import {TAB_SIZE} from "../../../constants/ThemeSetting";
@@ -108,9 +106,9 @@ const AboveHeader = () => {
               />
             </div>
             <Link to="/" className="gx-d-block gx-d-lg-none gx-pointer gx-mr-xs-3 gx-pt-xs-1 gx-w-logo">
-              <img alt="" src="/assets/images/w-logo.png"/></Link>
+              <img alt="" src={process.env.PUBLIC_URL + "/assets/images/w-logo.png"}/></Link>
             <Link to="/" className="gx-d-none gx-d-lg-block gx-pointer gx-mr-xs-5 gx-logo">
-              <img alt="" src="/assets/images/logo.png"/></Link>
+              <img alt="" src={process.env.PUBLIC_URL + "/assets/images/logo.png"}/></Link>
             <div className="gx-header-search gx-d-none gx-d-lg-flex">
               <SearchBox styleName="gx-lt-icon-search-bar-lg"
                          placeholder="Search in System..."
@@ -139,22 +137,7 @@ const AboveHeader = () => {
                 </Popover>
               </li>
 
-              <li className="gx-notify">
-                <Popover overlayClassName="gx-popover-horizantal" placement="bottomRight" content={<AppNotification/>}
-                         trigger="click">
-                  <span className="gx-pointer gx-d-block"><i className="icon icon-notification"/></span>
-                </Popover>
-              </li>
-
-              <li className="gx-msg">
-                <Popover overlayClassName="gx-popover-horizantal" placement="bottomRight"
-                         content={<MailNotification/>} trigger="click">
-                <span className="gx-pointer gx-status-pos gx-d-block">
-                <i className="icon icon-chat-new"/>
-                <span className="gx-status gx-status-rtl gx-small gx-orange"/>
-                </span>
-                </Popover>
-              </li>
+              {/* notifications removed */}
               <li className="gx-language">
                 <Popover overlayClassName="gx-popover-horizantal" placement="bottomRight"
                          content={languageMenu()} trigger="click">

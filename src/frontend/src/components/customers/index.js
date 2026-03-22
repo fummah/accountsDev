@@ -12,6 +12,8 @@ import QuoteList from './quotes/QuoteList';
 import InvoiceList from './invoices/InvoiceList';
 import CustomerList from './CustomerList';
 import CustomerDetails from './CustomerDetails';
+import Leads from './Leads';
+import CreditNoteList from './creditNotes/CreditNoteList';
 
 const CustomerRoutes = ({ match }) => {
   return (
@@ -30,6 +32,8 @@ const CustomerRoutes = ({ match }) => {
       <Route exact path={`${match.path}/income-tracker`} component={IncomeTracker} />
       <Route exact path={`${match.path}/recurring`} component={RecurringTransactions} />
       <Route exact path={`${match.path}/items`} component={ItemList} />
+      <Route exact path={`${match.path}/leads`} component={Leads} />
+      <Route exact path={`${match.path}/credit-notes`} component={CreditNoteList} />
     </Switch>
   );
 };

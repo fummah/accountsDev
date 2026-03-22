@@ -1,7 +1,7 @@
 import React from "react";
 import {FireOutlined, CreditCardOutlined, UnorderedListOutlined} from '@ant-design/icons';
 
-const WelComeCard = ({UnpaidInvoices, DueQuotes, DuePayments}) => {
+const WelComeCard = ({ UnpaidInvoices, DueQuotes, DuePayments }) => {
   return (
     <div className="gx-wel-ema gx-pt-xl-2">
       <h1 className="gx-mb-3">Welcome Demo!</h1>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect,useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {Col, Row,Card, Alert} from "antd";
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
@@ -7,39 +7,21 @@ import AddEmployee from 'components/Inner/Employees/AddEmployee';
 import Toast from "components/AppNotification/toast.js";
 import dayjs from 'dayjs';
 
-const data = [
-  {
-    id: 1,
-    name: 'John Doe',
-    position: 'Software Engineer',
-    salary: 6000,
-  },
-  {
-    id: 2,
-    name: 'Jane Smith',
-    position: 'Project Manager',
-    salary: 8000,
-  },
-  {
-    id: 3,
-    name: 'Alice Johnson',
-    position: 'Designer',
-    salary: 5000,
-  },
-];
-
-
+const PAGE_SIZE = 25;
 
 const Employees = () => {
   const addEmployeeRef = useRef();
-  const [loadings, setLoadings] = useState([]);
   const [addUserState, setAddUserState] = useState(false);
   const [user, setUser] = useState(null); 
   const [isSuccess, setIsSuccess] = useState(null);
   const [message, setMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [employees, setEmployees] = useState([]);
-  const [employeesSearched, setEmployeesSearched] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
 
   const totalSalary = employees.reduce((sum, employee) => sum + employee.salary, 0);
@@ -60,21 +42,18 @@ const Employees = () => {
       const salary = userData.salary;    
       const date_hired = userData.date_hired ? dayjs(userData.date_hired).format('YYYY-MM-DD') : null;
 
+      const employeeData = { first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status };
       let result;
-        
       if (userData.id) {
-        const id = userData.id;
-        const employeeData = {id,first_name, last_name, mi, email,phone,address, date_hired, entered_by, salary, status};
-        result = await window.electronAPI.updateEmployee(employeeData);   
+        result = await window.electronAPI.updateEmployee({ ...employeeData, id: userData.id });
+      } else {
+        result = await window.electronAPI.insertEmployee(employeeData);
       }
-      else{
-        result = await window.electronAPI.insertEmployee(first_name, last_name, mi, email,phone,address, date_hired, entered_by, salary, status); 
-          }
             console.log(result.message);
       setIsSuccess(result.success);  
       if (result.success) {
         setMessage('Employee saved successfully!');
-        fetchEmployees();
+        fetchEmployees(page, pageSize, search);
         if (addEmployeeRef.current) {
           addEmployeeRef.current.resetForm();
           handleUserClose();
@@ -105,7 +84,7 @@ const Employees = () => {
       setIsSuccess(result.success);  
       if (result.success) {
         setMessage('Record deleted successfully!');
-        fetchEmployees();
+        fetchEmployees(page, pageSize, search);
       
       } else {
         setMessage('Failed to delete. Please try again.');
@@ -119,47 +98,54 @@ const Employees = () => {
     
   };
   
-    const fetchEmployees = async () => {
+    const fetchEmployees = useCallback(async (p = 1, size = PAGE_SIZE, searchTerm = '') => {
         try {
-            const response = await await window.electronAPI.getAllEmployees();          
-            setEmployees(response);
-            setEmployeesSearched(response);
+            setLoading(true);
+            const res = await window.electronAPI.getEmployeesPaginated(p, size, searchTerm);
+            if (res && res.error) {
+              setMessage(`Error fetching employees: ${res.error}`);
+              setShowError(true);
+              return;
+            }
+            setEmployees(res.data || []);
+            setTotal(res.total || 0);
+            setPage(p);
+            setPageSize(size);
         } catch (error) {
           const errorMessage = error.message || "An unknown error occurred.";
           setMessage(`Error fetching employees: ${errorMessage}`);
           setShowError(true);
+        } finally {
+          setLoading(false);
         }
-    };
+    }, []);
 
     useEffect(() => {
-      fetchEmployees();
-  }, []);
+      fetchEmployees(1, PAGE_SIZE, '');
+    }, [fetchEmployees]);
+
+    const handleTableChange = (p, size) => {
+      fetchEmployees(p, size, search);
+    };
+
+    const handleSearch = (value) => {
+      setSearch(value);
+      fetchEmployees(1, pageSize, value);
+    };
 
   const handleUserClose = () => {
     setAddUserState(false);
+    setSelectedEmployee(null); // Clear selected employee when closing
   };
+  
   const showDrawer = () => {
     setSelectedEmployee(null);
     setAddUserState(true);
+    if (addEmployeeRef.current) {
+      addEmployeeRef.current.resetForm();
+    }
   };
 
-  const handleSearchedTxt = (event) => {
-    const value = event.target.value.toLowerCase();
-    if (value.trim() !== '')
-    {
-      const filtered = employees.filter(
-        (item) =>
-          (item.first_name && item.first_name.toLowerCase().includes(value)) ||
-        (item.mi && item.mi.toLowerCase().includes(value))  ||
-        (item.last_name && item.last_name.toLowerCase().includes(value)) 
-      );
-      setEmployeesSearched(filtered);
-    }
-    else{
-      setEmployeesSearched(employees);
-    }
-  };
-  
   return (
     <Auxiliary> 
       <Toast title="Error" message={message} setShowError={setShowError} show={showError} />
@@ -199,7 +185,18 @@ const Employees = () => {
   <Row gutter={[16, 16]}>
           
        <Col xs={24} sm={24} md={24}>
-       <EmployeesList employees={employeesSearched} onSelectEmployee={setSelectedEmployee} setAddUserState={setAddUserState} handleSearchedTxt={handleSearchedTxt} onDelete={deleteRecord}/>
+       <EmployeesList
+         employees={employees}
+         loading={loading}
+         total={total}
+         page={page}
+         pageSize={pageSize}
+         onTableChange={handleTableChange}
+         onSearch={handleSearch}
+         onSelectEmployee={setSelectedEmployee}
+         setAddUserState={setAddUserState}
+         onDelete={deleteRecord}
+       />
        </Col>
       </Row>
   <hr/>

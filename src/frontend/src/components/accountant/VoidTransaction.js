@@ -1,29 +1,58 @@
 import React, { useState } from 'react';
-import { Card, Form, Input, Button, Alert, Table } from 'antd';
+import { Card, Form, Input, Button, Alert, Table, message } from 'antd';
 
 const VoidTransaction = () => {
   const [form] = Form.useForm();
   const [searchResult, setSearchResult] = useState(null);
   const [voided, setVoided] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const onSearch = (values) => {
-    // Simulate searching for a transaction
-    setSearchResult({
-      transactionId: values.transactionId,
-      date: '2025-11-01',
-      amount: '1,000.00',
-      type: 'Invoice',
-      description: 'Sales Invoice #INV-001',
-    });
+  const onSearch = async (values) => {
+    try {
+      setLoading(true);
+      const all = await window.electronAPI.getTransactions();
+      const id = String(values.transactionId).trim();
+      const match = Array.isArray(all) ? all.find(t => String(t.id) === id || String(t.reference || '').trim() === id) : null;
+      if (!match) {
+        setSearchResult(null);
+        message.warning('Transaction not found');
+        return;
+      }
+      setSearchResult({
+        id: match.id,
+        transactionId: match.id,
+        date: match.date,
+        type: match.type,
+        amount: (Number(match.amount || match.debit || 0) || 0).toFixed(2),
+        description: match.description || '',
+        status: match.status || 'Active',
+        reference: match.reference || '',
+      });
+    } catch (e) {
+      message.error('Failed to search transactions');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleVoid = () => {
-    setVoided(true);
-    setTimeout(() => {
-      setVoided(false);
-      setSearchResult(null);
-      form.resetFields();
-    }, 3000);
+  const handleVoid = async () => {
+    try {
+      if (!searchResult || !searchResult.id) return;
+      setLoading(true);
+      const res = await window.electronAPI.voidTransaction(searchResult.id);
+      if (res && (res.changes > 0 || res.success !== false)) {
+        setVoided(true);
+        setSearchResult({ ...searchResult, status: 'Voided' });
+        message.success('Transaction voided');
+      } else {
+        throw new Error(res?.error || 'Void failed');
+      }
+    } catch (e) {
+      message.error(e.message || 'Failed to void transaction');
+    } finally {
+      setLoading(false);
+      setTimeout(() => setVoided(false), 3000);
+    }
   };
 
   const columns = [
@@ -46,6 +75,16 @@ const VoidTransaction = () => {
       title: 'Amount',
       dataIndex: 'amount',
       key: 'amount',
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+    },
+    {
+      title: 'Reference',
+      dataIndex: 'reference',
+      key: 'reference',
     },
     {
       title: 'Description',
@@ -73,13 +112,13 @@ const VoidTransaction = () => {
       >
         <Form.Item
           name="transactionId"
-          label="Transaction ID"
-          rules={[{ required: true, message: 'Please enter transaction ID' }]}
+          label="Transaction ID or Reference"
+          rules={[{ required: true, message: 'Please enter transaction ID or reference' }]}
         >
-          <Input placeholder="Enter transaction ID" />
+          <Input placeholder="Enter transaction ID or Reference" />
         </Form.Item>
         <Form.Item>
-          <Button type="primary" htmlType="submit">
+          <Button type="primary" htmlType="submit" loading={loading}>
             Search Transaction
           </Button>
         </Form.Item>
@@ -92,8 +131,9 @@ const VoidTransaction = () => {
             dataSource={[searchResult]}
             pagination={false}
             style={{ marginBottom: 16 }}
+            rowKey="transactionId"
           />
-          <Button type="primary" danger onClick={handleVoid}>
+          <Button type="primary" danger onClick={handleVoid} disabled={(searchResult.status || '').toLowerCase() === 'voided'} loading={loading}>
             Void Transaction
           </Button>
         </>

@@ -79,16 +79,20 @@ const EmployeeList = () => {
     setEditingEmployee(record);
     form.setFieldsValue({
       ...record,
-      date_hired: moment(record.date_hired)
+      date_hired: record.date_hired ? moment(record.date_hired) : null
     });
     setModalVisible(true);
   };
 
   const handleDelete = async (id) => {
     try {
-      await window.electronAPI.deleteEmployee(id);
-      message.success('Employee deleted successfully');
-      loadEmployees();
+      const res = await window.electronAPI.deleteEmployee(id);
+      if (res && res.success) {
+        message.success('Employee deleted successfully');
+        loadEmployees();
+      } else {
+        throw new Error(res?.error || 'Delete failed');
+      }
     } catch (error) {
       message.error('Failed to delete employee');
     }
@@ -108,10 +112,10 @@ const EmployeeList = () => {
 
   const columns = [
     {
-      title: 'Employee ID',
-      dataIndex: 'employeeId',
-      key: 'employeeId',
-      sorter: (a, b) => a.employeeId.localeCompare(b.employeeId),
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      sorter: (a, b) => Number(a.id) - Number(b.id),
     },
     {
       title: 'Name',

@@ -64,7 +64,8 @@ useEffect(() => {
       <Drawer
         title={`${vat ? 'Edit' : 'Add'} Vat`}
         size='medium'
-        width={400}
+        placement="top"
+        height={400}
         onClose={onUserClose}
         onCancel={onUserClose}
         open={open}

@@ -142,7 +142,7 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
     </Link>
   </Menu.Item>
   <Menu.Item key="inner/customers">
-    <Link to={{ pathname: "/inner/sales", state: { tabKey: "4" } }}>
+    <Link to={{ pathname: "/inner/sales", state: { tabKey: "9" } }}>
       <i className="icon icon-profile2" />
       <span>
         <IntlMessages id="accounts.customers" />
@@ -150,7 +150,7 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
     </Link>
   </Menu.Item>
   <Menu.Item key="inner/products">
-    <Link to={{ pathname: "/inner/sales", state: { tabKey: "5" } }}>
+    <Link to={{ pathname: "/inner/sales", state: { tabKey: "10" } }}>
       <i className="icon icon-view-o" />
       <span>
         <IntlMessages id="accounts.productsandservices" />
@@ -198,6 +198,9 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                   className="icon icon-all-contacts"/><span><IntlMessages
                   id="accounts.customers"/></span></Link>
               </Menu.Item>
+              <Menu.Item key="main/customers/leads">
+                <Link to="/main/customers/leads"><i className="icon icon-crm"/><span>Leads</span></Link>
+              </Menu.Item>
              
               </SubMenu>
               <SubMenu key="transactions" popupClassName={getNavStyleSubMenuClass(navStyle)}
@@ -231,7 +234,7 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
               </Menu.Item>
              
               <Menu.Item key="inner/employees">
-                <Link to="/inner/employees">
+                <Link to="/main/employees/center">
                   <i className="icon icon-profile2"/>
                   <span><IntlMessages id="accounts.employees"/></span>
                 </Link>
@@ -270,6 +273,113 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                   <i className="icon icon-crm"/><span>Cashflow Projector</span></Link>
                 </Menu.Item>        
 </SubMenu>
+
+              <SubMenu key="inventory" popupClassName={getNavStyleSubMenuClass(navStyle)}
+                       title={
+<span>
+<i className="icon icon-list"/>
+<Link to="/main/inventory/stock">
+  <span>Inventory</span>
+</Link>
+</span>
+                       }>
+                <Menu.Item key="main/inventory/stock">
+                  <Link to="/main/inventory/stock"><i className="icon icon-check-square-o -flex-column-reverse"/><span>Stock</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/inventory/warehouses">
+                  <Link to="/main/inventory/warehouses"><i className="icon icon-apps"/><span>Warehouses</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/inventory/bom">
+                  <Link to="/main/inventory/bom"><i className="icon icon-orders"/><span>Bill of Materials</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/inventory/serials">
+                  <Link to="/main/inventory/serials"><i className="icon icon-calendar"/><span>Serial Numbers</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/inventory/barcodes">
+                  <Link to="/main/inventory/barcodes"><i className="icon icon-invert-color"/><span>Barcodes</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/inventory/adjustments">
+                  <Link to="/main/inventory/adjustments"><i className="icon icon-edit"/><span>Adjustments</span></Link>
+                </Menu.Item>
+              </SubMenu>
+
+              <SubMenu key="projects" popupClassName={getNavStyleSubMenuClass(navStyle)}
+                       title={
+<span>
+<i className="icon icon-widgets"/>
+<Link to="/main/projects/center">
+  <span>Projects</span>
+</Link>
+</span>
+                       }>
+                <Menu.Item key="main/projects/center">
+                  <Link to="/main/projects/center"><i className="icon icon-widgets"/><span>Project Center</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/projects/profitability">
+                  <Link to="/main/projects/profitability"><i className="icon icon-chart-area-new"/><span>Profitability</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/projects/timesheets">
+                  <Link to="/main/projects/timesheets"><i className="icon icon-tasks"/><span>Timesheets</span></Link>
+                </Menu.Item>
+              </SubMenu>
+
+              <SubMenu key="pos" popupClassName={getNavStyleSubMenuClass(navStyle)}
+                       title={
+<span>
+<i className="icon icon-cart"/>
+<Link to="/main/pos/session">
+  <span>Point of Sale</span>
+</Link>
+</span>
+                       }>
+                <Menu.Item key="main/pos/session">
+                  <Link to="/main/pos/session"><i className="icon icon-profile2"/><span>Session</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/pos/sale">
+                  <Link to="/main/pos/sale"><i className="icon icon-add-circle"/><span>New Sale</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/pos/sales">
+                  <Link to="/main/pos/sales"><i className="icon icon-lising-dbrd"/><span>Sales</span></Link>
+                </Menu.Item>
+              </SubMenu>
+
+              <SubMenu key="crm" popupClassName={getNavStyleSubMenuClass(navStyle)}
+                       title={
+<span>
+<i className="icon icon-all-contacts"/>
+<Link to="/main/crm/leads">
+  <span>CRM</span>
+</Link>
+</span>
+                       }>
+                <Menu.Item key="main/crm/leads">
+                  <Link to="/main/crm/leads"><i className="icon icon-all-contacts"/><span>Leads</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/crm/activities">
+                  <Link to="/main/crm/activities"><i className="icon icon-tasks"/><span>Activities</span></Link>
+                </Menu.Item>
+              </SubMenu>
+
+              <SubMenu key="bank-statements" popupClassName={getNavStyleSubMenuClass(navStyle)}
+                       title={
+<span>
+<i className="icon icon-card"/>
+<Link to="/main/bank-statements/list">
+  <span>Bank Statements</span>
+</Link>
+</span>
+                       }>
+                <Menu.Item key="main/bank-statements/upload">
+                  <Link to="/main/bank-statements/upload"><i className="icon icon-upload"/><span>Upload & Parse</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/bank-statements/list">
+                  <Link to="/main/bank-statements/list"><i className="icon icon-lising-dbrd"/><span>Parsed Statements</span></Link>
+                </Menu.Item>
+              </SubMenu>
+
+              <Menu.Item key="main/analytics">
+                <Link to="/main/analytics"><i className="icon icon-chart-area-new"/><span>Analytics</span></Link>
+              </Menu.Item>
               <Menu.Item key="inner/profile">
                 <Link to="/inner/profile"><i
                   className="icon icon-user"/><span>Profile</span></Link>

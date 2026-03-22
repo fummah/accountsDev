@@ -209,6 +209,24 @@ const Employees = {
       return { success: false, error: error.message || 'Database error occurred' };
     }
   },
+
+  getPaginated: (page = 1, pageSize = 25, search = '') => {
+    const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
+    const limit = Math.max(1, Math.min(500, pageSize));
+    const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
+    let total;
+    let rows;
+    if (searchParam) {
+      total = db.prepare('SELECT COUNT(*) AS total FROM employees WHERE (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)').get(searchParam, searchParam, searchParam).total;
+      rows = db.prepare('SELECT id, first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status, COALESCE(role, \'Staff\') as role, COALESCE(permissions, \'[]\') as permissions, date_entered FROM employees WHERE (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?').all(searchParam, searchParam, searchParam, limit, offset);
+    } else {
+      total = db.prepare('SELECT COUNT(*) AS total FROM employees').get().total;
+      rows = db.prepare('SELECT id, first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status, COALESCE(role, \'Staff\') as role, COALESCE(permissions, \'[]\') as permissions, date_entered FROM employees ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
+    }
+    const data = rows.map(emp => ({ ...emp, permissions: emp.permissions || '[]', role: emp.role || 'Staff', status: emp.status || 'Active', salary: parseFloat(emp.salary || 0) }));
+    return { data, total };
+  },
+
   updateEmployee: async (employeeData) => {
     try {
       const { id, ...employeeDetails } = employeeData;

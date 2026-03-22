@@ -5,6 +5,16 @@ const db = require('../models/dbmgr');
 
 // Register employee-related IPC handlers
 const registerEmployeeHandlers = () => {
+  ipcMain.handle('get-employees-paginated', async (event, page, pageSize, search) => {
+    try {
+      const result = await Employees.getPaginated(page, pageSize, search || '');
+      return result && result.data !== undefined ? result : { data: [], total: 0 };
+    } catch (error) {
+      console.error('Error fetching employees (paginated):', error);
+      return { error: error.message };
+    }
+  });
+
   // Get all employees
   ipcMain.handle('get-employees', async () => {
     try {
@@ -81,15 +91,19 @@ const registerEmployeeHandlers = () => {
     }
   });
 
-  // Update employee
-  ipcMain.handle('update-employee', async (event, employeeData) => {
+  // Update employee (handle both naming conventions)
+  const updateHandler = async (event, employeeData) => {
     try {
       return await Employees.updateEmployee(employeeData);
     } catch (error) {
       console.error('Error updating employee:', error);
       return { error: error.message, success: false };
     }
-  });
+  };
+  
+  // Register both handler names for backwards compatibility
+  ipcMain.handle('updateemployee', updateHandler);
+  ipcMain.handle('update-employee', updateHandler);
 
   // Delete employee
   ipcMain.handle('delete-employee', async (event, id) => {

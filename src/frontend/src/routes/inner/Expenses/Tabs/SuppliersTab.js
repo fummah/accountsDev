@@ -1,5 +1,5 @@
-import React, { useState, useEffect,useRef } from 'react';
-import {Col, Row, Alert, Button} from "antd";
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Col, Row, Alert, Button, Spin } from "antd";
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
@@ -10,15 +10,20 @@ import Toast from "components/AppNotification/toast.js";
 import dayjs from 'dayjs';
 import {CategoryContext} from "appContext/TypeContext.js";
 
+const PAGE_SIZE = 25;
+
 const SuppliersTab = () => {
   const addSupplierRef = useRef();
-  const [loadings, setLoadings] = useState([]);
   const [addUserState, setAddUserState] = useState(false);
   const [isSuccess, setIsSuccess] = useState(null);
   const [message, setMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [suppliers, setSuppliers] = useState([]);
-  const [suppliersSearched, setSuppliersSearched] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [details, setDetails] = useState(0);
 
@@ -70,7 +75,7 @@ const SuppliersTab = () => {
       setIsSuccess(result.success);    
       if (result.success) {
         setMessage('Supplier saved successfully!');
-        fetchSuppliers();
+        fetchSuppliers(page, pageSize, search);
         if (addSupplierRef.current) {
           addSupplierRef.current.resetForm();
           handleUserClose();
@@ -100,7 +105,7 @@ const SuppliersTab = () => {
       setIsSuccess(result.success);  
       if (result.success) {
         setMessage('Record deleted successfully!');
-        fetchSuppliers();
+        fetchSuppliers(page, pageSize, search);
       
       } else {
         setMessage('Failed to delete. Please try again.');
@@ -111,23 +116,27 @@ const SuppliersTab = () => {
       setMessage('An error occurred. Please try again later.');
       setShowError(true);
     }
-    
   };
-  
-    const fetchSuppliers = async () => {
-        try {
-            const response = await await window.electronAPI.getAllSuppliers();          
-            setSuppliers(response);
-            setSuppliersSearched(response);
-        } catch (error) {
-          setMessage("Error fetching suppliers:", error);
-          setShowError(true);
-        }
-    };
 
-    useEffect(() => {
-      fetchSuppliers();
-  }, []);
+  const fetchSuppliers = useCallback(async (p = 1, size = PAGE_SIZE, searchTerm = '') => {
+        try {
+            setLoading(true);
+            const res = await window.electronAPI.getSuppliersPaginated(p, size, searchTerm);
+            if (res && res.error) { setMessage("Error fetching suppliers: " + res.error); setShowError(true); return; }
+            setSuppliers(res.data || []);
+            setTotal(res.total || 0);
+            setPage(p);
+            setPageSize(size);
+        } catch (error) {
+          setMessage("Error fetching suppliers: " + (error.message || error));
+          setShowError(true);
+        } finally { setLoading(false); }
+    }, []);
+
+    useEffect(() => { fetchSuppliers(1, PAGE_SIZE, ''); }, []);
+
+    const handleTableChange = (p, size) => { fetchSuppliers(p, size, search); };
+    const handleSearch = (value) => { setSearch(value); fetchSuppliers(1, pageSize, value); };
 
   const handleUserClose = () => {
     setAddUserState(false);
@@ -142,23 +151,6 @@ const SuppliersTab = () => {
     setDetails(0);
   }
  
-  const handleSearchedTxt = (event) => {
-    const value = event.target.value.toLowerCase();
-    if (value.trim() !== '')
-    {
-      const filtered = suppliers.filter(
-        (item) =>
-          (item.first_name && item.first_name.toLowerCase().includes(value)) ||
-        (item.middle_name && item.middle_name.toLowerCase().includes(value)) ||
-        (item.last_name && item.last_name.toLowerCase().includes(value)) ||
-        (item.company_name && item.company_name.toLowerCase().includes(value))
-      );
-      setSuppliersSearched(filtered);
-    }
-    else{
-      setSuppliersSearched(suppliers);
-    }
-  };
   return (
     <CategoryContext.Provider value="Supplier">
     <Auxiliary> 
@@ -199,7 +191,7 @@ const SuppliersTab = () => {
       </Col>
    ):(
    <Col span={24}>
-   <SuppliersList suppliers={suppliersSearched} onSelectSupplier={setSelectedSupplier} setDetails={setDetails} setAddUserState={setAddUserState} handleSearchedTxt={handleSearchedTxt} onDelete={deleteRecord}/>
+   <SuppliersList suppliers={suppliers} loading={loading} total={total} page={page} pageSize={pageSize} onTableChange={handleTableChange} onSearch={handleSearch} onSelectSupplier={setSelectedSupplier} setDetails={setDetails} setAddUserState={setAddUserState} onDelete={deleteRecord}/>
      </Col>
    )}
            

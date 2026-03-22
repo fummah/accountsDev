@@ -1,22 +1,61 @@
 import React, {useState, useEffect} from "react";
-import { Card, DatePicker, Select, Table, Col, Row } from "antd";
+import { Card, DatePicker, Select, Table, Col, Row, Button, message } from "antd";
+import { PrinterOutlined } from '@ant-design/icons';
+import { useRef } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import {Bar, BarChart, ResponsiveContainer, Tooltip, XAxis} from "recharts";
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
 import moment from "moment";
 
+const formattedNumber = (number) => { 
+  const num = new Intl.NumberFormat('fr-FR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(number); 
+  return `$${num}`;
+};
+
+const PrintableManagementReport = React.forwardRef(({ kpiData, tableData, chartData, companyName = 'Company' }, ref) => {
+  const rows = tableData || [];
+  return (
+    <div id="printable-management-report" ref={ref} style={{ padding: 24 }}>
+      <div style={{ textAlign: 'center', marginBottom: 12 }}>
+        <h1 style={{ marginBottom: 4 }}>{companyName}</h1>
+        <h2 style={{ marginTop: 0 }}>Management Report</h2>
+        <div style={{ fontSize: 12, color: '#666' }}>Generated: {new Date().toLocaleString()}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 20, margin: '20px 0' }}>
+        <div style={{ flex: 1 }}>
+          <div><strong>Total Revenue:</strong> {formattedNumber(kpiData?.totalRevenue || 0)}</div>
+          <div><strong>Total Expenses:</strong> {formattedNumber(kpiData?.totalExpenses || 0)}</div>
+          <div><strong>Net Profit:</strong> {formattedNumber(kpiData?.netProfit || 0)}</div>
+        </div>
+        <div style={{ width: 300, height: 120 }}>
+          {/* Render a small chart snapshot if chartData is provided */}
+          {chartData && chartData.length > 0 && (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                <Tooltip/>
+                <XAxis dataKey="name" hide />
+                <Bar dataKey="value" fill="#038fde" barSize={10} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+      <Table dataSource={rows} columns={[{title:'Metric', dataIndex:'metric'}, {title:'Value', dataIndex:'value'}]} pagination={false} rowKey={(r, i) => i} />
+      <div style={{ marginTop: 20, textAlign: 'right', fontSize: 12 }}>Page 1</div>
+    </div>
+  );
+});
+
+
+
 
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
-
-const formattedNumber = (number) => { 
-  const num = new Intl.NumberFormat('fr-FR', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
-}).format(number); 
-return `$${num}`;
-};
 
 
 
@@ -25,6 +64,16 @@ const ManagementReportTab = () => {
   const [kpiData, setKpiData] = useState(null);
   const [chartData, setChartData] = useState(null);
   const [tableData, setTableData] = useState(null);
+  const componentRef = useRef();
+  const handlePrint = useReactToPrint({
+    content: () => {
+      // prefer ref, fallback to element by id
+      return componentRef.current || document.getElementById('printable-management-report');
+    },
+    documentTitle: 'Management_Report',
+    onBeforeGetContent: () => console.log('Preparing management report for print'),
+    onAfterPrint: () => { console.log('Management report printed'); message.success('Management report printed'); }
+  });
 
   const currentMonthStart = moment().startOf("month");
   const currentMonthEnd = moment().endOf("month");
@@ -41,7 +90,7 @@ const columns = [
 // State for Customization
 const [selectedMetric, setSelectedMetric] = useState("Revenue");
 
-   const fetchManagementReports = async (start_date,last_date) => {
+  const fetchManagementReports = async (start_date,last_date) => {
         try {
             const response = await await window.electronAPI.getManagementReport(start_date,last_date);   
             console.log(response);       
@@ -75,6 +124,21 @@ const onDateChange = (dates) => {
    <Col span={24}>
    <div style={{ padding: "20px" }}>
       <h1>Management Reports</h1>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <Button type="default" icon={<PrinterOutlined />} onClick={() => {
+          if (!tableData && !kpiData) {
+            message.warning('No report data to print');
+            return;
+          }
+          const el = componentRef.current || document.getElementById('printable-management-report');
+          if (!el) {
+            message.error('There is nothing to print');
+            return;
+          }
+          handlePrint();
+        }}>Print</Button>
+      </div>
 
       {/* Date Range Picker */}
       <Card style={{ marginBottom: "20px" }}>
@@ -143,6 +207,8 @@ const onDateChange = (dates) => {
           <Option value="Growth">Customer Growth</Option>
         </Select>
       </Card>
+  {/* Off-screen printable content */}
+  <ManagementReportPrintableWrapper kpiData={kpiData} tableData={tableData} chartData={chartData} refProp={componentRef} />
     </div>
      </Col>
            
@@ -154,3 +220,11 @@ const onDateChange = (dates) => {
 };
 
 export default ManagementReportTab;
+
+// Hidden printable content
+// Rendered outside visible area so react-to-print can capture it
+const ManagementReportPrintableWrapper = ({ kpiData, tableData, chartData, refProp }) => (
+  <div style={{ position: 'fixed', left: '-10000px', top: 0, width: '100%' }}>
+    <PrintableManagementReport ref={refProp} kpiData={kpiData} tableData={tableData} chartData={chartData} />
+  </div>
+);

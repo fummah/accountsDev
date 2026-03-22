@@ -19,16 +19,19 @@
     "postinstall": "electron-builder install-app-deps",
     "package": "electron-builder --dir",
     "dist": "electron-builder",
-    "electron:build": "npm run build-react && electron-builder -c.extraMetadata.main=src/backend/main.js"
+    "electron:build": "npm run build-react && electron-builder -c.extraMetadata.main=src/backend/main.js",
+    "seed": "node scripts/seed-dummy-data.js"
   },
+  "smoke": "node scripts/smoke-tests.js",
   "build": {
+    "electronVersion": "32.2.0",
+    "productName": "Accounting App Demo",
     "appId": "com.tendai.myapp",
     "files": [
       "src/backend/**/*",
       "src/backend/db/**/*",
       "src/frontend/build/**/*",
       "node_modules/**/*",
-      "dist/**/*",
       "package.json"
     ],
     "directories": {
@@ -39,7 +42,8 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "favicon.ico"
+      "icon": "favicon.ico",
+      "executableName": "Accounting_App_Demo"
     },
     "nsis": {
       "oneClick": false,
@@ -60,11 +64,15 @@
   },
   "homepage": "https://github.com/fummah/accountsDev#readme",
   "dependencies": {
+    "@tensorflow/tfjs": "^4.16.0",
     "better-sqlite3": "^11.5.0",
     "concurrently": "^9.0.1",
     "electron-build": "^0.0.3",
     "express": "^4.21.2",
+    "jspdf": "^2.5.1",
     "knew": "^0.0.0",
-    "sqlite3": "^5.1.7"
+    "pdf-parse": "^1.1.1",
+    "sqlite3": "^5.1.7",
+    "xlsx": "^0.18.5"
   }
 }

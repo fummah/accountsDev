@@ -30,8 +30,20 @@ const menus = () => (<Menu onClick={(e) => {
 </Menu>);
 
 
-const EmployeesList = ({employees, onSelectEmployee, setAddUserState, handleSearchedTxt, onDelete}) => {
+const EmployeesList = ({
+  employees,
+  loading = false,
+  total = 0,
+  page = 1,
+  pageSize = 25,
+  onTableChange,
+  onSearch,
+  onSelectEmployee,
+  setAddUserState,
+  onDelete
+}) => {
   const redirectToItem = useRedirectToItem();
+  const [searchInput, setSearchInput] = useState('');
   const columns = [
     {
       title: 'First Name',
@@ -93,7 +105,6 @@ const EmployeesList = ({employees, onSelectEmployee, setAddUserState, handleSear
   
   ];
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
-  const [loading, setLoading] = useState(false);
 
   const rowSelection = {
     type: 'radio', // Set to 'radio' for single selection
@@ -108,7 +119,20 @@ const EmployeesList = ({employees, onSelectEmployee, setAddUserState, handleSear
 <>
     <Row>
     <Col xs={24} sm={8} md={8}>
-    <Input placeholder="search..." suffix={<SearchOutlined />} onKeyUp={handleSearchedTxt}/>
+    <Input
+      placeholder="Search (press Enter)"
+      suffix={<SearchOutlined />}
+      allowClear
+      value={searchInput}
+      onChange={(e) => setSearchInput(e.target.value)}
+      onPressEnter={() => typeof onSearch === 'function' && onSearch(searchInput)}
+      // When cleared, trigger a blank search
+      onBlur={() => {
+        if (!searchInput && typeof onSearch === 'function') {
+          onSearch('');
+        }
+      }}
+    />
     </Col>
       <Col xs={24} sm={16} md={16}>
          <div style={{ display: 'flex', gap: '10px',float:"right" }}>
@@ -121,8 +145,21 @@ const EmployeesList = ({employees, onSelectEmployee, setAddUserState, handleSear
         <Table rowSelection={rowSelection} 
         className="gx-table-no-bordered" 
         columns={columns} 
-        dataSource={employees} 
-        pagination={true} 
+        dataSource={employees || []}
+        loading={loading}
+        pagination={
+          typeof onTableChange === 'function'
+            ? {
+                current: page,
+                pageSize,
+                total,
+                showSizeChanger: true,
+                pageSizeOptions: ['10', '25', '50', '100'],
+                showTotal: (t) => `Total ${t} items`,
+                onChange: (p, size) => onTableChange(p, size),
+              }
+            : true
+        }
         size="small"
         rowKey="id"
         onRow={(record) => ({

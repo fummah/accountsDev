@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Table, DatePicker, Select, Button, Row, Col, Form } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, Table, DatePicker, Select, Button, Row, Col, Form, message } from 'antd';
+import { PrinterOutlined } from '@ant-design/icons';
 import moment from 'moment';
 
 const { RangePicker } = DatePicker;
@@ -7,10 +8,11 @@ const { Option } = Select;
 
 const JobCosting = () => {
   const [dateRange, setDateRange] = useState([moment().startOf('month'), moment()]);
-  const [selectedJob, setSelectedJob] = useState(null);
+  const [selectedJob, setSelectedJob] = useState('all');
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [jobOptions, setJobOptions] = useState([]);
 
   useEffect(() => {
     // initial load
@@ -71,26 +73,32 @@ const JobCosting = () => {
         dateRange[0].format('YYYY-MM-DD'),
         dateRange[1].format('YYYY-MM-DD')
       );
-      // Map management report tableData into job costing rows where reasonable
-      if (report && Array.isArray(report.tableData)) {
-        const rows = report.tableData.map((r, i) => {
-          // attempt to parse numeric value from formatted string
-          const raw = typeof r.value === 'string' ? Number(String(r.value).replace(/[^0-9.-]+/g, '')) : Number(r.value || 0);
-          return {
-            key: String(i + 1),
-            date: dateRange[0].format('YYYY-MM-DD'),
-            jobName: r.metric,
-            type: 'Summary',
-            description: r.metric,
-            laborCost: raw,
-            materialCost: 0,
-            totalCost: raw,
-          };
-        });
-        setData(rows);
-      } else {
-        setData([]);
-      }
+      // Base rows: use live expenses during the period and treat each payee as a job/project
+      const expenses = await window.electronAPI.getAllExpenses();
+      const expList = Array.isArray(expenses) ? expenses : (expenses && expenses.all) ? expenses.all : expenses?.data || [];
+      const expRows = expList
+        .filter(e => {
+          const d = e.payment_date ? moment(e.payment_date) : null;
+          return d && d.isBetween(dateRange[0].startOf('day'), dateRange[1].endOf('day'), null, '[]');
+        })
+        .map((e, idx) => ({
+          key: `e-${idx}`,
+          date: e.payment_date,
+          jobName: e.payee_name || String(e.payee || ''),
+          type: 'Expense',
+          description: e.category || e.ref_no || e.description || '',
+          laborCost: 0,
+          materialCost: Number(e.amount || 0),
+          totalCost: Number(e.amount || 0),
+        }));
+
+      // Optional: add management KPIs as summary pseudo-rows (not dummy - from backend)
+      const rows = [...expRows];
+      setData(rows);
+
+      // Build job options from payee names present in expenses
+      const jobs = Array.from(new Set(expRows.map(r => r.jobName).filter(Boolean)));
+      setJobOptions(jobs);
     } catch (err) {
       console.error('Failed to load job costing', err);
       setError(err.message || String(err));
@@ -110,6 +118,38 @@ const JobCosting = () => {
   const handleRefresh = () => {
     fetchReport();
   };
+
+  const handlePrint = () => {
+    try {
+      const rows = filteredData.map(r => `<tr>
+        <td>${r.date ? moment(r.date).format('YYYY-MM-DD') : ''}</td>
+        <td>${r.jobName || ''}</td>
+        <td>${r.type || ''}</td>
+        <td>${r.description || ''}</td>
+        <td style="text-align:right">${Number(r.laborCost || 0).toFixed(2)}</td>
+        <td style="text-align:right">${Number(r.materialCost || 0).toFixed(2)}</td>
+        <td style="text-align:right">${Number(r.totalCost || 0).toFixed(2)}</td>
+      </tr>`).join('');
+      const html = `<!doctype html><html><head><title>Job Costing Report</title>
+      <style>body{font-family:Arial;padding:16px}h2{margin:0 0 8px}
+      table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:6px}
+      th{text-align:left}</style></head><body>
+      <h2>Job Costing Report</h2>
+      <p>Period: ${dateRange[0].format('YYYY-MM-DD')} to ${dateRange[1].format('YYYY-MM-DD')} | Job: ${selectedJob}</p>
+      <table><thead><tr>
+        <th>Date</th><th>Job/Project</th><th>Type</th><th>Description</th><th>Labor Cost</th><th>Material Cost</th><th>Total Cost</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+      </body></html>`;
+      const w = window.open('', '_blank');
+      w.document.open(); w.document.write(html); w.document.close();
+      setTimeout(() => w.print(), 300);
+    } catch (e) { /* ignore */ }
+  };
+
+  const filteredData = useMemo(() => {
+    if (!selectedJob || selectedJob === 'all') return data;
+    return data.filter(r => (r.jobName || '').toString() === selectedJob);
+  }, [data, selectedJob]);
 
   return (
     <Card title="Job Costing Report">
@@ -133,8 +173,9 @@ const JobCosting = () => {
                 style={{ width: '100%' }}
               >
                 <Option value="all">All Jobs</Option>
-                <Option value="projectA">Project A</Option>
-                <Option value="projectB">Project B</Option>
+                {jobOptions.map(j => (
+                  <Option key={j} value={j}>{j}</Option>
+                ))}
               </Select>
             </Form.Item>
           </Col>
@@ -143,6 +184,9 @@ const JobCosting = () => {
               <Button type="primary" onClick={handleRefresh}>
                 Refresh Report
               </Button>
+              <Button icon={<PrinterOutlined />} style={{ marginLeft: 8 }} onClick={handlePrint}>
+                Print
+              </Button>
             </Form.Item>
           </Col>
         </Row>
@@ -150,7 +194,7 @@ const JobCosting = () => {
 
       <Table
         columns={columns}
-        dataSource={data}
+        dataSource={filteredData}
         loading={loading}
         pagination={false}
         summary={pageData => {

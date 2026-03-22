@@ -17,24 +17,25 @@ const Flow = () => {
     }
   }, [location.state]);
 
+  const P = (p) => (process.env.PUBLIC_URL + p);
   const items = [
-    { id: "products", icon: "/assets/icons/products.svg", label: "Products", x: 0, y: 0 },
-    { id: "expenses", icon: "/assets/icons/invoice.svg", label: "Expenses", x: 1, y: 0 },
-    { id: "bills", icon: "/assets/icons/pay.svg", label: "Pay Bills", x: 2, y: 0 },
-    { id: "analysis", icon: "/assets/icons/analysis.svg", label: "Analysis", x: 3, y: 0 },
+    { id: "products", icon: P("/assets/icons/products.svg"), label: "Products", x: 0, y: 0 },
+    { id: "expenses", icon: P("/assets/icons/invoice.svg"), label: "Expenses", x: 1, y: 0 },
+    { id: "bills", icon: P("/assets/icons/pay.svg"), label: "Pay Bills", x: 2, y: 0 },
+    { id: "analysis", icon: P("/assets/icons/analysis.svg"), label: "Analysis", x: 3, y: 0 },
   
-    { id: "sales", icon: "/assets/icons/track.svg", label: "Create Sales", x: 1, y: 1 },
-    { id: "cash", icon: "/assets/icons/expenses.svg", label: "Cash Receipts", x: 2, y: 1 },
-    { id: "reports", icon: "/assets/icons/statement.svg", label: "Reports", x: 3, y: 1 },
+    { id: "sales", icon: P("/assets/icons/track.svg"), label: "Create Sales", x: 1, y: 1 },
+    { id: "cash", icon: P("/assets/icons/expenses.svg"), label: "Cash Receipts", x: 2, y: 1 },
+    { id: "reports", icon: P("/assets/icons/statement.svg"), label: "Reports", x: 3, y: 1 },
   
-    { id: "quotes", icon: "/assets/icons/quotes.svg", label: "Quotes", x: 0, y: 2 },
-    { id: "invoice", icon: "/assets/icons/invoices.svg", label: "Create Invoice", x: 1, y: 2 },
-    { id: "payments", icon: "/assets/icons/payments.svg", label: "Payments", x: 2, y: 2 },
-    { id: "deposits", icon: "/assets/icons/bills.svg", label: "Deposits", x: 3, y: 2 },
+    { id: "quotes", icon: P("/assets/icons/quotes.svg"), label: "Quotes", x: 0, y: 2 },
+    { id: "invoice", icon: P("/assets/icons/invoices.svg"), label: "Create Invoice", x: 1, y: 2 },
+    { id: "payments", icon: P("/assets/icons/payments.svg"), label: "Payments", x: 2, y: 2 },
+    { id: "deposits", icon: P("/assets/icons/bills.svg"), label: "Deposits", x: 3, y: 2 },
 
-    { id: "employee", icon: "/assets/icons/employee.svg", label: "Create Employee", x: 1, y: 3 },
-    { id: "payroll", icon: "/assets/icons/payroll.svg", label: "Payroll", x: 2, y: 3 },
-    { id: "reconcile", icon: "/assets/icons/refund.svg", label: "Reconcile", x: 3, y: 3 },
+    { id: "employee", icon: P("/assets/icons/employee.svg"), label: "Create Employee", x: 1, y: 3 },
+    { id: "payroll", icon: P("/assets/icons/payroll.svg"), label: "Payroll", x: 2, y: 3 },
+    { id: "reconcile", icon: P("/assets/icons/refund.svg"), label: "Reconcile", x: 3, y: 3 },
   ];
   
   const arrows = [
@@ -61,20 +62,22 @@ const Flow = () => {
   ];
 
   const routeMap = {
-    products: "/inner/sales",
+    // direct mappings — include query params to open specific tabs where applicable
+    products: "/inner/sales?tab=10",
     bills: "/inner/expenses",
     payment: "/inner/expenses",
-    analysis: "/inner/reports",
-    sales: "/inner/sales",
-    cash: "/inner/expenses",
-    reports: "/inner/reports",
-    quotes: "/inner/sales",
-    invoice: "/inner/sales",
-    payments: "/inner/expenses",
-    deposits: "/inner/sales",
-    payroll: "/inner/employees",
-    employee: "/inner/employees",
+    analysis: "/inner/reports?tab=1",
+    sales: "/inner/sales?tab=1",
+    cash: "/inner/sales?tab=6", // Cash Receipts -> Income Tracker
+    reports: "/inner/reports?tab=1",
+    quotes: "/inner/sales?tab=3",
+    invoice: "/inner/sales?tab=2",
+    payments: "/inner/sales?tab=5",
+    deposits: "/main/banking/deposits",
+    payroll: "/main/employees/payroll",
+    employee: "/main/employees/center",
     reconcile: "/inner/transactions",
+    expenses: "/inner/expenses",
   };
   const WorkflowNode = ({ id, icon, label, x, y,onClick }) => (
     <div

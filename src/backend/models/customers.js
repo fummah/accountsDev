@@ -68,6 +68,24 @@ const Customers = {
     const report = this.getCustomerReport();
     return {all:stmt.all(),report:report};
   },
+
+  getPaginated: function (page = 1, pageSize = 25, search = '') {
+    const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
+    const limit = Math.max(1, Math.min(500, pageSize));
+    const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
+    let total;
+    let data;
+    if (searchParam) {
+      const stmtCount = db.prepare('SELECT COUNT(*) AS total FROM customers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?)');
+      total = stmtCount.get(searchParam, searchParam, searchParam).total;
+      const stmtData = db.prepare('SELECT * FROM customers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?');
+      data = stmtData.all(searchParam, searchParam, searchParam, limit, offset);
+    } else {
+      total = db.prepare('SELECT COUNT(*) AS total FROM customers').get().total;
+      data = db.prepare('SELECT * FROM customers ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
+    }
+    return { data, total };
+  },
    // Retrieve single customer
    getSingleCustomer: (customer_id) => {
     const stmt = db.prepare('SELECT *FROM customers WHERE id=?');    

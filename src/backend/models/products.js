@@ -48,6 +48,34 @@ const Products = {
     const stmt = db.prepare('SELECT * FROM products ORDER BY id DESC');
     return stmt.all();
   },
+
+  getPaginated: (page = 1, pageSize = 25, search = '', typeFilter = '') => {
+    const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
+    const limit = Math.max(1, Math.min(500, pageSize));
+    const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
+    const typeParam = typeFilter && typeFilter.trim() ? typeFilter.trim() : null;
+    let total;
+    let data;
+    const whereParts = [];
+    const params = [];
+    if (searchParam) {
+      whereParts.push('(name LIKE ? OR sku LIKE ? OR category LIKE ?)');
+      params.push(searchParam, searchParam, searchParam);
+    }
+    if (typeParam) {
+      whereParts.push('type = ?');
+      params.push(typeParam);
+    }
+    const whereClause = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
+    if (params.length) {
+      total = db.prepare(`SELECT COUNT(*) AS total FROM products${whereClause}`).get(...params).total;
+      data = db.prepare(`SELECT * FROM products${whereClause} ORDER BY id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    } else {
+      total = db.prepare('SELECT COUNT(*) AS total FROM products').get().total;
+      data = db.prepare('SELECT * FROM products ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
+    }
+    return { data, total };
+  },
   updateProduct : async (productData) => {
     const { id, ...productDetails } = productData;
     try {

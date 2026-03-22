@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Form, Input, Modal, message, DatePicker } from 'antd';
+import { Table, Button, Form, Input, Modal, message, DatePicker, Select } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import moment from 'moment';
 
@@ -15,32 +15,49 @@ const FixedAssets = () => {
 
   const loadAssets = async () => {
     try {
-      const assets = await window.electronAPI.getFixedAssets();
-      setAssets(assets);
+      const response = await window.electronAPI.getFixedAssets();
+      if (response && response.success && Array.isArray(response.data)) {
+        setAssets(response.data);
+      } else {
+        message.error(response && response.error ? response.error : 'Failed to load fixed assets');
+        setAssets([]);
+      }
     } catch (error) {
+      console.error('Failed to load fixed assets:', error);
       message.error('Failed to load fixed assets');
+      setAssets([]);
     }
   };
 
   const handleAddEdit = async (values) => {
     try {
-      const formattedValues = {
-        ...values,
+      const asset = {
+        assetName: values.assetName,
         purchaseDate: values.purchaseDate.format('YYYY-MM-DD'),
+        purchaseCost: Number(values.purchaseCost) || 0,
+        currentValue: Number(values.purchaseCost) || 0,
+        depreciationMethod: values.depreciationMethod,
+        status: 'Active',
+        entered_by: 'system',
+        date_entered: new Date().toISOString()
       };
-
+      let result;
       if (editingId) {
-        await window.electronAPI.updateFixedAsset({ ...formattedValues, id: editingId });
-        message.success('Asset updated successfully');
+        result = await window.electronAPI.updateFixedAsset({ ...asset, id: editingId });
       } else {
-        await window.electronAPI.createFixedAsset(formattedValues);
-        message.success('Asset created successfully');
+        result = await window.electronAPI.insertFixedAsset(asset);
       }
-      setIsModalVisible(false);
-      form.resetFields();
-      loadAssets();
+      if (result && result.success) {
+        message.success(editingId ? 'Asset updated successfully' : 'Asset created successfully');
+        setIsModalVisible(false);
+        form.resetFields();
+        loadAssets();
+      } else {
+        message.error(result && result.error ? result.error : 'Operation failed');
+      }
     } catch (error) {
-      message.error('Operation failed');
+      console.error('Operation failed:', error);
+      message.error(error.message || 'Operation failed');
     }
   };
 
@@ -60,18 +77,28 @@ const FixedAssets = () => {
       title: 'Purchase Cost',
       dataIndex: 'purchaseCost',
       key: 'purchaseCost',
-      render: (cost) => `$${cost.toFixed(2)}`,
+      render: (cost) => `$${(Number(cost) || 0).toFixed(2)}`,
     },
     {
       title: 'Depreciation Method',
       dataIndex: 'depreciationMethod',
       key: 'depreciationMethod',
+      render: (method) => {
+        const methods = {
+          'straight-line': 'Straight Line',
+          'reducing-balance': 'Reducing Balance',
+          'sum-of-years': 'Sum of Years Digits',
+          'units-of-production': 'Units of Production',
+          'double-declining': 'Double Declining Balance'
+        };
+        return methods[method] || method;
+      }
     },
     {
       title: 'Current Value',
       dataIndex: 'currentValue',
       key: 'currentValue',
-      render: (value) => `$${value.toFixed(2)}`,
+      render: (value) => `$${(Number(value) || 0).toFixed(2)}`,
     },
     {
       title: 'Actions',
@@ -170,9 +197,15 @@ const FixedAssets = () => {
           <Form.Item
             name="depreciationMethod"
             label="Depreciation Method"
-            rules={[{ required: true, message: 'Please input depreciation method!' }]}
+            rules={[{ required: true, message: 'Please select depreciation method!' }]}
           >
-            <Input />
+            <Select>
+              <Select.Option value="straight-line">Straight Line</Select.Option>
+              <Select.Option value="reducing-balance">Reducing Balance</Select.Option>
+              <Select.Option value="sum-of-years">Sum of Years Digits</Select.Option>
+              <Select.Option value="units-of-production">Units of Production</Select.Option>
+              <Select.Option value="double-declining">Double Declining Balance</Select.Option>
+            </Select>
           </Form.Item>
         </Form>
       </Modal>

@@ -14,7 +14,7 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
 }).format(number); 
 };
 
-const AccountsPayable = ({Expensed, ExpenseList}) => {
+const AccountsPayable = ({ Expensed, ExpenseList }) => {
   const redirectToItem = useRedirectToItem();
   return (
       <Widget

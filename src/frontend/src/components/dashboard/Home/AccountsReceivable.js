@@ -14,7 +14,7 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
 };
 
 
-const AccountsReceivable = ({Invoiced, ExpenseList}) => {
+const AccountsReceivable = ({ Invoiced, ExpenseList }) => {
 
   return (
       <Widget

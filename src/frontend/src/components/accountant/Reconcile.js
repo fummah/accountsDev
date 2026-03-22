@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Card, Form, Select, DatePicker, Button, Table, Row, Col, Alert } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Card, Form, Select, DatePicker, Button, Table, Row, Col, Alert, message, InputNumber } from 'antd';
+import moment from 'moment';
 
 const { Option } = Select;
 
@@ -7,6 +8,30 @@ const Reconcile = () => {
   const [form] = Form.useForm();
   const [reconcilingData, setReconcilingData] = useState(null);
   const [reconciled, setReconciled] = useState(false);
+  const [accounts, setAccounts] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadAccounts();
+  }, []);
+
+  const loadAccounts = async () => {
+    try {
+      const data = await window.electronAPI.getChartOfAccounts();
+      console.log('Loaded accounts:', data);
+        if (Array.isArray(data)) {
+          // Set all accounts without filtering
+          setAccounts(data);
+      } else {
+        console.error('Invalid accounts data received:', data);
+        message.error('Failed to load accounts: Invalid data format');
+      }
+    } catch (error) {
+      console.error('Failed to load accounts:', error);
+      message.error('Failed to load accounts');
+    }
+  };
 
   const columns = [
     {
@@ -67,22 +92,76 @@ const Reconcile = () => {
     },
   ];
 
-  const onFinish = (values) => {
-    console.log('Form values:', values);
-    setReconcilingData(data);
+  const loadTransactions = async (accountId) => {
+    try {
+      setLoading(true);
+      const data = await window.electronAPI.getTransactions();
+      return data.filter(tx => tx.accountId === accountId);
+    } catch (error) {
+      message.error('Failed to load transactions');
+      return [];
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleStatusChange = (key, value) => {
-    console.log('Status changed for row:', key, 'New value:', value);
+  const onFinish = async (values) => {
+    try {
+      const txs = await loadTransactions(values.account);
+      setTransactions(txs);
+      setReconcilingData(txs.map(tx => ({
+        key: tx.id,
+        date: moment(tx.date).format('YYYY-MM-DD'),
+        description: tx.description,
+        reference: tx.reference,
+        amount: tx.debit ? tx.debit : -tx.credit,
+        status: tx.isReconciled ? 'reconciled' : 'unreconciled'
+      })));
+    } catch (error) {
+      message.error('Failed to prepare reconciliation data');
+    }
   };
 
-  const handleReconcile = () => {
-    setReconciled(true);
-    setTimeout(() => {
-      setReconciled(false);
-      setReconcilingData(null);
-      form.resetFields();
-    }, 3000);
+  const handleStatusChange = async (key, value) => {
+    try {
+      const newData = reconcilingData.map(item => 
+        item.key === key ? { ...item, status: value } : item
+      );
+      setReconcilingData(newData);
+    } catch (error) {
+      message.error('Failed to update transaction status');
+    }
+  };
+
+  const handleReconcile = async () => {
+    try {
+      setLoading(true);
+      const accountId = form.getFieldValue('account');
+      const statementDate = form.getFieldValue('statementDate').format('YYYY-MM-DD');
+      const endingBalance = form.getFieldValue('endingBalance');
+
+      const reconcileResult = await window.electronAPI.reconcileTransactions({
+        accountId,
+        statementDate,
+        statementBalance: endingBalance,
+        transactions: reconcilingData
+          .filter(tx => tx.status === 'reconciled')
+          .map(tx => tx.key)
+      });
+
+      if (reconcileResult.success) {
+        message.success('Account reconciled successfully');
+        setReconciled(true);
+        setReconcilingData(null);
+        form.resetFields();
+      } else {
+        throw new Error(reconcileResult.error || 'Reconciliation failed');
+      }
+    } catch (error) {
+      message.error(error.message || 'Failed to reconcile account');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -108,10 +187,12 @@ const Reconcile = () => {
               label="Select Account"
               rules={[{ required: true, message: 'Please select an account' }]}
             >
-              <Select>
-                <Option value="bank">Bank Account</Option>
-                <Option value="cash">Cash Account</Option>
-                <Option value="creditCard">Credit Card</Option>
+              <Select loading={loading}>
+                {accounts.map(account => (
+                    <Option key={account.id} value={account.id}>
+                      {account.number} - {account.name}
+                  </Option>
+                ))}
               </Select>
             </Form.Item>
           </Col>
@@ -130,10 +211,11 @@ const Reconcile = () => {
               label="Statement Ending Balance"
               rules={[{ required: true, message: 'Please enter ending balance' }]}
             >
-              <Select>
-                <Option value="current">Current Balance ($5,000.00)</Option>
-                <Option value="previous">Previous Balance ($4,500.00)</Option>
-              </Select>
+              <InputNumber 
+                style={{ width: '100%' }}
+                formatter={value => `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                parser={value => value.replace(/\$\s?|(,*)/g, '')}
+              />
             </Form.Item>
           </Col>
         </Row>
@@ -155,10 +237,12 @@ const Reconcile = () => {
           />
           <Row justify="space-between" style={{ marginTop: 16 }}>
             <Col>
-              <Button onClick={() => setReconcilingData(null)}>Cancel</Button>
+              <Button onClick={() => setReconcilingData(null)} disabled={loading}>
+            Cancel
+          </Button>
             </Col>
             <Col>
-              <Button type="primary" onClick={handleReconcile}>
+              <Button type="primary" onClick={handleReconcile} loading={loading}>
                 Complete Reconciliation
               </Button>
             </Col>

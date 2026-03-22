@@ -8,12 +8,18 @@ const { Option } = Select;
 const Transaction = () => {
   const [form] = Form.useForm();
   const [accounts, setAccounts] = useState([]);
+  const [entities, setEntities] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     loadAccounts();
     loadTransactions();
+    loadEntities();
+    loadDimensions();
   }, []);
 
   const loadAccounts = async () => {
@@ -34,19 +40,47 @@ const Transaction = () => {
     }
   };
 
+  const loadEntities = async () => {
+    try {
+      const list = await (window.electronAPI.listEntities ? window.electronAPI.listEntities() : []);
+      setEntities(Array.isArray(list) ? list : []);
+    } catch (error) {
+      // silent
+    }
+  };
+
+  const loadDimensions = async () => {
+    try {
+      const [cls, locs, deps] = await Promise.all([
+        window.electronAPI.listClasses ? window.electronAPI.listClasses() : [],
+        window.electronAPI.listLocations ? window.electronAPI.listLocations() : [],
+        window.electronAPI.listDepartments ? window.electronAPI.listDepartments() : []
+      ]);
+      setClasses(Array.isArray(cls) ? cls : []);
+      setLocations(Array.isArray(locs) ? locs : []);
+      setDepartments(Array.isArray(deps) ? deps : []);
+    } catch {}
+  };
+
   const handleSubmit = async (values) => {
     try {
+      console.log('Submitting transaction:', values);
       setLoading(true);
       const formattedValues = {
         ...values,
         date: values.date.format('YYYY-MM-DD'),
+        entity_id: values.entity_id || null,
+        class: values.class || null,
+        location: values.location || null,
+        department: values.department || null
       };
 
-      await window.electronAPI.createTransaction(formattedValues);
+      await window.electronAPI.insertTransaction(formattedValues);
       message.success('Transaction saved successfully');
       form.resetFields();
       loadTransactions();
     } catch (error) {
+      console.error('Failed to save transaction', error);
       message.error('Failed to save transaction');
     } finally {
       setLoading(false);
@@ -108,6 +142,41 @@ const Transaction = () => {
           rules={[{ required: true, message: 'Please enter description!' }]}
         >
           <Input />
+        </Form.Item>
+
+        <Form.Item
+          name="entity_id"
+          label="Entity"
+        >
+          <Select placeholder="Select entity (optional)">
+            {entities.map(e => (
+              <Option key={e.id} value={e.id}>{e.name}</Option>
+            ))}
+          </Select>
+        </Form.Item>
+
+        <Form.Item name="class" label="Class">
+          <Select allowClear placeholder="Select class">
+            {classes.map(c => (
+              <Option key={c.id} value={c.name}>{c.name}</Option>
+            ))}
+          </Select>
+        </Form.Item>
+
+        <Form.Item name="location" label="Location">
+          <Select allowClear placeholder="Select location">
+            {locations.map(l => (
+              <Option key={l.id} value={l.name}>{l.name}</Option>
+            ))}
+          </Select>
+        </Form.Item>
+
+        <Form.Item name="department" label="Department">
+          <Select allowClear placeholder="Select department">
+            {departments.map(d => (
+              <Option key={d.id} value={d.name}>{d.name}</Option>
+            ))}
+          </Select>
         </Form.Item>
 
         <Form.Item

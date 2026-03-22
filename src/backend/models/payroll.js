@@ -1,5 +1,6 @@
 // src/backend/models/payroll.js
 const db = require('./dbmgr.js');
+const PayrollConfig = require('./payrollConfig');
 
 const Payroll = {
   // Create the Payroll tables if they don't exist
@@ -8,17 +9,18 @@ const Payroll = {
     db.prepare(`
       CREATE TABLE IF NOT EXISTS payroll_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        pay_period_start DATE NOT NULL,
-        pay_period_end DATE NOT NULL,
-        processed_date DATE NOT NULL,
-        payment_method TEXT NOT NULL,
+        -- Columns added via migrations if missing
+        pay_period_start DATE,
+        pay_period_end DATE,
+        processed_date DATE,
+        payment_method TEXT,
         notes TEXT,
-        status TEXT DEFAULT 'Processed',
-        total_net_pay REAL DEFAULT 0,
-        total_tax REAL DEFAULT 0,
-        total_deductions REAL DEFAULT 0,
-        payments_count INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        status TEXT,
+        total_net_pay REAL,
+        total_tax REAL,
+        total_deductions REAL,
+        payments_count INTEGER,
+        created_at DATETIME
       )
     `).run();
 
@@ -29,17 +31,54 @@ const Payroll = {
         payroll_run_id INTEGER,
         employee_id INTEGER,
         base_salary REAL,
-        hours_worked REAL DEFAULT 0,
-        overtime_hours REAL DEFAULT 0,
+        hours_worked REAL,
+        overtime_hours REAL,
         gross_pay REAL,
         tax_deductions REAL,
         other_deductions REAL,
         net_pay REAL,
-        payment_status TEXT DEFAULT 'Pending',
+        payment_status TEXT,
         FOREIGN KEY (payroll_run_id) REFERENCES payroll_runs(id),
         FOREIGN KEY (employee_id) REFERENCES employees(id)
       )
     `).run();
+
+    // Lightweight migrations: ensure expected columns exist (handles older DBs)
+    try {
+      const existingRunsCols = new Set(db.prepare(`PRAGMA table_info('payroll_runs')`).all().map(r => r.name));
+      const addRunCol = (name, ddl) => {
+        if (!existingRunsCols.has(name)) {
+          db.prepare(`ALTER TABLE payroll_runs ADD COLUMN ${name} ${ddl}`).run();
+        }
+      };
+      addRunCol('pay_period_start', 'DATE');
+      addRunCol('pay_period_end', 'DATE');
+      addRunCol('processed_date', 'DATE');
+      addRunCol('payment_method', 'TEXT');
+      addRunCol('notes', 'TEXT');
+      addRunCol('status', "TEXT DEFAULT 'Processed'");
+      addRunCol('total_net_pay', 'REAL DEFAULT 0');
+      addRunCol('total_tax', 'REAL DEFAULT 0');
+      addRunCol('total_deductions', 'REAL DEFAULT 0');
+      addRunCol('payments_count', 'INTEGER DEFAULT 0');
+      addRunCol('created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+    } catch (e) {
+      console.error('Payroll runs migration failed:', e);
+    }
+
+    try {
+      const existingDetailsCols = new Set(db.prepare(`PRAGMA table_info('payroll_details')`).all().map(r => r.name));
+      const addDetCol = (name, ddl) => {
+        if (!existingDetailsCols.has(name)) {
+          db.prepare(`ALTER TABLE payroll_details ADD COLUMN ${name} ${ddl}`).run();
+        }
+      };
+      addDetCol('hours_worked', 'REAL DEFAULT 0');
+      addDetCol('overtime_hours', 'REAL DEFAULT 0');
+      addDetCol('payment_status', "TEXT DEFAULT 'Pending'");
+    } catch (e) {
+      console.error('Payroll details migration failed:', e);
+    }
   },
 
   // Get all payroll records
@@ -95,6 +134,29 @@ const Payroll = {
     }
   },
 
+  // Evaluate payroll using configured formula
+  _evaluateRow({ regularHours, overtimeHours, rate, grossBase, employeeId, date, country }) {
+    const fnSrc = PayrollConfig.getActiveFormula();
+    let formulaFn;
+    try {
+      // Limited sandbox via function arguments only
+      formulaFn = (0, eval)(`(${fnSrc})`);
+    } catch (e) {
+      // Fallback if custom formula broken
+      formulaFn = ({ regularHours=0, overtimeHours=0, rate=0, grossBase=0, employeeId }) => {
+        const gross = (Number(regularHours)||0)*(Number(rate)||0) + (Number(overtimeHours)||0)*(Number(rate)||0)*1.5 + (Number(grossBase)||0);
+        const tax = PayrollConfig.computeTax(gross, country, date);
+        const deductions = PayrollConfig.computeDeductions(employeeId, gross, date);
+        return { gross, tax, deductions: deductions.items, net: gross - tax - deductions.total };
+      };
+    }
+    const helpers = {
+      computeTax: (g, c, d) => PayrollConfig.computeTax(g, c, d),
+      computeDeductions: (empId, g, d) => PayrollConfig.computeDeductions(empId, g, d)
+    };
+    return formulaFn({ regularHours, overtimeHours, rate, grossBase, employeeId, date, country, helpers });
+  },
+
   // Process a new payroll run
   processPayroll: async (payrollData) => {
     try {
@@ -104,7 +166,8 @@ const Payroll = {
         employeeIds,
         rows,
         paymentMethod,
-        notes
+        notes,
+        country = 'DEFAULT'
       } = payrollData;
 
       // Start a transaction
@@ -130,78 +193,58 @@ const Payroll = {
 
         const payrollRunId = runResult.lastInsertRowid;
 
+        const upsertDetail = (empId, rate, regular, overtime, grossBase) => {
+          const { gross, tax, deductions, net } = Payroll._evaluateRow({
+            regularHours: regular,
+            overtimeHours: overtime,
+            rate,
+            grossBase,
+            employeeId: empId,
+            date: payPeriodEnd || new Date().toISOString().slice(0,10),
+            country
+          });
+          db.prepare(`
+            INSERT INTO payroll_details (
+              payroll_run_id,
+              employee_id,
+              base_salary,
+              hours_worked,
+              overtime_hours,
+              gross_pay,
+              tax_deductions,
+              other_deductions,
+              net_pay,
+              payment_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            payrollRunId,
+            empId,
+            rate,
+            regular || 0,
+            overtime || 0,
+            gross,
+            tax,
+            (deductions||[]).reduce((s,d)=>s+Number(d.amount||0),0),
+            net,
+            'Processed'
+          );
+        };
+
         // If detailed rows were provided, use them; otherwise fall back to employeeIds
         if (Array.isArray(rows) && rows.length > 0) {
-          // rows expected: [{ id, regularHours, overtimeHours, rate, deductions }]
-          const taxRate = 0.2; // TODO: make configurable
           rows.forEach(r => {
             const empId = r.id || r.employee_id;
             const rate = Number(r.rate) || 0;
             const regular = Number(r.regularHours) || 0;
             const overtime = Number(r.overtimeHours) || 0;
-            const grossPay = regular * rate + overtime * rate * 1.5;
-            const taxDeductions = grossPay * taxRate;
-            const otherDeductions = Number(r.deductions) || 0;
-            const netPay = grossPay - taxDeductions - otherDeductions;
-
-            db.prepare(`
-              INSERT INTO payroll_details (
-                payroll_run_id,
-                employee_id,
-                base_salary,
-                hours_worked,
-                overtime_hours,
-                gross_pay,
-                tax_deductions,
-                other_deductions,
-                net_pay,
-                payment_status
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
-              payrollRunId,
-              empId,
-              rate,
-              regular,
-              overtime,
-              grossPay,
-              taxDeductions,
-              otherDeductions,
-              netPay,
-              'Processed'
-            );
+            const grossBase = Number(r.grossBase) || 0;
+            upsertDetail(empId, rate, regular, overtime, grossBase);
           });
         } else if (Array.isArray(employeeIds) && employeeIds.length > 0) {
-          // Get employee salaries
           const employees = db.prepare('SELECT id, salary FROM employees WHERE id IN (' + employeeIds.join(',') + ')').all();
-          // Process each employee using salary as gross
           employees.forEach(emp => {
-            const baseSalary = emp.salary;
-            const taxRate = 0.2;
-            const grossPay = baseSalary;
-            const taxDeductions = grossPay * taxRate;
-            const netPay = grossPay - taxDeductions;
-
-            db.prepare(`
-              INSERT INTO payroll_details (
-                payroll_run_id,
-                employee_id,
-                base_salary,
-                gross_pay,
-                tax_deductions,
-                other_deductions,
-                net_pay,
-                payment_status
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
-              payrollRunId,
-              emp.id,
-              baseSalary,
-              grossPay,
-              taxDeductions,
-              0,
-              netPay,
-              'Processed'
-            );
+            const baseSalary = Number(emp.salary)||0;
+            upsertDetail(emp.id, baseSalary, 0, 0, baseSalary);
           });
         }
 
@@ -249,6 +292,40 @@ const Payroll = {
         success: false,
         error: error.message || 'Failed to process payroll'
       };
+    }
+  },
+
+  getPayslipData(payrollRunId, employeeId) {
+    try {
+      const detail = db.prepare(`
+        SELECT pd.*, e.first_name, e.last_name, e.email, e.phone, e.salary,
+               pr.pay_period_start, pr.pay_period_end, pr.processed_date, pr.payment_method
+        FROM payroll_details pd
+        JOIN employees e ON e.id = pd.employee_id
+        JOIN payroll_runs pr ON pr.id = pd.payroll_run_id
+        WHERE pd.payroll_run_id = ? AND pd.employee_id = ?
+      `).get(payrollRunId, employeeId);
+      if (!detail) return { success: false, error: 'Payslip not found' };
+      return { success: true, data: detail };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  },
+
+  getPayslipsForRun(payrollRunId) {
+    try {
+      const rows = db.prepare(`
+        SELECT pd.*, e.first_name, e.last_name, e.email,
+               pr.pay_period_start, pr.pay_period_end, pr.processed_date, pr.payment_method
+        FROM payroll_details pd
+        JOIN employees e ON e.id = pd.employee_id
+        JOIN payroll_runs pr ON pr.id = pd.payroll_run_id
+        WHERE pd.payroll_run_id = ?
+        ORDER BY e.last_name, e.first_name
+      `).all(payrollRunId);
+      return { success: true, data: rows };
+    } catch (e) {
+      return { success: false, error: e.message };
     }
   }
 };

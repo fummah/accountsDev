@@ -19,6 +19,7 @@ const Invoices = {
     status TEXT DEFAULT 'Pending',
     number TEXT,
     vat REAL NOT NULL DEFAULT 0,
+    balance REAL DEFAULT 0,
     linked_invoice TEXT,
 	entered_by	TEXT,
 	date_entered DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -27,6 +28,38 @@ const Invoices = {
       )
     `;
     db.prepare(stmt).run();
+    // Migration: ensure additional columns exist on older DBs
+    try {
+      const colInfo = db.prepare("PRAGMA table_info(invoices)").all();
+      const hasBalance = colInfo.some(c => c.name === 'balance');
+      const hasCurrency = colInfo.some(c => c.name === 'currency');
+      const hasFx = colInfo.some(c => c.name === 'fxRate');
+      if (!hasBalance) {
+        console.log('[invoices] Adding missing column `balance` to invoices table');
+        db.prepare('ALTER TABLE invoices ADD COLUMN balance REAL DEFAULT 0').run();
+
+        // Populate balance from invoice_lines - payments if possible
+        try {
+          const invoicesRows = db.prepare('SELECT id FROM invoices').all();
+          for (const row of invoicesRows) {
+            const sumLines = db.prepare('SELECT COALESCE(SUM(amount * quantity),0) as total FROM invoice_lines WHERE invoice_id = ?').get(row.id).total;
+            const sumPayments = db.prepare('SELECT COALESCE(SUM(amount),0) as total FROM payments WHERE invoiceId = ?').get(row.id).total;
+            const bal = (sumLines || 0) - (sumPayments || 0);
+            db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(bal, row.id);
+          }
+        } catch (err) {
+          console.error('[invoices] Error populating balance values:', err);
+        }
+      }
+      if (!hasCurrency) {
+        db.prepare('ALTER TABLE invoices ADD COLUMN currency TEXT').run();
+      }
+      if (!hasFx) {
+        db.prepare('ALTER TABLE invoices ADD COLUMN fxRate REAL DEFAULT 1.0').run();
+      }
+    } catch (err) {
+      console.error('[invoices] Migration check failed:', err);
+    }
   }, 
   createInvoiceItem: () => {
     const stmt = `
@@ -45,33 +78,94 @@ const Invoices = {
   }, 
   
   // Insert a new Invoices
-  insertInvoice: async (customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines) => {
+  insertInvoice: (customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines) => {
     try {
     const stmt = db.prepare('INSERT INTO invoices (customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by, vat, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    const result = await stmt.run(customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by, vat, status);
+    const result = stmt.run(
+      Number(customer) || 0,
+      String(customer_email || ''),
+      islater ? 1 : 0,
+      String(billing_address || ''),
+      String(terms || ''),
+      String(start_date || ''),
+      String(last_date || ''),
+      String(message || ''),
+      String(statement_message || ''),
+      String(number || ''),
+      entered_by != null ? String(entered_by) : null,
+      Number(vat) || 0,
+      String(status || 'Draft')
+    );
 
     if (result.changes > 0) {
       const invoiceId = result.lastInsertRowid;
-      const invoiceLineStmt = db.prepare('INSERT INTO invoice_lines (invoice_id, product, description,quantity,rate, amount) VALUES (?, ?, ?, ?, ?, ?)');
-      for (const line of invoiceLines) {
-        await invoiceLineStmt.run(invoiceId, line.product, line.description,line.quantity,line.rate, line.amount);
+      const linesArr = Array.isArray(invoiceLines) ? invoiceLines : [];
+      if (linesArr.length > 0) {
+        const invoiceLineStmt = db.prepare('INSERT INTO invoice_lines (invoice_id, product, description,quantity,rate, amount) VALUES (?, ?, ?, ?, ?, ?)');
+        for (const line of linesArr) {
+          invoiceLineStmt.run(
+            invoiceId,
+            line.product_id || line.product || null,
+            String(line.description || ''),
+            Number(line.quantity) || 1,
+            Number(line.rate) || 0,
+            Number(line.amount) || 0
+          );
+        }
       }
-      return { success: true, invoiceId }; 
+      // Auto-generate invoice number if not provided
+      if (!number || number === '') {
+        const formattedNumber = `INV-${String(Number(invoiceId)).padStart(5, '0')}`;
+        db.prepare('UPDATE invoices SET number = ? WHERE id = ?').run(formattedNumber, invoiceId);
+      }
+      return { success: true, invoiceId: Number(invoiceId) }; 
     } 
       else {
         return { success: false };
       }
     } catch (error) {
       console.error("Error inserting Invoice:", error);
-      return { success: false, error:error };
+      return { success: false, error: error.message || String(error) };
     }
   },
 
   // Retrieve all Invoices
   getAllInvoices: function () {
-    const stmt = db.prepare("SELECT invoices.id, invoices.number,invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name,invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, SUM(invoice_lines.amount *invoice_lines.quantity) AS amount, invoices.vat, invoices.terms,invoices.message,invoices.statement_message, invoices.billing_address FROM invoice_lines INNER JOIN invoices ON invoice_lines.invoice_id = invoices.id INNER JOIN customers ON invoices.customer = customers.id GROUP BY invoices.id, customers.first_name, customers.last_name, invoices.status, invoices.start_date, invoices.last_date ORDER BY invoices.id DESC");
+    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount * invoice_lines.quantity), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id GROUP BY invoices.id ORDER BY invoices.id DESC");
     const report = this.getInvoiceReport();
     return {all:stmt.all(), report:report};
+  },
+
+  getPaginated: function (page = 1, pageSize = 25, search = '', status = '') {
+    const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
+    const limit = Math.max(1, Math.min(500, pageSize));
+    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount * invoice_lines.quantity), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id`;
+    const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
+    const statusParam = status && status.trim() ? status.trim() : null;
+    const whereParts = [];
+    const params = [];
+    if (searchParam) {
+      whereParts.push(`(customers.first_name || ' ' || customers.last_name LIKE ? OR invoices.number LIKE ?)`);
+      params.push(searchParam, searchParam);
+    }
+    if (statusParam) {
+      whereParts.push(`invoices.status = ?`);
+      params.push(statusParam);
+    }
+    const whereClause = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
+    const groupOrder = ` GROUP BY invoices.id, customers.first_name, customers.last_name, invoices.status, invoices.start_date, invoices.last_date ORDER BY invoices.id DESC`;
+    let total;
+    if (params.length) {
+      const innerSql = `${baseSql}${whereClause}${groupOrder}`;
+      total = db.prepare(`SELECT COUNT(*) AS total FROM (${innerSql})`).get(...params).total;
+    } else {
+      total = db.prepare('SELECT COUNT(*) AS total FROM invoices').get().total;
+    }
+    const dataSql = `${baseSql}${whereClause}${groupOrder} LIMIT ? OFFSET ?`;
+    const data = params.length
+      ? db.prepare(dataSql).all(...params, limit, offset)
+      : db.prepare(baseSql + groupOrder + ' LIMIT ? OFFSET ?').all(limit, offset);
+    return { data, total };
   },
   getInvoiceSummary: () => {
     const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Pending' ");
@@ -358,25 +452,51 @@ const Invoices = {
     };
   },
   getSingleInvoice: (invoice_id) => {
-    const stmt = db.prepare(`SELECT invoices.id as invoice_id, customers.first_name, customers.last_name,customers.phone_number, customers.mobile_number, invoices.status, invoices.customer_email, invoices.islater, invoices.billing_address,
-        invoices.start_date, invoices.last_date, invoices.message, invoices.statement_message, invoices.number, invoices.vat, invoices.entered_by, invoices.date_entered, invoice_lines.id AS line_id,
-        invoice_lines.amount, invoice_lines.description, invoice_lines.product, invoice_lines.quantity, invoice_lines.rate FROM invoice_lines INNER JOIN invoices ON invoice_lines.invoice_id = invoices.id INNER JOIN customers ON invoices.customer = customers.id WHERE invoices.id = ?`);
+    const stmt = db.prepare(`SELECT invoices.id as invoice_id, invoices.customer as customer_id, invoices.terms,
+        customers.first_name, customers.last_name, customers.phone_number, customers.mobile_number,
+        invoices.status, invoices.customer_email, invoices.islater, invoices.billing_address,
+        invoices.start_date, invoices.last_date, invoices.message, invoices.statement_message,
+        invoices.number, invoices.vat, invoices.entered_by, invoices.date_entered,
+        invoice_lines.id AS line_id, invoice_lines.amount, invoice_lines.description,
+        invoice_lines.product, invoice_lines.quantity, invoice_lines.rate
+      FROM invoices
+      LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id
+      LEFT JOIN customers ON invoices.customer = customers.id
+      WHERE invoices.id = ?`);
   
     const rows = stmt.all(invoice_id);
+    if (!rows || rows.length === 0) return null;
   
-    const groupedData = rows.reduce((acc, row) => {
-      const {invoice_id, first_name, last_name, phone_number, mobile_number, status,vat, customer_email, islater, billing_address, start_date, last_date, message, statement_message, number, entered_by, date_entered,
-        line_id, amount, description,quantity, product, rate, } = row;
-  
-      if (!acc) {
-        acc = {invoice_id, first_name, last_name, phone_number, mobile_number, status, vat, customer_email, islater, billing_address, start_date, last_date, message, statement_message, number, entered_by,
-          date_entered, lines: [], };
+    const first = rows[0];
+    const result = {
+      invoice_id: first.invoice_id,
+      customer_id: first.customer_id,
+      customer: first.customer_id,
+      terms: first.terms,
+      first_name: first.first_name,
+      last_name: first.last_name,
+      phone_number: first.phone_number,
+      mobile_number: first.mobile_number,
+      status: first.status,
+      vat: first.vat,
+      customer_email: first.customer_email,
+      islater: first.islater,
+      billing_address: first.billing_address,
+      start_date: first.start_date,
+      last_date: first.last_date,
+      message: first.message,
+      statement_message: first.statement_message,
+      number: first.number,
+      entered_by: first.entered_by,
+      date_entered: first.date_entered,
+      lines: [],
+    };
+    for (const row of rows) {
+      if (row.line_id) {
+        result.lines.push({ id: row.line_id, amount: row.amount, description: row.description, quantity: row.quantity, product_id: row.product, rate: row.rate });
       }
-      acc.lines.push({ id: line_id, amount, description, quantity, product, rate,});
-      return acc;
-    }, null);
-  
-    return groupedData;
+    }
+    return result;
   },
   getInitialInvoice: (invoice_id, type) => {
     type = type.toLowerCase();
@@ -421,42 +541,46 @@ const Invoices = {
   },
 
   updateInvoice : async (invoiceData) => {
-    const { id, lines, ...invoiceDetails } = invoiceData;
+    const { id, lines, invoiceLines, ...invoiceDetails } = invoiceData;
+    const lineItems = lines || invoiceLines || [];
 
     try {
-      // Update the main invoice details
-      await db.prepare(
+      db.prepare(
         `UPDATE invoices
          SET customer = ?, customer_email = ?, islater = ?, billing_address = ?, 
              terms = ?, start_date = ?, last_date = ?, number = ?, vat = ?, 
              message = ?, statement_message = ?, status = ?
          WHERE id = ?`).run(
-        [
-          invoiceDetails.customer,
-          invoiceDetails.customer_email,
+          Number(invoiceDetails.customer) || 0,
+          String(invoiceDetails.customer_email || ''),
           invoiceDetails.islater ? 1 : 0,
-          invoiceDetails.billing_address,
-          invoiceDetails.terms,
-          invoiceDetails.start_date,
-          invoiceDetails.last_date,
-          invoiceDetails.number,
-          invoiceDetails.vat,
-          invoiceDetails.message,
-          invoiceDetails.statement_message,
-          invoiceDetails.status,
-          id,
-        ]
+          String(invoiceDetails.billing_address || ''),
+          String(invoiceDetails.terms || ''),
+          String(invoiceDetails.start_date || ''),
+          String(invoiceDetails.last_date || ''),
+          String(invoiceDetails.number || ''),
+          Number(invoiceDetails.vat) || 0,
+          String(invoiceDetails.message || ''),
+          String(invoiceDetails.statement_message || ''),
+          String(invoiceDetails.status || 'Draft'),
+          Number(id)
       );
   
       // Delete existing lines for the invoice
-      await db.prepare(`DELETE FROM invoice_lines WHERE invoice_id = ?`, [id]);
+      db.prepare(`DELETE FROM invoice_lines WHERE invoice_id = ?`).run(Number(id));
   
       // Insert updated lines
-      for (const line of lines) {
-        await db.prepare(
-          `INSERT INTO invoice_lines (invoice_id, product, description, quantity, rate, amount)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [id, line.product, line.description, line.quantity, line.rate, line.amount]
+      const insertLine = db.prepare(
+        `INSERT INTO invoice_lines (invoice_id, product, description, quantity, rate, amount)
+         VALUES (?, ?, ?, ?, ?, ?)`);
+      for (const line of lineItems) {
+        insertLine.run(
+          Number(id),
+          line.product_id || line.product || null,
+          String(line.description || ''),
+          Number(line.quantity) || 1,
+          Number(line.rate) || 0,
+          Number(line.amount) || 0
         );
       }
   
@@ -482,49 +606,72 @@ const Invoices = {
   },
   getFinancialReport: function (start_date, last_date) {
     try {
-    const stmt_revenue = db.prepare("SELECT SUM(l.amount * l.quantity + ((l.amount * l.quantity) * i.vat / 100)) AS revenue_total_amount, SUM(p.price * l.quantity) AS product_total_amount FROM invoice_lines AS l INNER JOIN products as p ON l.product=p.name INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Paid', 'Partially Paid') AND i.start_date BETWEEN ? AND ?");
-    const stmt_expense = db.prepare("SELECT SUM(l.amount) AS expense_total_amount FROM expense_lines AS l INNER JOIN expenses AS e ON l.expense_id = e.id WHERE e.approval_status IN ('Paid', 'Pending') AND e.payment_date BETWEEN ? AND ?");
-   
-    const revenue = stmt_revenue.get(start_date, last_date);
-    const expense = stmt_expense.get(start_date, last_date);
+      // Use LEFT JOINs and COALESCE to avoid nulls when product mapping isn't present
+      const stmt_revenue = db.prepare(
+        `SELECT 
+           COALESCE(SUM(l.amount * l.quantity + ((l.amount * l.quantity) * i.vat / 100)), 0) AS revenue_total_amount,
+           COALESCE(SUM(COALESCE(p.price,0) * l.quantity), 0) AS product_total_amount
+         FROM invoice_lines AS l
+         LEFT JOIN products AS p ON l.product = p.id OR l.product = p.name
+         INNER JOIN invoices AS i ON l.invoice_id = i.id
+         WHERE i.status IN ('Paid', 'Partially Paid') AND i.start_date BETWEEN ? AND ?`
+      );
 
-    return {
-      profitLoss: {
-        revenue: revenue.revenue_total_amount,
-        cogs: revenue.product_total_amount,
-        operatingExpenses: expense.expense_total_amount,
-        grossProfit: revenue.revenue_total_amount - revenue.product_total_amount,
-        netProfit: (revenue.revenue_total_amount - revenue.product_total_amount) - expense.expense_total_amount,
-      },
-      balanceSheet: {
-        assets: {
-          cash: ((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0),
-          accountsReceivable: 0,
-          inventory: 0,
-          total: ((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0) + 0,
+      const stmt_expense = db.prepare(
+        `SELECT COALESCE(SUM(l.amount), 0) AS expense_total_amount
+         FROM expense_lines AS l
+         INNER JOIN expenses AS e ON l.expense_id = e.id
+         WHERE e.approval_status IN ('Paid', 'Pending') AND e.payment_date BETWEEN ? AND ?`
+      );
+
+      const revenue = stmt_revenue.get(start_date, last_date) || { revenue_total_amount: 0, product_total_amount: 0 };
+      const expense = stmt_expense.get(start_date, last_date) || { expense_total_amount: 0 };
+
+      // Ensure numeric values
+      const revenueTotal = Number(revenue.revenue_total_amount) || 0;
+      const productTotal = Number(revenue.product_total_amount) || 0;
+      const expenseTotal = Number(expense.expense_total_amount) || 0;
+
+      const grossProfit = revenueTotal - productTotal;
+      const netProfit = grossProfit - expenseTotal;
+
+      return {
+        profitLoss: {
+          revenue: revenueTotal,
+          cogs: productTotal,
+          operatingExpenses: expenseTotal,
+          grossProfit: grossProfit,
+          netProfit: netProfit,
         },
-        liabilities: {
-          accountsPayable: expense.expense_total_amount || 0,
-          shortTermDebt: 0,
-          total: (expense.expense_total_amount || 0) + 0,
+        balanceSheet: {
+          assets: {
+            cash: grossProfit - expenseTotal,
+            accountsReceivable: 0,
+            inventory: 0,
+            total: (grossProfit - expenseTotal),
+          },
+          liabilities: {
+            accountsPayable: expenseTotal,
+            shortTermDebt: 0,
+            total: expenseTotal,
+          },
+          equity: {
+            retainedEarnings: 0,
+            shareholderEquity: 0,
+            total: 0,
+          },
         },
-        equity: {
-          retainedEarnings: 0,
-          shareholderEquity: 0,
-          total: 0,
+        cashFlow: {
+          operating: grossProfit - expenseTotal,
+          investing: 0,
+          financing: 0,
+          netCashFlow: grossProfit - expenseTotal,
         },
-      },
-      cashFlow: {
-        operating: ((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0),
-        investing: 0,
-        financing: 0,
-        netCashFlow: (((revenue.revenue_total_amount || 0) - (revenue.product_total_amount || 0)) - (expense.expense_total_amount || 0)) + 0 + 0, // Sum of all activities
-      },
-    };
-  } catch (error) {
-    console.error('Error fetching report:', error);
-    throw error;
-  }
+      };
+    } catch (error) {
+      console.error('Error fetching report:', error);
+      throw error;
+    }
 
   },
   getManagementReport: function (start_date, last_date) {
@@ -564,6 +711,63 @@ const Invoices = {
   }
 
   },
+
+  // Accounts Receivable Aging (optimized with JOINs instead of correlated subqueries)
+  getARAging: function(referenceDate) {
+    try {
+      const today = referenceDate || new Date().toISOString().slice(0,10);
+
+      const rows = db.prepare(`
+        SELECT 
+          i.id AS invoiceId,
+          i.customer AS customerId,
+          COALESCE(c.first_name || ' ' || c.last_name, 'Unknown') AS customerName,
+          i.last_date AS dueDate,
+          COALESCE(lt.totalAmount, 0) AS totalAmount,
+          COALESCE(pt.totalPaid, 0) AS totalPaid,
+          COALESCE(i.vat, 0) AS vatRate
+        FROM invoices i
+        LEFT JOIN customers c ON c.id = i.customer
+        LEFT JOIN (SELECT invoice_id, SUM(amount * quantity) AS totalAmount FROM invoice_lines GROUP BY invoice_id) lt ON lt.invoice_id = i.id
+        LEFT JOIN (SELECT invoiceId, SUM(amount) AS totalPaid FROM payments GROUP BY invoiceId) pt ON pt.invoiceId = i.id
+        WHERE i.status IS NULL OR i.status NOT IN ('Paid')
+      `).all();
+
+      const enriched = [];
+      for (const r of rows) {
+        const totalWithVat = Number(r.totalAmount) * (1 + (Number(r.vatRate) || 0)/100);
+        const balance = Math.round((totalWithVat - Number(r.totalPaid || 0)) * 100) / 100;
+        if (balance <= 0) continue;
+        const daysPastDue = r.dueDate ? Math.floor((new Date(today) - new Date(r.dueDate)) / 86400000) : 0;
+        const bucket = daysPastDue <= 0 ? 'current'
+                    : daysPastDue <= 30 ? '1-30'
+                    : daysPastDue <= 60 ? '31-60'
+                    : daysPastDue <= 90 ? '61-90'
+                    : '90+';
+        enriched.push({ invoiceId: r.invoiceId, customerId: r.customerId, customerName: r.customerName, dueDate: r.dueDate, balance, daysPastDue: isNaN(daysPastDue) ? 0 : daysPastDue, bucket });
+      }
+
+      const summary = { current: 0, '1-30': 0, '31-60': 0, '61-90': 0, '90+': 0, total: 0 };
+      const byCustomerMap = new Map();
+      for (const row of enriched) {
+        summary[row.bucket] += row.balance;
+        summary.total += row.balance;
+        const key = row.customerId || `unknown:${row.customerName}`;
+        if (!byCustomerMap.has(key)) {
+          byCustomerMap.set(key, { customerId: row.customerId, customerName: row.customerName, invoices: [], total: 0 });
+        }
+        const group = byCustomerMap.get(key);
+        group.invoices.push(row);
+        group.total += row.balance;
+      }
+      const byCustomer = Array.from(byCustomerMap.values()).sort((a,b) => b.total - a.total);
+
+      return { success: true, today, summary, byCustomer };
+    } catch (e) {
+      console.error('[invoices] getARAging error:', e);
+      return { success: false, error: e.message };
+    }
+  }
 };
 
 // Ensure the Invoices table is created

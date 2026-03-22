@@ -34,10 +34,11 @@ export default function CashflowProjector() {
       try {
         const year = new Date().getFullYear();
         const response = await window.electronAPI.getCashflowProjections(year);
-        if (Array.isArray(response) && response.length > 0) {
+        
+        if (response.success && Array.isArray(response.data)) {
           // map response to months order
           const mapped = months.map(m => {
-            const found = response.find(r => r.month === m);
+            const found = response.data.find(r => r.month === m);
             return {
               month: m,
               inflow: found ? Number(found.inflow) : 0,
@@ -45,9 +46,12 @@ export default function CashflowProjector() {
             };
           });
           setCashflowData(mapped);
+        } else if (!response.success) {
+          message.error(response.error || 'Failed to load projections');
         }
       } catch (err) {
         console.error('Error loading cashflow projections', err);
+        message.error('Error loading projections');
       }
     };
     load();
