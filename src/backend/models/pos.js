@@ -91,6 +91,10 @@ const POS = {
     return db.prepare(`SELECT * FROM pos_sales ORDER BY date DESC`).all();
   },
 
+  listSessions: (limit) => {
+    return db.prepare(`SELECT * FROM pos_sessions ORDER BY openedAt DESC LIMIT ?`).all(limit || 50);
+  },
+
   getSaleWithLines: (saleId) => {
     const sale = db.prepare(`SELECT * FROM pos_sales WHERE id = ?`).get(saleId);
     if (!sale) return null;

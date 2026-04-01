@@ -8,6 +8,7 @@ const { Option } = Select;
 const MyCompany = () => {
   const [form] = Form.useForm();
   const [activeKey, setActiveKey] = useState("1");
+  const [logoBase64, setLogoBase64] = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -23,7 +24,6 @@ const MyCompany = () => {
             address: data.address,
             email: data.email,
             phone: data.phone,
-            logo: data.logo,
             currency: data.currency,
             fyStart: data.fy_start,
             vat: data.vat_rate,
@@ -33,6 +33,7 @@ const MyCompany = () => {
             branchCode: data.branch_code,
             payments: data.payments ? data.payments.split(',') : [],
           });
+          if (data.logo) setLogoBase64(data.logo);
         }
       } catch (err) {
         // ignore
@@ -52,7 +53,7 @@ const MyCompany = () => {
   const beforeUpload = async (file) => {
     try {
       const base64 = await getBase64(file);
-      form.setFieldsValue({ logo: base64 });
+      setLogoBase64(base64);
       message.success(`${file.name} uploaded`);
     } catch (err) {
       message.error(`${file.name} upload failed`);
@@ -120,11 +121,17 @@ const MyCompany = () => {
                 </Form.Item>
               </Col>
               <Col span={24}>
-                <Form.Item label="Company Logo" name="logo">
-                  <Upload beforeUpload={beforeUpload} showUploadList={false}>
-                    <Button icon={<UploadOutlined />}>Click to Upload</Button>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', marginBottom: 4 }}>Company Logo</label>
+                  <Upload beforeUpload={beforeUpload} showUploadList={false} accept="image/*">
+                    <Button icon={<UploadOutlined />}>Click to Upload Logo</Button>
                   </Upload>
-                </Form.Item>
+                </div>
+                {logoBase64 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <img src={logoBase64} alt="Company Logo" style={{ maxHeight: 80, maxWidth: 200, objectFit: 'contain', border: '1px solid #e8e8e8', borderRadius: 4, padding: 4 }} />
+                  </div>
+                )}
               </Col>
             </Row>
             <Form.Item>
@@ -140,7 +147,7 @@ const MyCompany = () => {
                     address: values.address || '',
                     email: values.email || '',
                     phone: values.phone || '',
-                    logo: values.logo || '', // base64 string if uploaded
+                    logo: typeof logoBase64 === 'string' ? logoBase64 : '',
                     currency: values.currency || '',
                     fy_start: values.fyStart || '',
                     vat_rate: values.vat || 0,
@@ -206,7 +213,7 @@ const MyCompany = () => {
                     address: values.address || '',
                     email: values.email || '',
                     phone: values.phone || '',
-                    logo: values.logo || '',
+                    logo: typeof logoBase64 === 'string' ? logoBase64 : '',
                     currency: values.currency || '',
                     fy_start: values.fyStart || '',
                     vat_rate: values.vat || 0,
@@ -267,7 +274,7 @@ const MyCompany = () => {
                     address: values.address || '',
                     email: values.email || '',
                     phone: values.phone || '',
-                    logo: values.logo || '',
+                    logo: typeof logoBase64 === 'string' ? logoBase64 : '',
                     currency: values.currency || '',
                     fy_start: values.fyStart || '',
                     vat_rate: values.vat || 0,

@@ -35,6 +35,17 @@ const Company = {
     return db.prepare('SELECT * FROM company_info WHERE id = 1').get() || {};
   },
   saveInfo(data) {
+    // Helper: coerce value to a SQLite-safe type (string, number, or null)
+    const safe = (v) => {
+      if (v == null) return null;
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint') return v;
+      if (Buffer.isBuffer(v)) return v;
+      return String(v); // fallback: stringify objects/arrays/booleans
+    };
+    // Accept both camelCase (legacy) and snake_case keys from the frontend
+    const payments = data.payments;
+    const paymentsStr = Array.isArray(payments) ? payments.join(',') : payments || null;
+
     const stmt = db.prepare(`UPDATE company_info SET
       name = @name,
       reg_number = @reg_number,
@@ -55,22 +66,22 @@ const Company = {
       date_updated = CURRENT_TIMESTAMP
       WHERE id = 1`);
     const res = stmt.run({
-      name: data.name || null,
-      reg_number: data.regNumber || null,
-      industry: data.industry || null,
-      business_type: data.businessType || null,
-      address: data.address || null,
-      email: data.email || null,
-      phone: data.phone || null,
-      logo: data.logo || null,
-      currency: data.currency || null,
-      fy_start: data.fyStart || null,
-      vat_rate: data.vat || null,
-      terms: data.terms || null,
-      bank_name: data.bank || null,
-      account_number: data.accountNumber || null,
-      branch_code: data.branchCode || null,
-      payments: Array.isArray(data.payments) ? data.payments.join(',') : data.payments || null,
+      name:           safe(data.name || null),
+      reg_number:     safe(data.reg_number || data.regNumber || null),
+      industry:       safe(data.industry || null),
+      business_type:  safe(data.business_type || data.businessType || null),
+      address:        safe(data.address || null),
+      email:          safe(data.email || null),
+      phone:          safe(data.phone || null),
+      logo:           safe(typeof data.logo === 'string' ? data.logo : null),
+      currency:       safe(data.currency || null),
+      fy_start:       safe(data.fy_start || data.fyStart || null),
+      vat_rate:       safe(data.vat_rate != null ? data.vat_rate : (data.vat != null ? data.vat : null)),
+      terms:          safe(data.terms != null ? data.terms : null),
+      bank_name:      safe(data.bank_name || data.bank || null),
+      account_number: safe(data.account_number || data.accountNumber || null),
+      branch_code:    safe(data.branch_code || data.branchCode || null),
+      payments:       safe(paymentsStr),
     });
     return { success: res.changes >= 0 };
   },

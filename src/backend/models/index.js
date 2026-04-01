@@ -43,6 +43,7 @@ module.exports = {
   Employees,
   Expenses,
   Notes,
+  Documents,
   Suppliers,
   Users,
   Vat,

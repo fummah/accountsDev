@@ -20,7 +20,7 @@ const ItemList = () => {
     setLoading(true);
     try {
       const data = await window.electronAPI.getItems();
-      setItems(data);
+      setItems(Array.isArray(data) ? data : []);
     } catch (error) {
       message.error('Failed to load items');
       console.error('Error fetching items:', error);
@@ -96,7 +96,7 @@ const ItemList = () => {
       title: 'Unit Price',
       dataIndex: 'unitPrice',
       key: 'unitPrice',
-      render: (price) => `$${price.toFixed(2)}`,
+      render: (price) => `R ${Number(price || 0).toFixed(2)}`,
     },
     {
       title: 'Stock',

@@ -43,6 +43,7 @@ const Sales = () => {
           onChange={(key) => setActiveKey(key)}
           destroyInactiveTabPane
           animated={false}
+          tabBarStyle={{ overflowX: 'auto', flexWrap: 'nowrap' }}
         >
           <TabPane tab="All Sales" key="1">
             <div className="gx-mb-2">

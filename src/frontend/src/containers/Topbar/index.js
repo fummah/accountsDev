@@ -1,6 +1,7 @@
 import React, {useState} from "react";
-import {Layout, Popover} from "antd";
-import {Link} from "react-router-dom";
+import {Layout, Popover, Tooltip} from "antd";
+import {Link, useHistory} from "react-router-dom";
+import {LeftOutlined, RightOutlined} from "@ant-design/icons";
 
 import CustomScrollbars from "util/CustomScrollbars";
 import languageData from "./languageData";
@@ -22,6 +23,7 @@ const Topbar = () => {
   const width = useSelector(({common}) => common.width);
   const [searchText, setSearchText] = useState('');
   const dispatch = useDispatch();
+  const history = useHistory();
 
   const languageMenu = () => (
     <CustomScrollbars className="gx-popover-lang-scroll">
@@ -52,6 +54,19 @@ const Topbar = () => {
         </div> : null}
       <Link to="/" className="gx-d-block gx-d-lg-none gx-pointer">
         <img alt="" src={(process.env.PUBLIC_URL + "/assets/images/w-logo.png")}/></Link>
+
+      <div className="gx-d-flex gx-align-items-center gx-mr-3" style={{ gap: 2 }}>
+        <Tooltip title="Back">
+          <span className="gx-icon-btn gx-pointer" onClick={() => history.goBack()} style={{ fontSize: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: '50%' }}>
+            <LeftOutlined />
+          </span>
+        </Tooltip>
+        <Tooltip title="Forward">
+          <span className="gx-icon-btn gx-pointer" onClick={() => history.goForward()} style={{ fontSize: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: '50%' }}>
+            <RightOutlined />
+          </span>
+        </Tooltip>
+      </div>
 
       <SearchBox styleName="gx-d-none gx-d-lg-block gx-lt-icon-search-bar-lg"
                  placeholder="Search in System..."

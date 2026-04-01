@@ -36,42 +36,42 @@ const AllSalesTab = () => {
   const [listLoading, setListLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
 
-  // Fetch report for cards only (lightweight)
-  useEffect(() => {
-    let mounted = true;
-    const fetchCards = async () => {
-      setCardsLoading(true);
-      try {
-        const [invoiceReportRes, customersRes] = await Promise.all([
-          window.electronAPI.getInvoiceReport().catch(() => null),
-          window.electronAPI.getCustomerReport ? window.electronAPI.getCustomerReport().catch(() => null) : Promise.resolve(null)
-        ]);
-        if (!mounted) return;
-        const invoiceReport = (invoiceReportRes && !invoiceReportRes.error) ? invoiceReportRes : {};
-        const customerReport = (customersRes && customersRes.success) ? (customersRes.report || {}) : {};
-        const overdueAmt = invoiceReport?.due_invoice?.[0]?.due_total_amount || 0;
-        const overdueCount = invoiceReport?.due_invoice?.[0]?.due_invoice || 0;
-        const openAmt = invoiceReport?.open_invoice?.[0]?.open_total_amount || 0;
-        const openCount = invoiceReport?.open_invoice?.[0]?.open_invoice || 0;
-        const paidAmt = invoiceReport?.paid_invoice?.[0]?.paid_total_amount || 0;
-        const paidCount = invoiceReport?.paid_invoice?.[0]?.paid_invoice || 0;
-        const estAmt = customerReport?.due_quote?.[0]?.due_total_amount || 0;
-        const estCount = customerReport?.due_quote?.[0]?.due_quote || 0;
-        setCards([
-          { title: `$${formattedNumber(estAmt)}`, description: `${estCount} estimates`, color: '#40a9ff', wd: 6 },
-          { title: `$${formattedNumber(overdueAmt)}`, description: `${overdueCount} overdue invoices`, color: '#fa8c16', wd: 6 },
-          { title: `$${formattedNumber(openAmt)}`, description: `${openCount} open invoices / credits`, color: '#d9d9d9', wd: 6 },
-          { title: `$${formattedNumber(paidAmt)}`, description: `${paidCount} recently paid`, color: '#52c41a', wd: 6 },
-        ]);
-      } catch (err) {
-        if (mounted) setErrorMessage(err?.message || 'Failed to load summary');
-      } finally {
-        if (mounted) setCardsLoading(false);
-      }
-    };
-    fetchCards();
-    return () => { mounted = false; };
+  const fetchCards = useCallback(async () => {
+    setCardsLoading(true);
+    try {
+      const [invoiceReportRes, customersRes] = await Promise.all([
+        window.electronAPI.getInvoiceReport().catch(() => null),
+        window.electronAPI.getCustomerReport ? window.electronAPI.getCustomerReport().catch(() => null) : Promise.resolve(null)
+      ]);
+      const invoiceReport = (invoiceReportRes && !invoiceReportRes.error) ? invoiceReportRes : {};
+      const customerReport = (customersRes && customersRes.success) ? (customersRes.report || {}) : {};
+      const overdueAmt = invoiceReport?.due_invoice?.[0]?.due_total_amount || 0;
+      const overdueCount = invoiceReport?.due_invoice?.[0]?.due_invoice || 0;
+      const openAmt = invoiceReport?.open_invoice?.[0]?.open_total_amount || 0;
+      const openCount = invoiceReport?.open_invoice?.[0]?.open_invoice || 0;
+      const paidAmt = invoiceReport?.paid_invoice?.[0]?.paid_total_amount || 0;
+      const paidCount = invoiceReport?.paid_invoice?.[0]?.paid_invoice || 0;
+      const estAmt = customerReport?.due_quote?.[0]?.due_total_amount || 0;
+      const estCount = customerReport?.due_quote?.[0]?.due_quote || 0;
+      setCards([
+        { title: `R ${formattedNumber(estAmt)}`, description: `${estCount} estimates`, color: '#40a9ff', wd: 6 },
+        { title: `R ${formattedNumber(overdueAmt)}`, description: `${overdueCount} overdue invoices`, color: '#fa8c16', wd: 6 },
+        { title: `R ${formattedNumber(openAmt)}`, description: `${openCount} open invoices / credits`, color: '#d9d9d9', wd: 6 },
+        { title: `R ${formattedNumber(paidAmt)}`, description: `${paidCount} recently paid`, color: '#52c41a', wd: 6 },
+      ]);
+    } catch (err) {
+      setErrorMessage(err?.message || 'Failed to load summary');
+    } finally {
+      setCardsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchCards();
+    const onFocus = () => fetchCards();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [fetchCards]);
 
   const fetchSalesPage = useCallback(async (p = 1, size = PAGE_SIZE, searchTerm = '') => {
     setListLoading(true);

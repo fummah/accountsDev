@@ -191,6 +191,19 @@ const CreateQuote = () => {
         product_id: l.product_id || null,
       }));
 
+      // Validate that every line has a product selected
+      if (quoteLines.length === 0) {
+        message.error('Please add at least one line item');
+        setSaving(false);
+        return;
+      }
+      const missingProduct = quoteLines.find(l => !l.product_id);
+      if (missingProduct) {
+        message.error('Please select a product from the dropdown for each line item. All lines must have a product selected from the system.');
+        setSaving(false);
+        return;
+      }
+
       if (isEdit) {
         const res = await window.electronAPI.updateQuote?.({
           id: Number(id), status: status || vals.status || 'Open',
@@ -309,7 +322,7 @@ const CreateQuote = () => {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="number" label="Quote Number"><Input placeholder="Auto-generated if blank" /></Form.Item>
+              <Form.Item name="number" label="Quote Number" rules={[{ pattern: /^[A-Za-z0-9\-\/]*$/, message: 'Only letters, numbers, hyphens and slashes allowed' }]}><Input placeholder="Auto-generated if blank" /></Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="customer_email" label="Email"><Input /></Form.Item>

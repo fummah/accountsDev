@@ -412,6 +412,37 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   webhookDelete: (id) => ipcRenderer.invoke('webhook-delete', id),
   webhookLogs: (webhookId, limit) => ipcRenderer.invoke('webhook-logs', webhookId, limit),
   webhookTest: (id) => ipcRenderer.invoke('webhook-test', id),
+
+  // POS (Point of Sale)
+  posGetOpenSession: () => ipcRenderer.invoke('pos-get-open-session'),
+  posOpenSession: (openedBy, openingAmount) => ipcRenderer.invoke('pos-open-session', openedBy, openingAmount),
+  posCloseSession: (sessionId, closingAmount) => ipcRenderer.invoke('pos-close-session', sessionId, closingAmount),
+  posCreateSale: (sale, lines) => ipcRenderer.invoke('pos-create-sale', sale, lines),
+  posListSales: (sessionId) => ipcRenderer.invoke('pos-list-sales', sessionId),
+  posListSessions: (limit) => ipcRenderer.invoke('pos-list-sessions', limit),
+  posGetSale: (saleId) => ipcRenderer.invoke('pos-get-sale', saleId),
+
+  // CRM
+  crmListLeads: (filters) => ipcRenderer.invoke('crm-list-leads', filters),
+  crmGetLead: (id) => ipcRenderer.invoke('crm-get-lead', id),
+  crmCreateLead: (lead) => ipcRenderer.invoke('crm-create-lead', lead),
+  crmUpdateLead: (lead) => ipcRenderer.invoke('crm-update-lead', lead),
+  crmUpdateLeadStage: (id, stage) => ipcRenderer.invoke('crm-update-lead-stage', id, stage),
+  crmBulkUpdateStage: (ids, stage) => ipcRenderer.invoke('crm-bulk-update-stage', ids, stage),
+  crmDeleteLead: (id) => ipcRenderer.invoke('crm-delete-lead', id),
+  crmConvertLead: (id, extraData) => ipcRenderer.invoke('crm-convert-lead', id, extraData),
+  crmListActivities: (params) => ipcRenderer.invoke('crm-list-activities', params),
+  crmOverdueActivities: () => ipcRenderer.invoke('crm-overdue-activities'),
+  crmUpcomingActivities: (days) => ipcRenderer.invoke('crm-upcoming-activities', days),
+  crmCreateActivity: (activity) => ipcRenderer.invoke('crm-create-activity', activity),
+  crmUpdateActivity: (activity) => ipcRenderer.invoke('crm-update-activity', activity),
+  crmDeleteActivity: (id) => ipcRenderer.invoke('crm-delete-activity', id),
+  crmGetLeadQuotes: (leadId) => ipcRenderer.invoke('crm-get-lead-quotes', leadId),
+  crmLinkQuote: (leadId, quoteId) => ipcRenderer.invoke('crm-link-quote', leadId, quoteId),
+  crmCreateQuoteForLead: (leadId, quoteData, quoteLines) => ipcRenderer.invoke('crm-create-quote-for-lead', leadId, quoteData, quoteLines),
+  crmGetLeadWithRelated: (leadId) => ipcRenderer.invoke('crm-get-lead-with-related', leadId),
+  crmPipelineStats: () => ipcRenderer.invoke('crm-pipeline-stats'),
+  crmReports: () => ipcRenderer.invoke('crm-reports'),
 });
 
 // Navigation event from main to renderer (production routing)

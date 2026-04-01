@@ -127,18 +127,27 @@ const AuditTrail = () => {
       {chainResult && (
         <Card size="small" style={{ marginBottom: 16, borderColor: chainResult.broken === 0 ? '#52c41a' : '#f5222d' }}>
           <Row gutter={16}>
-            <Col span={8}>
-              <Statistic title="Entries Verified" value={chainResult.total} />
+            <Col span={6}>
+              <Statistic title="Total Entries" value={chainResult.total} />
             </Col>
-            <Col span={8}>
+            <Col span={6}>
+              <Statistic title="Hash-Chained" value={chainResult.verified ?? chainResult.total}
+                valueStyle={{ color: '#1890ff' }} />
+            </Col>
+            <Col span={6}>
               <Statistic title="Chain Breaks" value={chainResult.broken}
                 valueStyle={{ color: chainResult.broken === 0 ? '#52c41a' : '#f5222d' }} />
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Statistic title="Integrity" value={chainResult.broken === 0 ? 'PASS' : 'FAIL'}
                 valueStyle={{ color: chainResult.broken === 0 ? '#52c41a' : '#f5222d', fontWeight: 700 }} />
             </Col>
           </Row>
+          {chainResult.legacy > 0 && (
+            <p style={{ margin: '8px 0 0', color: '#8c8c8c', fontSize: 12 }}>
+              {chainResult.legacy} legacy entries (created before hash chain) are excluded from verification.
+            </p>
+          )}
         </Card>
       )}
 

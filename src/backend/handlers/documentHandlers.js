@@ -50,12 +50,13 @@ function registerDocumentHandlers() {
         Number(linkedId) || 0,
         enteredBy || 'system'
       );
-      if (res && res.lastInsertRowid) {
-        // update file_path column if present
+      if (res && res.success) {
         try {
           const db = require('../models/dbmgr');
-          db.prepare('UPDATE documents SET file_seen = 1 WHERE 1=0').run();
-        } catch {}
+          db.prepare('UPDATE documents SET file_path = ? WHERE random_number = ? AND file_path IS NULL').run(fileName, fileName);
+        } catch (e) {
+          console.warn('Could not set file_path after upload:', e.message);
+        }
       }
       return { success: true, path: filePath };
     } catch (e) {

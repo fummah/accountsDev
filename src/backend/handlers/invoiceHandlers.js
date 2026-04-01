@@ -85,13 +85,17 @@ const registerInvoiceHandlers = () => {
         last_date, message, statement_message, number, entered_by, vat, status, invoiceLines
       );
       if (res?.success) {
-        AuditLog.log({
-          userId: ctx.userId,
-          action: 'create',
-          entityType: 'invoice',
-          entityId: res?.invoice_id || res?.id,
-          details: { customer, number, status }
-        });
+        try {
+          AuditLog.log({
+            userId: ctx.userId,
+            action: 'create',
+            entityType: 'invoice',
+            entityId: res?.invoice_id || res?.id,
+            details: { customer, number, status }
+          });
+        } catch (auditErr) {
+          console.warn('Audit log failed (non-fatal):', auditErr.message);
+        }
       }
       return res;
     } catch (error) {
@@ -107,13 +111,17 @@ const registerInvoiceHandlers = () => {
       validateInvoice(invoiceData);
       const res = await Invoices.updateInvoice(invoiceData);
       if (res?.success) {
-        AuditLog.log({
-          userId: ctx.userId,
-          action: 'update',
-          entityType: 'invoice',
-          entityId: invoiceData?.id,
-          details: { status: invoiceData?.status, total: invoiceData?.total }
-        });
+        try {
+          AuditLog.log({
+            userId: ctx.userId,
+            action: 'update',
+            entityType: 'invoice',
+            entityId: invoiceData?.id,
+            details: { status: invoiceData?.status, total: invoiceData?.total }
+          });
+        } catch (auditErr) {
+          console.warn('Audit log failed (non-fatal):', auditErr.message);
+        }
       }
       return res;
     } catch (error) {    

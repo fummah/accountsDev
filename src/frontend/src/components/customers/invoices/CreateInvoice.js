@@ -197,6 +197,19 @@ const CreateInvoice = () => {
         product_id: l.product_id || null,
       }));
 
+      // Validate that every line has a product selected
+      if (invoiceLines.length === 0) {
+        message.error('Please add at least one line item');
+        setSaving(false);
+        return;
+      }
+      const missingProduct = invoiceLines.find(l => !l.product_id);
+      if (missingProduct) {
+        message.error('Please select a product from the dropdown for each line item. All lines must have a product selected from the system.');
+        setSaving(false);
+        return;
+      }
+
       if (isEdit) {
         const res = await window.electronAPI.updateInvoice?.({
           id: Number(id), customer, customer_email, billing_address, terms,
@@ -306,7 +319,7 @@ const CreateInvoice = () => {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="number" label="Invoice Number"><Input placeholder="Auto-generated if blank" /></Form.Item>
+              <Form.Item name="number" label="Invoice Number" rules={[{ pattern: /^[A-Za-z0-9\-\/]*$/, message: 'Only letters, numbers, hyphens and slashes allowed' }]}><Input placeholder="Auto-generated if blank" /></Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="terms" label="Payment Terms">

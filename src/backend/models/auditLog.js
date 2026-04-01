@@ -105,11 +105,18 @@ const AuditLog = {
     const rows = db.prepare('SELECT * FROM audit_logs ORDER BY id ASC LIMIT ?').all(limit);
     let prevHash = null;
     const broken = [];
+    let legacyCount = 0;
     for (const row of rows) {
-      if (row.prev_hash !== prevHash) broken.push({ id: row.id, expected: prevHash, got: row.prev_hash });
+      if (row.prev_hash == null && row.entry_hash == null) {
+        legacyCount++;
+        continue;
+      }
+      if (row.prev_hash !== prevHash) {
+        broken.push({ id: row.id, expected: prevHash, got: row.prev_hash });
+      }
       prevHash = row.entry_hash;
     }
-    return { total: rows.length, broken: broken.length, details: broken.slice(0, 10) };
+    return { total: rows.length, verified: rows.length - legacyCount, legacy: legacyCount, broken: broken.length, details: broken.slice(0, 10) };
   }
 };
 

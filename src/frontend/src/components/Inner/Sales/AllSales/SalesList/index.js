@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Table, Dropdown, Menu, Col, Row } from "antd";
+import { Table, Dropdown, Menu, Col, Row, Tooltip } from "antd";
 import { useRedirectToItem } from 'util/navigation';
 import { Input } from 'antd';
 import { SearchOutlined, PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
@@ -67,10 +67,14 @@ const SalesList = ({ sales = [], loading = false, total = 0, page = 1, pageSize 
       {
         title: 'Memo',
         dataIndex: 'memo',
-        render: (text, record) => {
-          return <span className="gx-text-grey">{record.memo}</span>
-        },
-    },
+        width: 200,
+        ellipsis: true,
+        render: (text, record) => (
+          <Tooltip title={record.memo}>
+            <span className="gx-text-grey" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{record.memo}</span>
+          </Tooltip>
+        ),
+      },
     {
         title: 'Amount',
         dataIndex: 'amount',

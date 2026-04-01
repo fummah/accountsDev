@@ -18,31 +18,24 @@ const AuditLog = require('../models/auditLog');
 const { authorize } = require('../security/authz');
 const Settings = require('../models/settings');
 const Anchors = require('../models/auditAnchors');
-ipcMain.handle('deletingrecord', async (event,id,table) => {
-  try {
-    table = (table || '').toLowerCase();
-    switch (table) {
-      case 'invoices':
-        return await Invoices.deleteInvoice(id);
-      case 'quotes':
-        return await Quotes.deleteQuote(id);
-      case 'expenses':
-        // delete expense lines first then expense
-        return await Expenses.deleteExpense ? await Expenses.deleteExpense(id) : await Vat.deleteRecord(id,table);
-      case 'vat':
-        return await Vat.deleteRecord(id,table);
-      default:
-        // fallback to generic delete
-        return await Vat.deleteRecord(id,table);
-    }
-  } catch (error) {    
-    console.error('Error deleting record:', error);
-    return { error: error.message };
-  }
-});
+
+// NOTE: 'deletingrecord' handler is registered in ipcHandlers.js — do NOT duplicate here
 function registerAccountingHandlers() {
+  // Safe handler registration – skip duplicates instead of crashing
+  const safeHandle = (channel, handler) => {
+    try {
+      ipcMain.handle(channel, handler);
+    } catch (e) {
+      if (e.message && e.message.includes('second handler')) {
+        console.warn(`[accountingHandlers] Skipping duplicate channel: ${channel}`);
+      } else {
+        console.error(`[accountingHandlers] Error registering '${channel}':`, e);
+      }
+    }
+  };
+
   // Chart of Accounts handlers
-  ipcMain.handle('get-chart-of-accounts', async () => {
+  safeHandle('get-chart-of-accounts', async () => {
     try {
       return await ChartOfAccounts.getAllAccounts();
     } catch (error) {
@@ -50,7 +43,7 @@ function registerAccountingHandlers() {
       return { error: error.message };
     }
   });
-  ipcMain.handle('get-budgets', async () => {
+  safeHandle('get-budgets', async () => {
   try {
     console.log('[ipcHandlers] get-budgets invoked');
     return await Budgets.getBudgets();
@@ -60,7 +53,7 @@ function registerAccountingHandlers() {
   }
 });
 // convert quote
-ipcMain.handle('convertquote', async (event,quote_id) => {
+safeHandle('convertquote', async (event,quote_id) => {
   try {
     return await Quotes.convertToInvoice(quote_id);
   } catch (error) {    
@@ -68,7 +61,7 @@ ipcMain.handle('convertquote', async (event,quote_id) => {
     return { error: error.message };
   }
 });
-ipcMain.handle('insert-budget', async (event, department, period, amount, forecast, entered_by) => {
+safeHandle('insert-budget', async (event, department, period, amount, forecast, entered_by) => {
   try {
     console.log('Inserting budget:', department, period, amount, forecast, entered_by);
     return await Budgets.insertBudget(department, period, amount, forecast, entered_by);
@@ -78,7 +71,7 @@ ipcMain.handle('insert-budget', async (event, department, period, amount, foreca
   }
 });
 
-ipcMain.handle('update-budget', async (_e, id, department, period, amount, forecast) => {
+safeHandle('update-budget', async (_e, id, department, period, amount, forecast) => {
   try {
     return Budgets.updateBudget(id, department, period, amount, forecast);
   } catch (error) {
@@ -86,7 +79,7 @@ ipcMain.handle('update-budget', async (_e, id, department, period, amount, forec
   }
 });
 
-ipcMain.handle('delete-budget', async (_e, id) => {
+safeHandle('delete-budget', async (_e, id) => {
   try {
     return Budgets.deleteBudget(id);
   } catch (error) {
@@ -94,7 +87,7 @@ ipcMain.handle('delete-budget', async (_e, id) => {
   }
 });
 
-ipcMain.handle('budget-vs-actual', async (_e, period) => {
+safeHandle('budget-vs-actual', async (_e, period) => {
   try {
     return Budgets.getVsActual(period);
   } catch (error) {
@@ -102,7 +95,7 @@ ipcMain.handle('budget-vs-actual', async (_e, period) => {
   }
 });
 
-ipcMain.handle('budget-periods', async () => {
+safeHandle('budget-periods', async () => {
   try {
     return Budgets.getPeriods();
   } catch (error) {
@@ -110,7 +103,7 @@ ipcMain.handle('budget-periods', async () => {
   }
 });
 
-  ipcMain.handle('insert-chart-account', async (event, name, type, number, entered_by) => {
+  safeHandle('insert-chart-account', async (event, name, type, number, entered_by) => {
     try {
       const ctx = authorize(event, { permissions: 'write:chart-accounts' });
       return await ChartOfAccounts.insertAccount(name, type, number, entered_by);
@@ -120,7 +113,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('update-chart-account', async (event, accountData) => {
+  safeHandle('update-chart-account', async (event, accountData) => {
     try {
       const ctx = authorize(event, { permissions: 'write:chart-accounts' });
       const res = await ChartOfAccounts.updateAccount(accountData);
@@ -140,7 +133,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('delete-chart-account', async (event, id) => {
+  safeHandle('delete-chart-account', async (event, id) => {
     try {
       const ctx = authorize(event, { permissions: 'write:chart-accounts' });
       const res = await ChartOfAccounts.deleteAccount(id);
@@ -160,7 +153,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Cashflow Projections handlers
-  ipcMain.handle('get-cashflow-projections', async (_, year) => {
+  safeHandle('get-cashflow-projections', async (_, year) => {
     try {
       console.log('[accountingHandlers] get-cashflow-projections invoked for year:', year);
       const result = await CashflowProjections.getProjections(year);
@@ -178,7 +171,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('save-cashflow-projections', async (_, projections, year) => {
+  safeHandle('save-cashflow-projections', async (_, projections, year) => {
     try {
       console.log('[accountingHandlers] save-cashflow-projections invoked');
       const result = await CashflowProjections.saveProjections(projections, year);
@@ -190,7 +183,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Fixed Assets handlers
-  ipcMain.handle('get-fixed-assets', async () => {
+  safeHandle('get-fixed-assets', async () => {
     try {
       const assets = FixedAssets.getAllAssets();
       if (Array.isArray(assets)) {
@@ -204,7 +197,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('insert-fixed-asset', async (event, asset) => {
+  safeHandle('insert-fixed-asset', async (event, asset) => {
     try {
       const ctx = authorize(event, { permissions: 'write:fixed-assets' });
       if (!asset || !asset.assetName) {
@@ -227,7 +220,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('update-fixed-asset', async (event, asset) => {
+  safeHandle('update-fixed-asset', async (event, asset) => {
     try {
       const ctx = authorize(event, { permissions: 'write:fixed-assets' });
       const res = FixedAssets.updateAsset(asset);
@@ -247,7 +240,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('delete-fixed-asset', async (event, id) => {
+  safeHandle('delete-fixed-asset', async (event, id) => {
     try {
       const ctx = authorize(event, { permissions: 'write:fixed-assets' });
       const res = await FixedAssets.delete(id);
@@ -267,7 +260,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Transactions handlers
-  ipcMain.handle('get-transactions', async () => {
+  safeHandle('get-transactions', async () => {
     try {
       return await Transactions.getAll();
     } catch (error) {
@@ -276,7 +269,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('create-transaction', async (event, transaction) => {
+  safeHandle('create-transaction', async (event, transaction) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
       console.log('Creating transaction:', transaction);
@@ -297,7 +290,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('void-transaction', async (event, id) => {
+  safeHandle('void-transaction', async (event, id) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
       const res = await Transactions.voidTransaction(id);
@@ -317,7 +310,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Trial Balance by date range
-  ipcMain.handle('get-trial-balance', async (_, startDate, endDate) => {
+  safeHandle('get-trial-balance', async (_, startDate, endDate) => {
     try {
       return await Transactions.getTrialBalance(startDate, endDate);
     } catch (error) {
@@ -327,7 +320,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Consolidated Trial Balance across entities
-  ipcMain.handle('get-trial-balance-consolidated', async (event, { entityIds, startDate, endDate, eliminateIntercompany = true }) => {
+  safeHandle('get-trial-balance-consolidated', async (event, { entityIds, startDate, endDate, eliminateIntercompany = true }) => {
     try {
       const ctx = authorize(event, { permissions: 'read:reports' });
       // Enforce entity ACL: all ids must be accessible by user
@@ -344,7 +337,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Advanced Trial Balance (filters: entityIds, class, location, department)
-  ipcMain.handle('get-trial-balance-advanced', async (event, filters) => {
+  safeHandle('get-trial-balance-advanced', async (event, filters) => {
     try {
       authorize(event, { permissions: 'read:reports' });
       return Transactions.getTrialBalanceAdvanced(filters || {});
@@ -355,7 +348,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Handle reconciliation
-  ipcMain.handle('reconcile-transactions', async (event, data) => {
+  safeHandle('reconcile-transactions', async (event, data) => {
     try {
       const ctx = authorize(event, { permissions: 'write:reconcile' });
       const res = await Transactions.reconcileTransactions(data);
@@ -376,7 +369,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Entities management
-  ipcMain.handle('entities-list', async (event) => {
+  safeHandle('entities-list', async (event) => {
     try {
       let ctx = null;
       try {
@@ -397,7 +390,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Dimensions (classes / locations / departments)
-  ipcMain.handle('classes-list', async () => {
+  safeHandle('classes-list', async () => {
     try {
       return require('../models/classes').list();
     } catch (error) {
@@ -407,7 +400,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // COA Import/Export + Versions
-  ipcMain.handle('coa-export-template', async () => {
+  safeHandle('coa-export-template', async () => {
     try {
       // CSV header and a sample row
       const header = 'number,name,type,status';
@@ -418,7 +411,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('coa-export-current', async () => {
+  safeHandle('coa-export-current', async () => {
     try {
       const rows = await ChartOfAccounts.getAllAccounts();
       const header = 'number,name,type,status';
@@ -435,7 +428,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('coa-import', async (_event, { csvText, note }) => {
+  safeHandle('coa-import', async (_event, { csvText, note }) => {
     try {
       if (!csvText || typeof csvText !== 'string') throw new Error('csvText required');
       const COAVersions = require('../models/coaVersions');
@@ -471,7 +464,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('coa-versions-list', async () => {
+  safeHandle('coa-versions-list', async () => {
     try {
       const COAVersions = require('../models/coaVersions');
       return COAVersions.list(100);
@@ -480,7 +473,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('coa-version-create', async (_e, note) => {
+  safeHandle('coa-version-create', async (_e, note) => {
     try {
       const COAVersions = require('../models/coaVersions');
       return COAVersions.createFromCurrent(note || 'Manual snapshot');
@@ -489,7 +482,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('coa-version-restore', async (_e, id) => {
+  safeHandle('coa-version-restore', async (_e, id) => {
     try {
       const COAVersions = require('../models/coaVersions');
       return COAVersions.restore(id);
@@ -497,7 +490,7 @@ ipcMain.handle('budget-periods', async () => {
       return { error: error.message };
     }
   });
-  ipcMain.handle('classes-create', async (_e, payload) => {
+  safeHandle('classes-create', async (_e, payload) => {
     try {
       return require('../models/classes').create(payload || {});
     } catch (error) {
@@ -505,7 +498,7 @@ ipcMain.handle('budget-periods', async () => {
       return { error: error.message };
     }
   });
-  ipcMain.handle('locations-list', async () => {
+  safeHandle('locations-list', async () => {
     try {
       return require('../models/locations').list();
     } catch (error) {
@@ -513,7 +506,7 @@ ipcMain.handle('budget-periods', async () => {
       return { error: error.message };
     }
   });
-  ipcMain.handle('locations-create', async (_e, payload) => {
+  safeHandle('locations-create', async (_e, payload) => {
     try {
       return require('../models/locations').create(payload || {});
     } catch (error) {
@@ -521,7 +514,7 @@ ipcMain.handle('budget-periods', async () => {
       return { error: error.message };
     }
   });
-  ipcMain.handle('departments-list', async () => {
+  safeHandle('departments-list', async () => {
     try {
       return require('../models/departments').list();
     } catch (error) {
@@ -529,7 +522,7 @@ ipcMain.handle('budget-periods', async () => {
       return { error: error.message };
     }
   });
-  ipcMain.handle('departments-create', async (_e, payload) => {
+  safeHandle('departments-create', async (_e, payload) => {
     try {
       return require('../models/departments').create(payload || {});
     } catch (error) {
@@ -538,7 +531,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('entities-create', async (event, payload) => {
+  safeHandle('entities-create', async (event, payload) => {
     try {
       const ctx = authorize(event, { roles: ['Admin'] });
       const res = Entities.createEntity(payload || {});
@@ -549,7 +542,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('entity-assign-user', async (event, { userId, entityId, role }) => {
+  safeHandle('entity-assign-user', async (event, { userId, entityId, role }) => {
     try {
       const ctx = authorize(event, { roles: ['Admin', 'Manager'] });
       const res = Entities.assignUserToEntity({ userId, entityId, role });
@@ -561,7 +554,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Intercompany transfer
-  ipcMain.handle('create-intercompany-transfer', async (event, payload) => {
+  safeHandle('create-intercompany-transfer', async (event, payload) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
       const res = Transactions.createIntercompanyTransfer(payload || {});
@@ -573,7 +566,7 @@ ipcMain.handle('budget-periods', async () => {
   });
 
   // Closing date controls
-  ipcMain.handle('get-closing-date', async (event) => {
+  safeHandle('get-closing-date', async (event) => {
     try {
       authorize(event, { permissions: 'read:*' });
       return { success: true, closingDate: Settings.get('closingDate') || null };
@@ -582,7 +575,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('set-closing-date', async (event, closingDate) => {
+  safeHandle('set-closing-date', async (event, closingDate) => {
     try {
       const ctx = authorize(event, { roles: ['Admin'] });
       if (!closingDate || typeof closingDate !== 'string') throw new Error('closingDate must be YYYY-MM-DD');
@@ -594,7 +587,7 @@ ipcMain.handle('budget-periods', async () => {
     }
   });
 
-  ipcMain.handle('clear-closing-date', async (event) => {
+  safeHandle('clear-closing-date', async (event) => {
     try {
       const ctx = authorize(event, { roles: ['Admin'] });
       Settings.set('closingDate', null);
@@ -606,25 +599,25 @@ ipcMain.handle('budget-periods', async () => {
   });
 
 // Audit Trail handlers
-ipcMain.handle('audit-list', async (_e, opts) => {
+safeHandle('audit-list', async (_e, opts) => {
   try {
     return AuditLog.list(opts || {});
   } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('audit-search', async (_e, filters) => {
+safeHandle('audit-search', async (_e, filters) => {
   try {
     return AuditLog.search(filters || {});
   } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('audit-stats', async () => {
+safeHandle('audit-stats', async () => {
   try {
     return AuditLog.stats();
   } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('audit-verify-chain', async (_e, limit) => {
+safeHandle('audit-verify-chain', async (_e, limit) => {
   try {
     return AuditLog.verifyChain(limit || 100);
   } catch (e) { return { error: e.message }; }

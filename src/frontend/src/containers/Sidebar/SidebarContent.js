@@ -283,6 +283,9 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
 </Link>
 </span>
                        }>
+                <Menu.Item key="main/inventory/items">
+                  <Link to="/main/inventory/items"><i className="icon icon-view-o"/><span>Items List</span></Link>
+                </Menu.Item>
                 <Menu.Item key="main/inventory/stock">
                   <Link to="/main/inventory/stock"><i className="icon icon-check-square-o -flex-column-reverse"/><span>Stock</span></Link>
                 </Menu.Item>
@@ -347,16 +350,16 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                        title={
 <span>
 <i className="icon icon-all-contacts"/>
-<Link to="/main/crm/leads">
+<Link to="/main/customers/leads">
   <span>CRM</span>
 </Link>
 </span>
                        }>
-                <Menu.Item key="main/crm/leads">
-                  <Link to="/main/crm/leads"><i className="icon icon-all-contacts"/><span>Leads</span></Link>
+                <Menu.Item key="main/customers/leads">
+                  <Link to="/main/customers/leads"><i className="icon icon-all-contacts"/><span>Leads</span></Link>
                 </Menu.Item>
-                <Menu.Item key="main/crm/activities">
-                  <Link to="/main/crm/activities"><i className="icon icon-tasks"/><span>Activities</span></Link>
+                <Menu.Item key="main/customers/leads-activities">
+                  <Link to={{ pathname: "/main/customers/leads", state: { tabKey: "activities" } }}><i className="icon icon-tasks"/><span>Activities</span></Link>
                 </Menu.Item>
               </SubMenu>
 

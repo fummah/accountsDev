@@ -47,6 +47,15 @@ function registerPosHandlers() {
     }
   });
 
+  ipcMain.handle('pos-list-sessions', async (event, limit) => {
+    try {
+      return POS.listSessions(limit);
+    } catch (e) {
+      console.error('Error listing POS sessions:', e);
+      return { error: e.message };
+    }
+  });
+
   ipcMain.handle('pos-get-sale', async (event, saleId) => {
     try {
       return POS.getSaleWithLines(saleId);
