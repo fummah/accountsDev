@@ -30,7 +30,7 @@ const UserProfile = () => {
 
     <div className="gx-flex-row gx-align-items-center gx-mb-4 gx-avatar-row">
       <Popover placement="bottomRight" content={userMenuOptions} trigger="click">
-        <Avatar src={companyLogo || "https://via.placeholder.com/150"}
+        <Avatar src={companyLogo || `${process.env.PUBLIC_URL || ''}/assets/images/logo.png`}
                 className="gx-size-40 gx-pointer gx-mr-3" alt=""/>
         <span className="gx-avatar-name">{companyName || 'My Company'}<i
           className="icon icon-chevron-down gx-fs-xxs gx-ml-2"/></span>

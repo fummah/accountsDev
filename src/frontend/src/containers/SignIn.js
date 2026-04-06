@@ -50,7 +50,7 @@ const SignIn = () => {
               
             </div>
             <div className="gx-app-logo">
-              <img alt="example" src="/assets/images/logo.png"/>
+              <img alt="example" src={process.env.PUBLIC_URL + "/assets/images/logo.png"}/>
             </div>
           </div>
           <div className="gx-app-login-content">

@@ -62,7 +62,7 @@ const SignUp = (props) => {
               <p><IntlMessages id="app.userAuth.getAccount"/></p>
             </div>
             <div className="gx-app-logo">
-              <img alt="example" src="/assets/images/logo.png"/>
+              <img alt="example" src={process.env.PUBLIC_URL + "/assets/images/logo.png"}/>
             </div>
           </div>
 

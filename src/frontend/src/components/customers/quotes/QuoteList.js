@@ -5,7 +5,7 @@ import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
 
-const statusColors = { Open: 'blue', Accepted: 'green', Declined: 'red', Expired: 'default', Converted: 'purple', Draft: 'default' };
+const statusColors = { Open: 'blue', Accepted: 'green', Declined: 'red', Expired: 'default', Converted: 'purple', Invoiced: 'purple', Draft: 'default', Sent: 'cyan', Cancelled: 'default' };
 
 const QuoteList = () => {
   const { symbol: cSym } = useCurrency();
@@ -54,7 +54,11 @@ const QuoteList = () => {
 
   const handleConvert = async (id) => {
     try {
-      await window.electronAPI.convertToInvoice?.(id);
+      const res = await window.electronAPI.convertToInvoice?.(id);
+      if (res?.error) {
+        message.error(typeof res.error === 'string' ? res.error : 'Conversion failed');
+        return;
+      }
       message.success('Quote converted to invoice');
       load(pagination.current, pagination.pageSize, search, statusFilter);
     } catch { message.error('Conversion failed'); }

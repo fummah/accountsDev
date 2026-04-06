@@ -286,10 +286,10 @@ const Quotes = {
   
       // Begin transaction
       const transaction = db.transaction(() => {
-        // Insert into invoices table
+        // Insert into invoices table (include status, last_date, message, statement_message, linked_quote)
         const invoice_stmt = db.prepare(`
-          INSERT INTO invoices (customer, customer_email, islater, billing_address, terms, start_date, number, entered_by, vat, linked_quote)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO invoices (customer, customer_email, islater, billing_address, terms, start_date, last_date, message, statement_message, number, entered_by, vat, status, linked_quote)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
   
         const result = invoice_stmt.run(
@@ -298,10 +298,14 @@ const Quotes = {
           quote.islater ? 1 : 0,
           String(quote.billing_address || ''),
           String(quote.terms || ''),
-          new Date().toISOString().split('T')[0], // Current date as ISO string
-          0,
+          new Date().toISOString().split('T')[0],
+          String(quote.last_date || ''),
+          String(quote.message || ''),
+          String(quote.statement_message || ''),
+          '',
           quote.entered_by != null ? String(quote.entered_by) : null,
           Number(quote.vat) || 0,
+          'Pending',
           Number(quote.id)
         );
   
@@ -309,21 +313,16 @@ const Quotes = {
         const formatted_invoice_number = `INV-${String(invoice_id).padStart(5, '0')}`;
   
         // Update the invoice number
-        const update_invoice_number_stmt = db.prepare(`
-          UPDATE invoices SET number = ? WHERE id = ?
-        `);
-        update_invoice_number_stmt.run(formatted_invoice_number, invoice_id);
+        db.prepare(`UPDATE invoices SET number = ? WHERE id = ?`).run(formatted_invoice_number, invoice_id);
   
         // Update linked_invoice in the quotes table
-        const update_quote_stmt = db.prepare(`
-          UPDATE quotes SET linked_invoice = ?, status = ? WHERE id = ?
-        `);
-        update_quote_stmt.run(invoice_id,'Invoiced', quote_id);
+        db.prepare(`UPDATE quotes SET linked_invoice = ?, status = ? WHERE id = ?`).run(invoice_id, 'Invoiced', quote_id);
   
         // Insert into invoice_lines table
         const invoice_lines_stmt = db.prepare(`
-          INSERT INTO invoice_lines (invoice_id, product, description,quantity,rate, amount) VALUES (?, ?, ?, ?, ?, ?)`);
+          INSERT INTO invoice_lines (invoice_id, product, description, quantity, rate, amount) VALUES (?, ?, ?, ?, ?, ?)`);
   
+        let totalAmount = 0;
         for (const line of quote_lines) {
           invoice_lines_stmt.run(
             invoice_id,
@@ -333,7 +332,15 @@ const Quotes = {
             line.rate,
             line.amount
           );
+          totalAmount += (Number(line.amount) || 0) * (Number(line.quantity) || 1);
         }
+
+        // Set balance on the new invoice (total with VAT)
+        const vatRate = Number(quote.vat) || 0;
+        const balance = totalAmount * (1 + vatRate / 100);
+        db.prepare(`UPDATE invoices SET balance = ? WHERE id = ?`).run(balance, invoice_id);
+
+        return invoice_id;
       });
   
       // Execute transaction

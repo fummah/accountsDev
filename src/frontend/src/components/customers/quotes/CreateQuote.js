@@ -173,10 +173,11 @@ const CreateQuote = () => {
   const vatAmount = subtotal * (Number(vatPercent) || 0) / 100;
   const grandTotal = subtotal + vatAmount;
 
-  const handleSave = async (status) => {
+  const handleSave = async (statusOverride) => {
     try {
       const vals = await form.validateFields();
       setSaving(true);
+      const finalStatus = statusOverride || vals.status || 'Open';
       const customer = vals.customer;
       const customer_email = vals.customer_email || '';
       const billing_address = vals.billing_address || '';
@@ -208,16 +209,27 @@ const CreateQuote = () => {
       }
 
       if (isEdit) {
+        // If user chose 'Invoiced', save quote then convert to invoice
+        const saveStatus = finalStatus === 'Invoiced' ? 'Invoiced' : finalStatus;
         const res = await window.electronAPI.updateQuote?.({
-          id: Number(id), status: status || vals.status || 'Open',
+          id: Number(id), status: saveStatus,
           customer, customer_email, billing_address,
           start_date, last_date, message: msg, statement_message, number, vat, quoteLines,
         });
         if (res?.error) { message.error(res.error); setSaving(false); return; }
-        message.success('Quote updated');
+
+        if (finalStatus === 'Invoiced') {
+          try {
+            const convRes = await window.electronAPI.convertToInvoice?.(Number(id));
+            if (convRes?.error) { message.error(convRes.error); } else { message.success('Quote saved and converted to invoice'); }
+          } catch { message.error('Quote saved but conversion failed'); }
+        } else {
+          message.success('Quote updated');
+        }
       } else {
         const res = await window.electronAPI.insertQuote?.(
-          status || 'Open', customer, customer_email, false, billing_address,
+          finalStatus === 'Invoiced' ? 'Open' : finalStatus,
+          customer, customer_email, false, billing_address,
           start_date, last_date, msg, statement_message, number,
           null, vat, quoteLines
         );
@@ -381,9 +393,9 @@ const CreateQuote = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Button type="dashed" icon={<PlusOutlined />} onClick={addLine}>Add Line</Button>
               <div style={{ textAlign: 'right' }}>
-                <div>Subtotal: R {subtotal.toFixed(2)}</div>
-                {vatPercent > 0 && <div>VAT ({vatPercent}%): R {vatAmount.toFixed(2)}</div>}
-                <div style={{ fontSize: 16, fontWeight: 600 }}>Total: R {grandTotal.toFixed(2)}</div>
+                <div>Subtotal: {cSym} {subtotal.toFixed(2)}</div>
+                {vatPercent > 0 && <div>VAT ({vatPercent}%): {cSym} {vatAmount.toFixed(2)}</div>}
+                <div style={{ fontSize: 16, fontWeight: 600 }}>Total: {cSym} {grandTotal.toFixed(2)}</div>
               </div>
             </div>
           )}
@@ -400,7 +412,7 @@ const CreateQuote = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <Space wrap>
             <Button size="large" onClick={() => handleSave('Draft')} loading={saving}>Save as Draft</Button>
-            <Button size="large" type="primary" icon={<SaveOutlined />} onClick={() => handleSave('Open')} loading={saving}>
+            <Button size="large" type="primary" icon={<SaveOutlined />} onClick={() => handleSave()} loading={saving}>
               {isEdit ? 'Update Quote' : 'Save Quote'}
             </Button>
           </Space>

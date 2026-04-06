@@ -85,8 +85,9 @@ const ReceivePayments = () => {
 
   const handlePayment = (invoice) => {
     setSelectedInvoice(invoice);
+    const invoiceAmount = Number(invoice.balance) || Number(invoice.total) || 0;
     form.setFieldsValue({
-      amount: invoice.balance,
+      amount: invoiceAmount,
       paymentMethod: 'bank'
     });
     setPaymentModal(true);
@@ -227,8 +228,10 @@ const ReceivePayments = () => {
           >
             <InputNumber
               style={{ width: '100%' }}
-              formatter={value => `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-              parser={value => value.replace(/\$\s?|(,*)/g, '')}
+              min={0.01}
+              step={0.01}
+              formatter={value => `${cSym} ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+              parser={value => value.replace(new RegExp(`\\${cSym}\\s?|(,*)`, 'g'), '')}
             />
           </Form.Item>
 
@@ -245,6 +248,13 @@ const ReceivePayments = () => {
             </Select>
           </Form.Item>
 
+          {selectedInvoice && (
+            <div style={{ marginBottom: 16, padding: '8px 12px', background: '#f5f5f5', borderRadius: 4 }}>
+              <div><strong>Invoice:</strong> {selectedInvoice.invoiceNumber || selectedInvoice.number || `INV-${selectedInvoice.id}`}</div>
+              <div><strong>Total:</strong> {cSym} {Number(selectedInvoice.total || 0).toFixed(2)}</div>
+              <div><strong>Balance Due:</strong> {cSym} {Number(selectedInvoice.balance || 0).toFixed(2)}</div>
+            </div>
+          )}
           <Form.Item>
             <Space>
               <Button type="primary" htmlType="submit">

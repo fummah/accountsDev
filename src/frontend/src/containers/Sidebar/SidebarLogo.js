@@ -32,13 +32,14 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
     navStyle = NAV_STYLE_DRAWER;
   }
 
+  const publicUrl = process.env.PUBLIC_URL || '';
   const logoImg = companyLogo
     ? <img alt="logo" src={companyLogo} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
     : navStyle === NAV_STYLE_NO_HEADER_MINI_SIDEBAR && !isMobile
-      ? <img alt="logo" src={"/assets/images/w-logo.png"} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
+      ? <img alt="logo" src={`${publicUrl}/assets/images/w-logo.png`} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
       : themeType === THEME_TYPE_LITE
-        ? <img alt="logo" src={"/assets/images/logo.png"} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
-        : <img alt="logo" src={"/assets/images/logo-white.png"} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />;
+        ? <img alt="logo" src={`${publicUrl}/assets/images/logo.png`} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
+        : <img alt="logo" src={`${publicUrl}/assets/images/logo-white.png`} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />;
 
   // Show fold/unfold toggle on desktop only (mobile uses the Drawer close button)
   const showToggle = !isMobile && (navStyle === NAV_STYLE_FIXED || navStyle === NAV_STYLE_MINI_SIDEBAR);

@@ -56,24 +56,23 @@ function registerCustomerHandlers() {
     // Payments
     ipcMain.handle('get-unpaid-invoices', async (event, customerId) => {
         try {
-            // Use existing customer fields (display_name or first_name/last_name).
-            // If customerId is provided, filter invoices for that customer only.
-            if (customerId) {
-                return await db.all(
-                    `SELECT i.*, COALESCE(NULLIF(c.display_name, ''), c.first_name || ' ' || c.last_name) AS customerName
-                     FROM invoices i
-                     JOIN customers c ON i.customer = c.id
-                     WHERE LOWER(IFNULL(i.status, '')) != 'paid' AND i.customer = ? ORDER BY i.id DESC`,
-                    [customerId]
-                );
-            }
+            const baseSql = `
+                SELECT i.*,
+                       COALESCE(NULLIF(c.display_name, ''), c.first_name || ' ' || c.last_name) AS customerName,
+                       COALESCE(lt.lineTotal, 0) AS amount,
+                       COALESCE(lt.lineTotal, 0) * (1 + COALESCE(i.vat, 0) / 100.0) AS total,
+                       COALESCE(pt.totalPaid, 0) AS totalPaid,
+                       COALESCE(lt.lineTotal, 0) * (1 + COALESCE(i.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0) AS balance
+                FROM invoices i
+                JOIN customers c ON i.customer = c.id
+                LEFT JOIN (SELECT invoice_id, SUM(amount * quantity) AS lineTotal FROM invoice_lines GROUP BY invoice_id) lt ON lt.invoice_id = i.id
+                LEFT JOIN (SELECT invoiceId, SUM(amount) AS totalPaid FROM payments GROUP BY invoiceId) pt ON pt.invoiceId = i.id
+                WHERE LOWER(IFNULL(i.status, '')) NOT IN ('paid', 'cancelled', 'void')`;
 
-            return await db.all(
-                `SELECT i.*, COALESCE(NULLIF(c.display_name, ''), c.first_name || ' ' || c.last_name) AS customerName
-                 FROM invoices i
-                 JOIN customers c ON i.customer = c.id
-                 WHERE LOWER(IFNULL(i.status, '')) != 'paid' ORDER BY i.id DESC`
-            );
+            if (customerId) {
+                return db.all(baseSql + ` AND i.customer = ? ORDER BY i.id DESC`, [customerId]);
+            }
+            return db.all(baseSql + ` ORDER BY i.id DESC`);
         } catch (error) {
             console.error('Error fetching unpaid invoices:', error);
             throw error;
@@ -82,29 +81,52 @@ function registerCustomerHandlers() {
 
     ipcMain.handle('record-payment', async (event, paymentData) => {
         try {
-            // Start transaction
-            await db.run('BEGIN TRANSACTION');
+            const invoiceId = paymentData.invoiceId;
+            const payAmount = Number(paymentData.amount) || 0;
 
             // Insert payment record
             await db.run(
                 `INSERT INTO payments (invoiceId, amount, paymentMethod, date, createdAt) 
                  VALUES (?, ?, ?, ?, datetime('now'))`,
-                [paymentData.invoiceId, paymentData.amount, paymentData.paymentMethod, paymentData.date || paymentData.paymentDate]
+                [invoiceId, payAmount, paymentData.paymentMethod, paymentData.date || paymentData.paymentDate]
             );
 
-            // Update invoice balance
+            // Compute total from invoice_lines (with VAT)
+            const lineTotal = await db.get(
+                `SELECT COALESCE(SUM(l.amount * l.quantity), 0) AS total, COALESCE(i.vat, 0) AS vat
+                 FROM invoice_lines l
+                 JOIN invoices i ON i.id = l.invoice_id
+                 WHERE l.invoice_id = ?`,
+                [invoiceId]
+            );
+            const invoiceTotal = (Number(lineTotal?.total) || 0) * (1 + (Number(lineTotal?.vat) || 0) / 100);
+
+            // Compute total payments made
+            const paidRow = await db.get(
+                `SELECT COALESCE(SUM(amount), 0) AS totalPaid FROM payments WHERE invoiceId = ?`,
+                [invoiceId]
+            );
+            const totalPaid = Number(paidRow?.totalPaid) || 0;
+
+            // Calculate remaining balance and determine status
+            const remaining = invoiceTotal - totalPaid;
+            let newStatus;
+            if (remaining <= 0.01) {
+                newStatus = 'Paid';
+            } else if (totalPaid > 0) {
+                newStatus = 'Partially Paid';
+            } else {
+                newStatus = 'Pending';
+            }
+
+            // Update invoice balance and status
             await db.run(
-                `UPDATE invoices 
-                 SET balance = balance - ?, 
-                     status = CASE WHEN balance - ? <= 0 THEN 'paid' ELSE 'partial' END 
-                 WHERE id = ?`,
-                [paymentData.amount, paymentData.amount, paymentData.invoiceId]
+                `UPDATE invoices SET balance = ?, status = ? WHERE id = ?`,
+                [Math.max(0, remaining), newStatus, invoiceId]
             );
 
-            await db.run('COMMIT');
-            return { success: true };
+            return { success: true, newStatus, remaining: Math.max(0, remaining) };
         } catch (error) {
-            await db.run('ROLLBACK');
             console.error('Error recording payment:', error);
             throw error;
         }

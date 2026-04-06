@@ -178,10 +178,11 @@ const CreateInvoice = () => {
   const vatAmount = subtotal * (Number(vatPercent) || 0) / 100;
   const grandTotal = subtotal + vatAmount;
 
-  const handleSave = async (status) => {
+  const handleSave = async (statusOverride) => {
     try {
       const vals = await form.validateFields();
       setSaving(true);
+      const finalStatus = statusOverride || vals.status || 'Draft';
       const customer = vals.customer;
       const customer_email = vals.customer_email || '';
       const billing_address = vals.billing_address || '';
@@ -217,7 +218,7 @@ const CreateInvoice = () => {
         const res = await window.electronAPI.updateInvoice?.({
           id: Number(id), customer, customer_email, billing_address, terms,
           start_date, last_date, message: msg, statement_message, number,
-          vat, status: status || vals.status || 'Draft', invoiceLines,
+          vat, status: finalStatus, invoiceLines,
         });
         if (res?.error) { message.error(res.error); setSaving(false); return; }
         message.success('Invoice updated');
@@ -225,7 +226,7 @@ const CreateInvoice = () => {
         const res = await window.electronAPI.insertInvoice?.(
           customer, customer_email, false, billing_address, terms,
           start_date, last_date, msg, statement_message, number,
-          null, vat, status || 'Draft', invoiceLines
+          null, vat, finalStatus, invoiceLines
         );
         if (res?.error) { message.error(typeof res.error === 'string' ? res.error : 'Insert failed'); setSaving(false); return; }
         if (res?.success === false) { message.error('Failed to create invoice'); setSaving(false); return; }
@@ -389,9 +390,9 @@ const CreateInvoice = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Button type="dashed" icon={<PlusOutlined />} onClick={addLine}>Add Line</Button>
               <div style={{ textAlign: 'right' }}>
-                <div>Subtotal: R {subtotal.toFixed(2)}</div>
-                {vatPercent > 0 && <div>VAT ({vatPercent}%): R {vatAmount.toFixed(2)}</div>}
-                <div style={{ fontSize: 16, fontWeight: 600 }}>Total: R {grandTotal.toFixed(2)}</div>
+                <div>Subtotal: {cSym} {subtotal.toFixed(2)}</div>
+                {vatPercent > 0 && <div>VAT ({vatPercent}%): {cSym} {vatAmount.toFixed(2)}</div>}
+                <div style={{ fontSize: 16, fontWeight: 600 }}>Total: {cSym} {grandTotal.toFixed(2)}</div>
               </div>
             </div>
           )}
@@ -408,7 +409,10 @@ const CreateInvoice = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <Space wrap>
             <Button size="large" onClick={() => handleSave('Draft')} loading={saving}>Save as Draft</Button>
-            <Button size="large" type="primary" icon={<SaveOutlined />} onClick={() => handleSave('Sent')} loading={saving}>
+            <Button size="large" type="primary" icon={<SaveOutlined />} onClick={() => handleSave()} loading={saving}>
+              {isEdit ? 'Update Invoice' : 'Save Invoice'}
+            </Button>
+            <Button size="large" onClick={() => handleSave('Sent')} loading={saving}>
               {isEdit ? 'Update & Send' : 'Save & Send'}
             </Button>
           </Space>

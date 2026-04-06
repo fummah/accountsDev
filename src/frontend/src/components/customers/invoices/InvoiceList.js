@@ -5,7 +5,7 @@ import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
 
-const statusColors = { Paid: 'green', Unpaid: 'orange', Sent: 'blue', Overdue: 'red', Draft: 'default', Void: 'volcano' };
+const statusColors = { Paid: 'green', Unpaid: 'orange', Sent: 'blue', Overdue: 'red', Draft: 'default', Void: 'volcano', Pending: 'gold', 'Partially Paid': 'cyan', Cancelled: 'default' };
 
 const InvoiceList = () => {
   const { symbol: cSym } = useCurrency();
@@ -53,8 +53,8 @@ const InvoiceList = () => {
   };
 
   const totalAmount = invoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const unpaidAmount = invoices.filter(i => i.status === 'Unpaid' || i.status === 'Sent').reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const paidCount = invoices.filter(i => i.status === 'Paid').length;
+  const unpaidAmount = invoices.filter(i => !['Paid', 'Cancelled', 'Void', 'Draft'].includes(i.status)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const paidAmount = invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
   const columns = [
     { title: 'Invoice #', dataIndex: 'number', key: 'number', width: 100,
@@ -96,7 +96,7 @@ const InvoiceList = () => {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}><Card size="small"><Statistic title="Total Invoiced" value={totalAmount.toFixed(2)} prefix={cSym} /></Card></Col>
         <Col span={8}><Card size="small"><Statistic title="Unpaid" value={unpaidAmount.toFixed(2)} prefix={cSym} valueStyle={{ color: unpaidAmount > 0 ? '#faad14' : '#52c41a' }} /></Card></Col>
-        <Col span={8}><Card size="small"><Statistic title="Paid" value={paidCount} suffix={`/ ${invoices.length}`} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+        <Col span={8}><Card size="small"><Statistic title="Paid" value={paidAmount.toFixed(2)} prefix={cSym} valueStyle={{ color: '#52c41a' }} /></Card></Col>
       </Row>
 
       <Card

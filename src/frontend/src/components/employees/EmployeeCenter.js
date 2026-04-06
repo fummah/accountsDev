@@ -105,7 +105,7 @@ const EmployeeCenter = () => {
       // Only keep relevant fields
       const allowedFields = [
         'first_name', 'last_name', 'mi', 'email', 'phone', 'address',
-        'date_hired', 'entered_by', 'salary', 'status', 'role', 'permissions'
+        'date_hired', 'entered_by', 'salary', 'status', 'role', 'permissions', 'department'
       ];
       
       const sanitizedData = {};

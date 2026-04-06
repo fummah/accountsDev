@@ -87,9 +87,9 @@ const BelowHeader = () => {
               />
             </div>
             <Link to="/" className="gx-d-block gx-d-lg-none gx-pointer gx-mr-xs-3 gx-pt-xs-1 gx-w-logo">
-              <img alt="" src="/assets/images/w-logo.png"/></Link>
+              <img alt="" src={process.env.PUBLIC_URL + "/assets/images/w-logo.png"}/></Link>
             <Link to="/" className="gx-d-none gx-d-lg-block gx-pointer gx-mr-xs-5 gx-logo">
-              <img alt="" src="/assets/images/logo.png"/></Link>
+              <img alt="" src={process.env.PUBLIC_URL + "/assets/images/logo.png"}/></Link>
             <div className="gx-header-search gx-d-none gx-d-lg-flex">
               <SearchBox styleName="gx-lt-icon-search-bar-lg"
                          placeholder="Search in System..."

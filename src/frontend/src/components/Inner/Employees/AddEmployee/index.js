@@ -1,7 +1,7 @@
-import React, { forwardRef, useImperativeHandle, useEffect } from 'react';
+import React, { forwardRef, useImperativeHandle, useEffect, useState } from 'react';
 import moment from 'moment';
-import { Button, Col, Drawer, Form, Input, Row, Space,Dropdown, DatePicker, Select,Checkbox } from 'antd';
-import { DownOutlined,IdcardOutlined } from '@ant-design/icons';
+import { Button, Col, Drawer, Form, Input, Row, Space, Dropdown, DatePicker, Select, Checkbox, Modal, Divider, message } from 'antd';
+import { DownOutlined, IdcardOutlined, PlusOutlined } from '@ant-design/icons';
 import Widget from "components/Widget/index";
 
 const { Option } = Select;
@@ -9,6 +9,33 @@ const { Option } = Select;
 const AddEmployee = forwardRef(({ onSaveUser, onUserClose, showDrawer, open, setShowError,setMessage, employee }, ref) => {
   
   const [form] = Form.useForm();
+  const [deptForm] = Form.useForm();
+  const [departments, setDepartments] = useState([]);
+  const [deptModalVisible, setDeptModalVisible] = useState(false);
+
+  const loadDepartments = async () => {
+    try {
+      const res = await window.electronAPI?.listDepartments?.();
+      setDepartments(Array.isArray(res) ? res : []);
+    } catch { setDepartments([]); }
+  };
+
+  useEffect(() => { loadDepartments(); }, []);
+
+  const handleAddDepartment = async () => {
+    try {
+      const vals = await deptForm.validateFields();
+      const res = await window.electronAPI?.createDepartment?.(vals);
+      if (res?.success) {
+        message.success('Department added');
+        setDeptModalVisible(false);
+        deptForm.resetFields();
+        loadDepartments();
+      } else {
+        message.error(res?.error || 'Failed to add department');
+      }
+    } catch {}
+  };
 
   const handleSave = () => {
     form.validateFields().then(values => {
@@ -99,7 +126,7 @@ useEffect(() => {
       >
       
   <Form form={form} layout="" {...layout} initialValues={{
-    status: `Activate`,
+    status: 'Active',
   }}>
   <Widget
       title={
@@ -149,10 +176,33 @@ useEffect(() => {
               </Form.Item>
               </Col>
               <Col span={8}>
-              <Form.Item name="status" label="Status" rules={[{ required: true, message: 'Please select ststus', },]}> 
-<Select mode="single" placeholder="Please select status" value="" defaultValue="Select status">
+              <Form.Item name="department" label="Department">
+                <Select
+                  showSearch
+                  optionFilterProp="children"
+                  placeholder="Select department"
+                  dropdownRender={menu => (
+                    <div>
+                      {menu}
+                      <Divider style={{ margin: '4px 0' }} />
+                      <div style={{ padding: '4px 8px' }}>
+                        <Button type="link" icon={<PlusOutlined />} onClick={() => setDeptModalVisible(true)} block>
+                          Add Department
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                >
+                  {departments.map(d => <Option key={d.id} value={d.name}>{d.name}</Option>)}
+                </Select>
+              </Form.Item>
+              </Col>
+              <Col span={8}>
+              <Form.Item name="status" label="Status" rules={[{ required: true, message: 'Please select status', },]}> 
+<Select placeholder="Please select status">
 <Option value="Active">Active</Option>
-<Option value="Deactivated">Deactivated</Option>
+<Option value="Inactive">Inactive</Option>
+<Option value="On Leave">On Leave</Option>
 </Select>
 </Form.Item>
               </Col>
@@ -186,6 +236,24 @@ useEffect(() => {
 
               </Form>        
       </Drawer>
+
+      <Modal
+        title="Add Department"
+        visible={deptModalVisible}
+        onOk={handleAddDepartment}
+        onCancel={() => { setDeptModalVisible(false); deptForm.resetFields(); }}
+        okText="Add"
+        destroyOnClose
+      >
+        <Form form={deptForm} layout="vertical" preserve={false}>
+          <Form.Item name="name" label="Department Name" rules={[{ required: true, message: 'Enter department name' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="code" label="Department Code">
+            <Input placeholder="Optional code" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 });
