@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Card, Button, InputNumber, Form, Row, Col, Statistic, Tag, Space, message, Alert, Divider, Empty, Select, Modal, Input, Table } from 'antd';
 import { PlayCircleOutlined, PoweroffOutlined, ClockCircleOutlined, DollarOutlined, UserOutlined, ReloadOutlined, ShoppingCartOutlined, PlusOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useHistory } from 'react-router-dom';
+import { useCurrency } from '../../../utils/currency';
 
 const { Option } = Select;
 
 const Session = () => {
+  const { symbol: cSym } = useCurrency();
   const [openSession, setOpenSession] = useState(null);
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -134,7 +136,7 @@ const Session = () => {
                       </Select>
                     </Form.Item>
                     <Form.Item name="openingAmount" label="Opening Float Amount" initialValue={0}>
-                      <InputNumber prefix="R" min={0} style={{ width: '100%' }} size="large"
+                      <InputNumber prefix={cSym} min={0} style={{ width: '100%' }} size="large"
                         formatter={v => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                         parser={v => v.replace(/,/g, '')} />
                     </Form.Item>
@@ -171,13 +173,13 @@ const Session = () => {
                 <Card size="small"><Statistic title="Session #" value={openSession.id} /></Card>
               </Col>
               <Col xs={12} sm={6}>
-                <Card size="small"><Statistic title="Opening Float" value={Number(openSession.openingAmount || 0).toFixed(2)} prefix="R" /></Card>
+                <Card size="small"><Statistic title="Opening Float" value={Number(openSession.openingAmount || 0).toFixed(2)} prefix={cSym} /></Card>
               </Col>
               <Col xs={12} sm={6}>
                 <Card size="small"><Statistic title="Sales Count" value={sales.length} /></Card>
               </Col>
               <Col xs={12} sm={6}>
-                <Card size="small"><Statistic title="Sales Total" value={sessionTotal.toFixed(2)} prefix="R" valueStyle={{ color: '#1890ff' }} /></Card>
+                <Card size="small"><Statistic title="Sales Total" value={sessionTotal.toFixed(2)} prefix={cSym} valueStyle={{ color: '#1890ff' }} /></Card>
               </Col>
             </Row>
 
@@ -201,7 +203,7 @@ const Session = () => {
                   size="small" style={{ borderColor: '#f5222d' }}>
                   <Form form={closeForm} layout="vertical" onFinish={closeSession_}>
                     <Form.Item name="closingAmount" label="Cash in Drawer" initialValue={0}>
-                      <InputNumber prefix="R" min={0} style={{ width: '100%' }} size="large"
+                      <InputNumber prefix={cSym} min={0} style={{ width: '100%' }} size="large"
                         formatter={v => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                         parser={v => v.replace(/,/g, '')} />
                     </Form.Item>
@@ -232,7 +234,7 @@ const Session = () => {
                         <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                           <td style={{ padding: '6px 8px' }}>{s.id}</td>
                           <td style={{ padding: '6px 8px' }}>{s.date || s.createdAt || '-'}</td>
-                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>R {Number(s.total || 0).toFixed(2)}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>{cSym} {Number(s.total || 0).toFixed(2)}</td>
                           <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                             <Tag color={s.paymentType === 'cash' ? 'green' : s.paymentType === 'card' ? 'blue' : 'orange'}>
                               {(s.paymentType || 'N/A').toUpperCase()}

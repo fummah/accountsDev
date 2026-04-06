@@ -7,6 +7,7 @@ const Projects = {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         code TEXT,
+        description TEXT,
         customerId INTEGER,
         status TEXT DEFAULT 'active', -- active, on_hold, completed, cancelled
         budget REAL DEFAULT 0,
@@ -14,6 +15,14 @@ const Projects = {
         updatedAt DATETIME
       )
     `).run();
+
+    // Safe migration: add description if missing
+    try {
+      const cols = new Set(db.prepare(`PRAGMA table_info('projects')`).all().map(r => r.name));
+      if (!cols.has('description')) {
+        db.prepare(`ALTER TABLE projects ADD COLUMN description TEXT`).run();
+      }
+    } catch {}
 
     db.prepare(`
       CREATE TABLE IF NOT EXISTS project_links (
@@ -47,17 +56,17 @@ const Projects = {
 
   create: (project) => {
     const stmt = db.prepare(`
-      INSERT INTO projects (name, code, customerId, status, budget, createdAt)
-      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      INSERT INTO projects (name, code, description, customerId, status, budget, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
     `);
-    return stmt.run(project.name, project.code || null, project.customerId || null, project.status || 'active', project.budget || 0);
+    return stmt.run(project.name, project.code || null, project.description || null, project.customerId || null, project.status || 'active', project.budget || 0);
   },
 
   update: (project) => {
     const stmt = db.prepare(`
-      UPDATE projects SET name=?, code=?, customerId=?, status=?, budget=?, updatedAt=datetime('now') WHERE id=?
+      UPDATE projects SET name=?, code=?, description=?, customerId=?, status=?, budget=?, updatedAt=datetime('now') WHERE id=?
     `);
-    return stmt.run(project.name, project.code || null, project.customerId || null, project.status || 'active', project.budget || 0, project.id);
+    return stmt.run(project.name, project.code || null, project.description || null, project.customerId || null, project.status || 'active', project.budget || 0, project.id);
   },
 
   delete: (id) => {

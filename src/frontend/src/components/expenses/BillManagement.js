@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Space, Modal, Form, Input, DatePicker, Select, message } from 'antd';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
 const BillManagement = () => {
+  const { symbol: cSym } = useCurrency();
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -73,7 +75,7 @@ const BillManagement = () => {
     { title: 'Bill Number', dataIndex: 'id', key: 'id' },
     { title: 'Vendor', key: 'payee', render: (_, r) => r.payee_name || r.payee },
     { title: 'Due Date', dataIndex: 'payment_date', key: 'payment_date', render: d => d ? moment(d).format('YYYY-MM-DD') : '' },
-    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: a => `$${Number(a || 0).toFixed(2)}` },
+    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: a => `${cSym} ${Number(a || 0).toFixed(2)}` },
     { title: 'Status', dataIndex: 'approval_status', key: 'approval_status' },
     { title: 'Action', key: 'action', render: (_, record) => (
       <Space>
@@ -93,7 +95,7 @@ const BillManagement = () => {
 
       <Modal
         title="Create New Bill"
-        open={showModal}
+        visible={showModal}
         onCancel={() => { setShowModal(false); form.resetFields(); }}
         onOk={() => form.submit()}
         okText="Create"

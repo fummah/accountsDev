@@ -4,10 +4,12 @@ import { ArrowLeftOutlined } from '@ant-design/icons';
 import { ShopOutlined, DollarOutlined, FileTextOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { TabPane } = Tabs;
 
 const VendorCenter = () => {
+  const { symbol: cSym } = useCurrency();
   const [vendors, setVendors] = useState([]);
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -132,7 +134,7 @@ const VendorCenter = () => {
     {
       title: 'Balance',
       key: 'balance',
-      render: (_, record) => `$${record.opening_balance || '0.00'}`,
+      render: (_, record) => `${cSym} ${record.opening_balance || '0.00'}`,
     },
     {
       title: 'Actions',
@@ -181,7 +183,7 @@ const VendorCenter = () => {
       key: 'amount',
       render: (_, record) => {
         const total = record.amount || 0;
-        return `$${Number(total).toFixed(2)}`;
+        return `${cSym} ${Number(total).toFixed(2)}`;
       },
     },
     {

@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Form, Input, Select, DatePicker, Button, Table, message } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
 const Transaction = () => {
+  const { symbol: cSym } = useCurrency();
   const [form] = Form.useForm();
   const [accounts, setAccounts] = useState([]);
   const [entities, setEntities] = useState([]);
@@ -108,13 +110,13 @@ const Transaction = () => {
       title: 'Debit',
       dataIndex: 'debit',
       key: 'debit',
-      render: (amount) => amount ? `$${amount.toFixed(2)}` : '',
+      render: (amount) => amount ? `${cSym} ${amount.toFixed(2)}` : '',
     },
     {
       title: 'Credit',
       dataIndex: 'credit',
       key: 'credit',
-      render: (amount) => amount ? `$${amount.toFixed(2)}` : '',
+      render: (amount) => amount ? `${cSym} ${amount.toFixed(2)}` : '',
     },
   ];
 
@@ -198,7 +200,7 @@ const Transaction = () => {
           label="Amount"
           rules={[{ required: true, message: 'Please enter amount!' }]}
         >
-          <Input type="number" prefix="$" />
+          <Input type="number" prefix={cSym} />
         </Form.Item>
 
         <Form.Item

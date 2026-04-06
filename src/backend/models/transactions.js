@@ -118,6 +118,14 @@ const Transactions = {
     return db.prepare("SELECT * FROM transactions ORDER BY date DESC").all();
   },
 
+  getDeposits() {
+    return db.prepare("SELECT * FROM transactions WHERE LOWER(type) = 'deposit' ORDER BY date DESC").all();
+  },
+
+  getTransfers() {
+    return db.prepare("SELECT * FROM transactions WHERE LOWER(type) IN ('transfer_in', 'transfer_out') ORDER BY date DESC").all();
+  },
+
   insert({ date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class: classTag, location, department }) {
     // Closing date enforcement
     const closingDate = Settings.get('closingDate');
@@ -161,7 +169,7 @@ const Transactions = {
     }
   },
 
-  createBankTransfer({ fromAccount, toAccount, date, amount, reference }) {
+  createBankTransfer({ fromAccount, toAccount, date, amount, reference, description }) {
     // Closing date enforcement
     const closingDate = Settings.get('closingDate');
     if (closingDate && date && typeof date === 'string' && date <= closingDate) {
@@ -172,21 +180,25 @@ const Transactions = {
     db.prepare('BEGIN TRANSACTION').run();
     
     try {
-      // Create withdrawal from source account
-      db.prepare(`
-        INSERT INTO transactions (
-          accountId, date, type, reference, description,
-          debit, credit
-        ) VALUES (?, ?, 'transfer_out', ?, 'Bank Transfer Out', NULL, ?)
-      `).run(fromAccount, date, reference, amount);
+      const descOut = description ? `Transfer Out: ${description}` : 'Bank Transfer Out';
+      const descIn = description ? `Transfer In: ${description} to account ${toAccount}` : `Bank Transfer In to account ${toAccount}`;
+      const ref = reference || ('TRF-' + Date.now());
 
-      // Create deposit to destination account
+      // Create withdrawal from source account (credit = money leaving)
       db.prepare(`
         INSERT INTO transactions (
           accountId, date, type, reference, description,
           debit, credit
-        ) VALUES (?, ?, 'transfer_in', ?, 'Bank Transfer In', ?, NULL)
-      `).run(toAccount, date, reference, amount);
+        ) VALUES (?, ?, 'transfer_out', ?, ?, NULL, ?)
+      `).run(fromAccount, date, ref, descOut, amount);
+
+      // Create deposit to destination account (debit = money arriving)
+      db.prepare(`
+        INSERT INTO transactions (
+          accountId, date, type, reference, description,
+          debit, credit
+        ) VALUES (?, ?, 'transfer_in', ?, ?, ?, NULL)
+      `).run(toAccount, date, ref, descIn, amount);
 
       db.prepare('COMMIT').run();
       return { success: true };

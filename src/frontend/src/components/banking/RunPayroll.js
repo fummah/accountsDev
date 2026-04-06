@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Table, Button, DatePicker, Card, Space, message, Modal, Form, Input, Select } from 'antd';
 import { DollarOutlined, CheckOutlined, CalendarOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 
 const RunPayroll = () => {
+  const { symbol: cSym } = useCurrency();
   const [form] = Form.useForm();
   const [employees, setEmployees] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState([]);
@@ -96,7 +98,7 @@ const RunPayroll = () => {
       title: 'Base Pay',
       dataIndex: 'basePay',
       key: 'basePay',
-      render: (_, record) => `$${Number(record.salary || record.basePay || 0).toFixed(2)}`,
+      render: (_, record) => `${cSym} ${Number(record.salary || record.basePay || 0).toFixed(2)}`,
     },
     {
       title: 'Last Paid',

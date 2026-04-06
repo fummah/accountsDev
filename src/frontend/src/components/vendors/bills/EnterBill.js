@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Card, Form, Input, Button, DatePicker, Select, message, Divider, Modal, Row, Col } from 'antd';
 import { ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../../utils/currency';
 
 const { Option } = Select;
 
 const EnterBill = ({ history, location, match }) => {
+  const { symbol: cSym } = useCurrency();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
@@ -93,7 +95,7 @@ const EnterBill = ({ history, location, match }) => {
 
         <Form.Item name="billNumber" label="Bill Number"><Input /></Form.Item>
         <Form.Item name="billDate" label="Bill Date"><DatePicker style={{ width: '100%' }} defaultValue={moment()} /></Form.Item>
-        <Form.Item name="amount" label="Amount" rules={[{ required: true }]}><Input type="number" prefix="R" /></Form.Item>
+        <Form.Item name="amount" label="Amount" rules={[{ required: true }]}><Input type="number" prefix={cSym} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
 
         <Form.Item>

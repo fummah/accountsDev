@@ -68,7 +68,8 @@ const registerEmployeeHandlers = () => {
         salary,
         status,
         role,
-        permissions
+        permissions,
+        department
       } = employeeData;
 
       return await Employees.insertEmployee(
@@ -83,7 +84,8 @@ const registerEmployeeHandlers = () => {
         salary,
         status,
         role,
-        permissions
+        permissions,
+        department
       );
     } catch (error) {
       console.error('Error inserting employee:', error);

@@ -31,6 +31,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSingleSupplier: (supplier_id) => ipcRenderer.invoke('get-singleSupplier',supplier_id),
   updateSupplier: (supplierData) => ipcRenderer.invoke('updatesupplier',supplierData),
   insertSupplier: (title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes) => ipcRenderer.invoke('insert-supplier', title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes),
+  supplierToggleStatus: (id, status) => ipcRenderer.invoke('supplier-toggle-status', id, status),
+  deleteSupplier: (id) => ipcRenderer.invoke('delete-supplier', id),
+
+  // Expense Categories
+  expenseCategoriesList: () => ipcRenderer.invoke('expense-categories-list'),
+  expenseCategoriesActive: () => ipcRenderer.invoke('expense-categories-active'),
+  expenseCategoryInsert: (name, description, color) => ipcRenderer.invoke('expense-category-insert', name, description, color),
+  expenseCategoryUpdate: (id, name, description, color, status) => ipcRenderer.invoke('expense-category-update', id, name, description, color, status),
+  expenseCategoryDelete: (id) => ipcRenderer.invoke('expense-category-delete', id),
+
 //Expenses
   getAllExpenses: () => ipcRenderer.invoke('get-expenses'),
   getExpensesPaginated: (page, pageSize, search) => ipcRenderer.invoke('get-expenses-paginated', page, pageSize, search),
@@ -99,6 +109,8 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   getTrialBalance: (startDate, endDate) => ipcRenderer.invoke('get-trial-balance', startDate, endDate),
   getTrialBalanceConsolidated: (payload) => ipcRenderer.invoke('get-trial-balance-consolidated', payload),
   getTrialBalanceAdvanced: (filters) => ipcRenderer.invoke('get-trial-balance-advanced', filters),
+  getDeposits: () => ipcRenderer.invoke('get-deposits'),
+  getTransfers: () => ipcRenderer.invoke('get-transfers'),
   createDeposit: (data) => ipcRenderer.invoke('create-deposit', data),
   createBankTransfer: (data) => ipcRenderer.invoke('create-bank-transfer', data),
   reconcileTransactions: (data) => ipcRenderer.invoke('reconcile-transactions', data),
@@ -147,6 +159,10 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   createLocation: (payload) => ipcRenderer.invoke('locations-create', payload),
   listDepartments: () => ipcRenderer.invoke('departments-list'),
   createDepartment: (payload) => ipcRenderer.invoke('departments-create', payload),
+  listRoles: () => ipcRenderer.invoke('roles-list'),
+  createRole: (name, description) => ipcRenderer.invoke('roles-create', name, description),
+  updateRole: (id, name, description) => ipcRenderer.invoke('roles-update', id, name, description),
+  deleteRole: (id) => ipcRenderer.invoke('roles-delete', id),
 
   // COA import/export + versions
   coaExportTemplate: () => ipcRenderer.invoke('coa-export-template'),

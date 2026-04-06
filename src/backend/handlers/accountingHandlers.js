@@ -531,6 +531,40 @@ safeHandle('budget-periods', async () => {
     }
   });
 
+  // Roles CRUD
+  safeHandle('roles-list', async () => {
+    try {
+      return require('../models/roles').list();
+    } catch (error) {
+      console.error('Error listing roles:', error);
+      return [];
+    }
+  });
+  safeHandle('roles-create', async (_e, name, description) => {
+    try {
+      return require('../models/roles').create(name, description);
+    } catch (error) {
+      console.error('Error creating role:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  safeHandle('roles-update', async (_e, id, name, description) => {
+    try {
+      return require('../models/roles').update(id, name, description);
+    } catch (error) {
+      console.error('Error updating role:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  safeHandle('roles-delete', async (_e, id) => {
+    try {
+      return require('../models/roles').remove(id);
+    } catch (error) {
+      console.error('Error deleting role:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   safeHandle('entities-create', async (event, payload) => {
     try {
       const ctx = authorize(event, { roles: ['Admin'] });

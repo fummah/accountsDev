@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Card, DatePicker, Button, Table, Statistic, Row, Col, message, Divider } from 'antd';
 import { PrinterOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { RangePicker } = DatePicker;
 
 const VATReturn = () => {
+  const { symbol: cSym } = useCurrency();
   const [dateRange, setDateRange] = useState([
     moment().startOf('quarter'),
     moment().endOf('quarter')
@@ -81,11 +83,11 @@ const VATReturn = () => {
   const columns = [
     { title: 'VAT Name', dataIndex: 'vat_name', key: 'name', render: (v, r) => v || r.name || '-' },
     { title: 'Rate %', dataIndex: 'vat_percentage', key: 'rate', width: 90, render: (v, r) => `${v || r.rate || 0}%` },
-    { title: 'Output VAT (Collected)', dataIndex: 'output_vat', key: 'output', width: 160, render: v => `$${(Number(v) || 0).toFixed(2)}` },
-    { title: 'Input VAT (Paid)', dataIndex: 'input_vat', key: 'input', width: 140, render: v => `$${(Number(v) || 0).toFixed(2)}` },
+    { title: 'Output VAT (Collected)', dataIndex: 'output_vat', key: 'output', width: 160, render: v => `${cSym} ${(Number(v) || 0).toFixed(2)}` },
+    { title: 'Input VAT (Paid)', dataIndex: 'input_vat', key: 'input', width: 140, render: v => `${cSym} ${(Number(v) || 0).toFixed(2)}` },
     { title: 'Net VAT', dataIndex: 'net', key: 'net', width: 120, render: v => {
       const n = Number(v) || 0;
-      return <span style={{ color: n >= 0 ? '#cf1322' : '#3f8600', fontWeight: 'bold' }}>${n.toFixed(2)}</span>;
+      return <span style={{ color: n >= 0 ? '#cf1322' : '#3f8600', fontWeight: 'bold' }}>{cSym} {n.toFixed(2)}</span>;
     }},
   ];
 
@@ -104,17 +106,17 @@ const VATReturn = () => {
       >
         <Row gutter={24} style={{ marginBottom: 24 }}>
           <Col span={8}>
-            <Statistic title="Output VAT (Collected)" value={data.summary.totalOutput} precision={2} prefix="$" />
+            <Statistic title="Output VAT (Collected)" value={data.summary.totalOutput} precision={2} prefix={cSym} />
           </Col>
           <Col span={8}>
-            <Statistic title="Input VAT (Paid)" value={data.summary.totalInput} precision={2} prefix="$" />
+            <Statistic title="Input VAT (Paid)" value={data.summary.totalInput} precision={2} prefix={cSym} />
           </Col>
           <Col span={8}>
             <Statistic
               title="Net VAT Payable"
               value={data.summary.netVat}
               precision={2}
-              prefix="$"
+              prefix={cSym}
               valueStyle={{ color: data.summary.netVat >= 0 ? '#cf1322' : '#3f8600' }}
             />
           </Col>

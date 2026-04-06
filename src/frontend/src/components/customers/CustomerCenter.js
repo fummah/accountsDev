@@ -3,11 +3,13 @@ import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Tag, In
 import { UserOutlined, DollarOutlined, FileDoneOutlined, ClockCircleOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { TabPane } = Tabs;
 const statusColors = { Draft: 'default', Sent: 'processing', Pending: 'warning', Unpaid: 'warning', Paid: 'success', 'Partially Paid': 'orange', Overdue: 'error', Cancelled: 'default', Open: 'blue', Accepted: 'success', Declined: 'error', Expired: 'default', Invoiced: 'purple' };
 
 const CustomerCenter = () => {
+  const { symbol: cSym } = useCurrency();
   const history = useHistory();
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
@@ -93,7 +95,7 @@ const CustomerCenter = () => {
     { title: 'Email', dataIndex: 'email', key: 'email' },
     { title: 'Phone', dataIndex: 'phone_number', key: 'phone' },
     { title: 'Balance', key: 'balance',
-      render: (_, record) => `R ${Number(record.opening_balance || 0).toFixed(2)}` },
+      render: (_, record) => `${cSym} ${Number(record.opening_balance || 0).toFixed(2)}` },
     { title: 'Actions', key: 'actions', width: 200,
       render: (_, record) => (
         <Space>
@@ -113,7 +115,7 @@ const CustomerCenter = () => {
     { title: 'Due Date', dataIndex: 'last_date', key: 'dueDate',
       render: (d) => d ? moment(d).format('DD/MM/YYYY') : '-' },
     { title: 'Amount', dataIndex: 'amount', key: 'amount',
-      render: (v) => <span style={{ fontWeight: 500 }}>R {Number(v || 0).toFixed(2)}</span> },
+      render: (v) => <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span> },
     { title: 'Status', dataIndex: 'status', key: 'status',
       render: (s) => <Tag color={statusColors[s] || 'default'}>{s}</Tag> },
   ];
@@ -127,7 +129,7 @@ const CustomerCenter = () => {
     { title: 'Expiry', dataIndex: 'last_date', key: 'expiry',
       render: (d) => d ? moment(d).format('DD/MM/YYYY') : '-' },
     { title: 'Amount', dataIndex: 'amount', key: 'amount',
-      render: (v) => <span style={{ fontWeight: 500 }}>R {Number(v || 0).toFixed(2)}</span> },
+      render: (v) => <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span> },
     { title: 'Status', dataIndex: 'status', key: 'status',
       render: (s) => <Tag color={statusColors[s] || 'default'}>{s}</Tag> },
   ];
@@ -141,10 +143,10 @@ const CustomerCenter = () => {
           <Card size="small"><Statistic title="Total Customers" value={stats.totalCustomers} prefix={<UserOutlined />} /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small"><Statistic title="Total Receivables" value={stats.totalReceivables.toFixed(2)} prefix="R" /></Card>
+          <Card size="small"><Statistic title="Total Receivables" value={stats.totalReceivables.toFixed(2)} prefix={cSym} /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small"><Statistic title="Overdue Amount" value={stats.overdueAmount.toFixed(2)} prefix="R"
+          <Card size="small"><Statistic title="Overdue Amount" value={stats.overdueAmount.toFixed(2)} prefix={cSym}
             valueStyle={{ color: stats.overdueAmount > 0 ? '#cf1322' : '#52c41a' }} /></Card>
         </Col>
         <Col span={6}>

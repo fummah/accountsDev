@@ -3,11 +3,13 @@ import { Card, Descriptions, Table, Tabs, Button, Space, Tag, Statistic, Row, Co
 import { ArrowLeftOutlined, EditOutlined, FileTextOutlined, DollarOutlined, PlusOutlined, LeftOutlined, RightOutlined, FileDoneOutlined } from '@ant-design/icons';
 import { useParams, useHistory, Link } from 'react-router-dom';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { TabPane } = Tabs;
 const statusColors = { Draft: 'default', Sent: 'processing', Pending: 'warning', Unpaid: 'warning', Paid: 'success', 'Partially Paid': 'orange', Overdue: 'error', Cancelled: 'default', Open: 'blue', Accepted: 'success', Declined: 'error', Expired: 'default', Invoiced: 'purple' };
 
 const CustomerDetails = () => {
+  const { symbol: cSym } = useCurrency();
   const { id } = useParams();
   const history = useHistory();
   const [customer, setCustomer] = useState(null);
@@ -86,7 +88,7 @@ const CustomerDetails = () => {
     { title: 'Due', dataIndex: 'last_date', key: 'due', width: 100,
       render: d => d ? moment(d).format('DD/MM/YYYY') : '-' },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120,
-      render: v => <span style={{ fontWeight: 500 }}>R {Number(v || 0).toFixed(2)}</span> },
+      render: v => <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span> },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
       render: s => <Tag color={statusColors[s] || 'default'}>{s}</Tag> },
   ];
@@ -99,7 +101,7 @@ const CustomerDetails = () => {
     { title: 'Expiry', dataIndex: 'last_date', key: 'expiry', width: 100,
       render: d => d ? moment(d).format('DD/MM/YYYY') : '-' },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120,
-      render: v => <span style={{ fontWeight: 500 }}>R {Number(v || 0).toFixed(2)}</span> },
+      render: v => <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span> },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
       render: s => <Tag color={statusColors[s] || 'default'}>{s}</Tag> },
   ];
@@ -128,8 +130,8 @@ const CustomerDetails = () => {
             <h2 style={{ margin: 0 }}>{custName}</h2>
             <span style={{ color: '#888' }}>{customer?.email || ''} {customer?.phone_number ? `• ${customer.phone_number}` : ''}</span>
           </Col>
-          <Col><Statistic title="Receivables" value={totalReceivables.toFixed(2)} prefix="R" valueStyle={{ fontSize: 18 }} /></Col>
-          <Col><Statistic title="Paid" value={totalPaid.toFixed(2)} prefix="R" valueStyle={{ fontSize: 18, color: '#52c41a' }} /></Col>
+          <Col><Statistic title="Receivables" value={totalReceivables.toFixed(2)} prefix={cSym} valueStyle={{ fontSize: 18 }} /></Col>
+          <Col><Statistic title="Paid" value={totalPaid.toFixed(2)} prefix={cSym} valueStyle={{ fontSize: 18, color: '#52c41a' }} /></Col>
           <Col><Statistic title="Overdue" value={overdue.length} valueStyle={{ fontSize: 18, color: overdue.length > 0 ? '#f5222d' : '#52c41a' }} /></Col>
         </Row>
       </Card>
@@ -171,7 +173,7 @@ const CustomerDetails = () => {
                 <Descriptions.Item label="Company">{customer?.company || customer?.company_name || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Email">{customer?.email || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Phone">{customer?.phone_number || customer?.mobile_number || '-'}</Descriptions.Item>
-                <Descriptions.Item label="Balance">R {Number(customer?.opening_balance || 0).toFixed(2)}</Descriptions.Item>
+                <Descriptions.Item label="Balance">{cSym} {Number(customer?.opening_balance || 0).toFixed(2)}</Descriptions.Item>
                 <Descriptions.Item label="Payment Terms">{customer?.terms || customer?.payment_method || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Billing Address" span={2}>{customer?.billing_address || customer?.address1 || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Notes" span={2}>{customer?.notes || '-'}</Descriptions.Item>
@@ -237,7 +239,7 @@ const CustomerDetails = () => {
                 render: function(t, r) { return <Link to={'/main/customers/' + (r.docType === 'Invoice' ? 'invoices' : 'quotes') + '/edit/' + r.id}>{t || '#' + r.id}</Link>; } },
               { title: 'Date', dataIndex: 'start_date', key: 'date', width: 100, render: function(d) { return d ? moment(d).format('DD/MM/YYYY') : '-'; } },
               { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120,
-                render: function(v) { return <span style={{ fontWeight: 500 }}>R {Number(v || 0).toFixed(2)}</span>; } },
+                render: function(v) { return <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span>; } },
               { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
                 render: function(s) { return <Tag color={statusColors[s] || 'default'}>{s}</Tag>; } },
             ]}
@@ -254,15 +256,15 @@ const CustomerDetails = () => {
               columns={[
                 { title: 'Date', dataIndex: 'start_date', key: 'date', render: function(d) { return d ? moment(d).format('DD/MM/YYYY') : '-'; } },
                 { title: 'Description', key: 'desc', render: function(_, r) { return 'Invoice ' + (r.number || '#' + r.id); } },
-                { title: 'Amount', dataIndex: 'amount', key: 'amount', render: function(v) { return <span>R {Number(v || 0).toFixed(2)}</span>; } },
+                { title: 'Amount', dataIndex: 'amount', key: 'amount', render: function(v) { return <span>{cSym} {Number(v || 0).toFixed(2)}</span>; } },
                 { title: 'Status', dataIndex: 'status', key: 'status', render: function(s) { return <Tag color={statusColors[s] || 'default'}>{s}</Tag>; } },
-                { title: 'Balance', key: 'balance', render: function(_, r) { return r.status === 'Paid' ? 'R 0.00' : <span style={{ color: '#f5222d' }}>R {Number(r.amount || 0).toFixed(2)}</span>; } },
+                { title: 'Balance', key: 'balance', render: function(_, r) { return r.status === 'Paid' ? `${cSym} 0.00` : <span style={{ color: '#f5222d' }}>{cSym} {Number(r.amount || 0).toFixed(2)}</span>; } },
               ]}
               rowKey="id" size="small" pagination={false}
               summary={function() { return (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0} colSpan={2}><strong>Total Outstanding</strong></Table.Summary.Cell>
-                  <Table.Summary.Cell index={2}><strong>R {totalReceivables.toFixed(2)}</strong></Table.Summary.Cell>
+                  <Table.Summary.Cell index={2}><strong>{cSym} {totalReceivables.toFixed(2)}</strong></Table.Summary.Cell>
                   <Table.Summary.Cell index={3} colSpan={2} />
                 </Table.Summary.Row>
               ); }} />

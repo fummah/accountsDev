@@ -3,11 +3,13 @@ import { Card, DatePicker, Button, Table, Row, Col, Statistic, Select } from 'an
 import { Line } from '@ant-design/charts';
 import { PrinterOutlined, DownloadOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 
 const CashFlow = () => {
+  const { symbol: cSym } = useCurrency();
   const [dateRange, setDateRange] = useState([
     moment().startOf('year'),
     moment().endOf('year')
@@ -63,19 +65,19 @@ const CashFlow = () => {
           title: 'Revenue',
           dataIndex: 'revenue',
           key: 'revenue',
-          render: (amount) => `$${amount.toFixed(2)}`,
+          render: (amount) => `${cSym} ${amount.toFixed(2)}`,
         },
         {
           title: 'Investments',
           dataIndex: 'investments',
           key: 'investments',
-          render: (amount) => `$${amount.toFixed(2)}`,
+          render: (amount) => `${cSym} ${amount.toFixed(2)}`,
         },
         {
           title: 'Other Inflows',
           dataIndex: 'otherInflows',
           key: 'otherInflows',
-          render: (amount) => `$${amount.toFixed(2)}`,
+          render: (amount) => `${cSym} ${amount.toFixed(2)}`,
         },
       ],
     },
@@ -86,19 +88,19 @@ const CashFlow = () => {
           title: 'Operating Expenses',
           dataIndex: 'operatingExpenses',
           key: 'operatingExpenses',
-          render: (amount) => `$${amount.toFixed(2)}`,
+          render: (amount) => `${cSym} ${amount.toFixed(2)}`,
         },
         {
           title: 'Capital Expenditure',
           dataIndex: 'capex',
           key: 'capex',
-          render: (amount) => `$${amount.toFixed(2)}`,
+          render: (amount) => `${cSym} ${amount.toFixed(2)}`,
         },
         {
           title: 'Other Outflows',
           dataIndex: 'otherOutflows',
           key: 'otherOutflows',
-          render: (amount) => `$${amount.toFixed(2)}`,
+          render: (amount) => `${cSym} ${amount.toFixed(2)}`,
         },
       ],
     },
@@ -108,14 +110,14 @@ const CashFlow = () => {
       key: 'netCashFlow',
       render: (amount) => {
         const color = amount >= 0 ? '#3f8600' : '#cf1322';
-        return <span style={{ color }}>${amount.toFixed(2)}</span>;
+        return <span style={{ color }}>{cSym} {amount.toFixed(2)}</span>;
       },
     },
     {
       title: 'Closing Balance',
       dataIndex: 'closingBalance',
       key: 'closingBalance',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      render: (amount) => `${cSym} ${amount.toFixed(2)}`,
     },
   ];
 
@@ -129,7 +131,7 @@ const CashFlow = () => {
     },
     yAxis: {
       label: {
-        formatter: (v) => `$${v}`,
+        formatter: (v) => `${cSym} ${v}`,
       },
     },
     legend: {
@@ -198,7 +200,7 @@ const CashFlow = () => {
               title="Operating Cash Flow"
               value={num(summary.operatingCashFlow)}
               precision={2}
-              prefix="$"
+              prefix={cSym}
               valueStyle={{ color: num(summary.operatingCashFlow) >= 0 ? '#3f8600' : '#cf1322' }}
             />
           </Card>
@@ -209,7 +211,7 @@ const CashFlow = () => {
               title="Investing Cash Flow"
               value={num(summary.investingCashFlow)}
               precision={2}
-              prefix="$"
+              prefix={cSym}
               valueStyle={{ color: num(summary.investingCashFlow) >= 0 ? '#3f8600' : '#cf1322' }}
             />
           </Card>
@@ -220,7 +222,7 @@ const CashFlow = () => {
               title="Financing Cash Flow"
               value={num(summary.financingCashFlow)}
               precision={2}
-              prefix="$"
+              prefix={cSym}
               valueStyle={{ color: num(summary.financingCashFlow) >= 0 ? '#3f8600' : '#cf1322' }}
             />
           </Card>
@@ -231,7 +233,7 @@ const CashFlow = () => {
               title="Net Cash Flow"
               value={num(summary.netCashFlow)}
               precision={2}
-              prefix="$"
+              prefix={cSym}
               valueStyle={{ color: num(summary.netCashFlow) >= 0 ? '#3f8600' : '#cf1322' }}
             />
           </Card>

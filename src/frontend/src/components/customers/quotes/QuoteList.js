@@ -3,10 +3,12 @@ import { Table, Button, Input, Card, Space, Tag, Select, message, Popconfirm, Ro
 import { PlusOutlined, ReloadOutlined, DeleteOutlined, EyeOutlined, SwapOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
+import { useCurrency } from '../../../utils/currency';
 
 const statusColors = { Open: 'blue', Accepted: 'green', Declined: 'red', Expired: 'default', Converted: 'purple', Draft: 'default' };
 
 const QuoteList = () => {
+  const { symbol: cSym } = useCurrency();
   const [quotes, setQuotes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -78,7 +80,7 @@ const QuoteList = () => {
       }},
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 110,
       sorter: (a, b) => (Number(a.amount) || 0) - (Number(b.amount) || 0),
-      render: v => <span style={{ fontWeight: 500 }}>R {Number(v || 0).toFixed(2)}</span> },
+      render: v => <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span> },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 100,
       filters: Object.keys(statusColors).map(s => ({ text: s, value: s })),
       onFilter: (v, r) => r.status === v,
@@ -101,7 +103,7 @@ const QuoteList = () => {
   return (
     <div style={{ padding: 24 }}>
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}><Card size="small"><Statistic title="Total Quoted" value={totalAmount.toFixed(2)} prefix="R" /></Card></Col>
+        <Col span={8}><Card size="small"><Statistic title="Total Quoted" value={totalAmount.toFixed(2)} prefix={cSym} /></Card></Col>
         <Col span={8}><Card size="small"><Statistic title="Open" value={openCount} valueStyle={{ color: '#1890ff' }} /></Card></Col>
         <Col span={8}><Card size="small"><Statistic title="Accepted" value={acceptedCount} valueStyle={{ color: '#52c41a' }} /></Card></Col>
       </Row>

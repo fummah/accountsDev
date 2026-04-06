@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Card, Button, Modal, Form, Input, InputNumber, Select, Space, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 const { TextArea } = Input;
 
 const ItemList = () => {
+  const { symbol: cSym } = useCurrency();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -96,7 +98,7 @@ const ItemList = () => {
       title: 'Unit Price',
       dataIndex: 'unitPrice',
       key: 'unitPrice',
-      render: (price) => `R ${Number(price || 0).toFixed(2)}`,
+      render: (price) => `${cSym} ${Number(price || 0).toFixed(2)}`,
     },
     {
       title: 'Stock',

@@ -8,9 +8,7 @@ import CustomersTab from "../CustomersLeads/Tabs/CustomersTab";
 import ProductsTab from "./Tabs/ProductsTab";
 import CreateStatement from "../../../components/customers/statements/CreateStatement";
 import ReceivePayments from "../../../components/customers/payments/ReceivePayments";
-import IncomeTracker from "../../../components/customers/IncomeTracker";
 import RecurringTransactions from "../../../components/customers/RecurringTransactions";
-import ItemList from "../../../components/customers/ItemList";
 import Auxiliary from "util/Auxiliary";
 
 const TabPane = Tabs.TabPane;
@@ -80,19 +78,9 @@ const Sales = () => {
               <ReceivePayments />
             </div>
           </TabPane>
-          <TabPane tab="Income Tracker" key="6">
-            <div className="gx-mb-2">
-              <IncomeTracker />
-            </div>
-          </TabPane>
           <TabPane tab="Recurring Transactions" key="7">
             <div className="gx-mb-2">
               <RecurringTransactions />
-            </div>
-          </TabPane>
-          <TabPane tab="Item List" key="8">
-            <div className="gx-mb-2">
-              <ItemList />
             </div>
           </TabPane>
          

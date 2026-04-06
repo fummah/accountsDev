@@ -27,31 +27,35 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
     })();
   }, []);
 
-  if (width < TAB_SIZE && navStyle === NAV_STYLE_FIXED) {
+  const isMobile = width < TAB_SIZE;
+  if (isMobile && navStyle === NAV_STYLE_FIXED) {
     navStyle = NAV_STYLE_DRAWER;
   }
 
   const logoImg = companyLogo
     ? <img alt="logo" src={companyLogo} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
-    : navStyle === NAV_STYLE_NO_HEADER_MINI_SIDEBAR && width >= TAB_SIZE
+    : navStyle === NAV_STYLE_NO_HEADER_MINI_SIDEBAR && !isMobile
       ? <img alt="logo" src={"/assets/images/w-logo.png"} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
       : themeType === THEME_TYPE_LITE
         ? <img alt="logo" src={"/assets/images/logo.png"} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
         : <img alt="logo" src={"/assets/images/logo-white.png"} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />;
 
+  // Show fold/unfold toggle on desktop only (mobile uses the Drawer close button)
+  const showToggle = !isMobile && (navStyle === NAV_STYLE_FIXED || navStyle === NAV_STYLE_MINI_SIDEBAR);
+
   return (
     <div className="gx-layout-sider-header">
-      {(navStyle === NAV_STYLE_FIXED || navStyle === NAV_STYLE_MINI_SIDEBAR) ? <div className="gx-linebar">
+      {showToggle ? <div className="gx-linebar">
         <i
-          className={`gx-icon-btn icon icon-${!sidebarCollapsed ? 'menu-unfold' : 'menu-fold'} ${themeType !== THEME_TYPE_LITE ? 'gx-text-white' : ''}`}
+          className={`gx-icon-btn icon icon-${sidebarCollapsed ? 'menu-fold' : 'menu-unfold'} ${themeType !== THEME_TYPE_LITE ? 'gx-text-white' : ''}`}
           onClick={() => {
-            setSidebarCollapsed(!sidebarCollapsed)
+            if (typeof setSidebarCollapsed === 'function') setSidebarCollapsed();
           }}
         />
       </div> : null}
 
       <Link to="/" className="gx-site-logo">
-        {logoImg}
+        {sidebarCollapsed ? null : logoImg}
       </Link>
     </div>
   );

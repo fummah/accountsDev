@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Table, Button, Form, DatePicker, Select, Input, Modal, Card, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const Payroll = () => {
+  const { symbol: cSym } = useCurrency();
   const [employees, setEmployees] = useState([]);
   const [payrollRecords, setPayrollRecords] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -106,7 +108,7 @@ const Payroll = () => {
       title: 'Total Net Paid',
       dataIndex: 'totalNetPay',
       key: 'totalNetPay',
-      render: (amount) => `$${Number(amount || 0).toFixed(2)}`,
+      render: (amount) => `${cSym} ${Number(amount || 0).toFixed(2)}`,
     },
     {
       title: 'Payments',
@@ -158,7 +160,7 @@ const Payroll = () => {
         <Table
           columns={[
             { title: 'Name', dataIndex: 'name', key: 'name' },
-            { title: 'Salary', dataIndex: 'salary', key: 'salary', render: (val) => `$${Number(val).toFixed(2)}` },
+            { title: 'Salary', dataIndex: 'salary', key: 'salary', render: (val) => `${cSym} ${Number(val).toFixed(2)}` },
             { title: 'Status', dataIndex: 'status', key: 'status' },
             { title: 'Role', dataIndex: 'role', key: 'role' },
             { title: 'Email', dataIndex: 'email', key: 'email' },
@@ -185,7 +187,7 @@ const Payroll = () => {
 
       <Modal
         title="Process Payroll"
-        open={isModalVisible}
+        visible={isModalVisible}
         onOk={() => form.submit()}
         onCancel={() => {
           setIsModalVisible(false);

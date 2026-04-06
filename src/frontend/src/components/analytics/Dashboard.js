@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, Switch, Space, message, InputNumber, Button, Select, Spin, Row, Col, Statistic, Progress, Divider } from 'antd';
+import { Card, Switch, Space, message, InputNumber, Button, Select, Spin, Row, Col, Statistic, Progress, Divider, DatePicker } from 'antd';
+import moment from 'moment';
 import { ArrowUpOutlined, ArrowDownOutlined, DollarOutlined, FileTextOutlined, BankOutlined, AlertOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../utils/currency';
 
 /* Simple CSS bar chart component */
 const MiniBarChart = ({ data, labelKey, valueKey, color = '#1890ff', height = 120 }) => {
@@ -23,7 +25,7 @@ const MiniBarChart = ({ data, labelKey, valueKey, color = '#1890ff', height = 12
   );
 };
 
-const AgingBar = ({ data }) => {
+const AgingBar = ({ data, cSym = '$' }) => {
   if (!data) return <span>...</span>;
   const buckets = ['current', '1-30', '31-60', '61-90', '90+'];
   const colors = ['#52c41a', '#1890ff', '#faad14', '#fa8c16', '#ff4d4f'];
@@ -36,16 +38,17 @@ const AgingBar = ({ data }) => {
         return (
           <div key={b} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ width: 50, fontSize: 12 }}>{b}</span>
-            <Progress percent={pct} size="small" strokeColor={colors[i]} format={() => `$${val.toFixed(0)}`} style={{ flex: 1 }} />
+            <Progress percent={pct} size="small" strokeColor={colors[i]} format={() => `${cSym}${val.toFixed(0)}`} style={{ flex: 1 }} />
           </div>
         );
       })}
-      <div style={{ fontWeight: 600, marginTop: 4 }}>Total: ${total.toFixed(2)}</div>
+      <div style={{ fontWeight: 600, marginTop: 4 }}>Total: {cSym}{total.toFixed(2)}</div>
     </div>
   );
 };
 
 const AnalyticsDashboard = () => {
+  const { symbol: cSym } = useCurrency();
   const [kpis, setKpis] = useState(null);
   const [error, setError] = useState('');
 
@@ -68,6 +71,7 @@ const AnalyticsDashboard = () => {
   const [aiPrediction, setAiPrediction] = useState([]);
 
   const [pageLoading, setPageLoading] = useState(true);
+  const [dateRange, setDateRange] = useState([moment().startOf('year'), moment()]);
 
   const saveWidgets = async () => {
     try { setSaving(true); await window.electronAPI.dashboardWidgetsSet?.({ widgets }); message.success('Layout saved'); } catch {} finally { setSaving(false); }
@@ -83,18 +87,20 @@ const AnalyticsDashboard = () => {
     const loadAll = async () => {
       setPageLoading(true);
       setError('');
-      const d = new Date().toISOString().slice(0,10);
+      const d = dateRange && dateRange[1] ? dateRange[1].format('YYYY-MM-DD') : new Date().toISOString().slice(0,10);
+        const startDate = dateRange && dateRange[0] ? dateRange[0].format('YYYY-MM-DD') : null;
+        const endDate = dateRange && dateRange[1] ? dateRange[1].format('YYYY-MM-DD') : null;
       try {
-        // Load ALL data in parallel for speed
+        // Load ALL data in parallel for speed — pass date range where APIs support it
         const [layout, kpiRes, forecastRes, trendRes, arRes, apRes, insightsRes, anomRes, whatIfRes] = await Promise.all([
           safe(() => window.electronAPI.dashboardWidgetsGet?.({})),
-          safe(() => window.electronAPI.getDashboardKpis?.()),
+          safe(() => window.electronAPI.getDashboardKpis?.(startDate, endDate)),
           safe(() => window.electronAPI.forecastCashflow?.()),
-          safe(() => window.electronAPI.getRevenueTrend?.()),
-          safe(() => window.electronAPI.getARAging?.(d)),
-          safe(() => window.electronAPI.getAPAging?.(d)),
-          safe(() => window.electronAPI.dashboardInsights?.()),
-          safe(() => window.electronAPI.detectExpenseAnomalies?.()),
+          safe(() => window.electronAPI.getRevenueTrend?.(startDate, endDate)),
+          safe(() => window.electronAPI.getARAging?.(endDate || d)),
+          safe(() => window.electronAPI.getAPAging?.(endDate || d)),
+          safe(() => window.electronAPI.dashboardInsights?.(startDate, endDate)),
+          safe(() => window.electronAPI.detectExpenseAnomalies?.(startDate, endDate)),
           safe(() => window.electronAPI.whatIfForecast?.({ revenueGrowthPct: whatIfR, expenseGrowthPct: whatIfE })),
         ]);
         if (cancelled) return;
@@ -113,7 +119,7 @@ const AnalyticsDashboard = () => {
     };
     loadAll();
     return () => { cancelled = true; };
-  }, []);
+  }, [dateRange]);
 
   const trainAI = async () => {
     try {
@@ -142,9 +148,16 @@ const AnalyticsDashboard = () => {
   return (
     <Spin spinning={pageLoading} tip="Loading analytics...">
     <div style={{ padding: 24 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <h2 style={{ margin: 0 }}>Analytics Dashboard</h2>
-        <Space>
+        <Space wrap>
+          <DatePicker.RangePicker
+            value={dateRange}
+            onChange={(range) => setDateRange(range || [moment().startOf('year'), moment()])}
+            format="DD/MM/YYYY"
+            allowClear={false}
+            style={{ minWidth: 240 }}
+          />
           <span>KPIs</span><Switch size="small" checked={widgets.kpis} onChange={v => setWidgets(prev => ({...prev, kpis:v}))} />
           <span>Cashflow</span><Switch size="small" checked={widgets.cashflow} onChange={v => setWidgets(prev => ({...prev, cashflow:v}))} />
           <span>Revenue</span><Switch size="small" checked={widgets.revenue} onChange={v => setWidgets(prev => ({...prev, revenue:v}))} />
@@ -195,10 +208,10 @@ const AnalyticsDashboard = () => {
       {widgets.aging && (
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col span={12}>
-            <Card size="small" title={<span><BankOutlined /> A/R Aging</span>}><AgingBar data={ar} /></Card>
+            <Card size="small" title={<span><BankOutlined /> A/R Aging</span>}><AgingBar data={ar} cSym={cSym} /></Card>
           </Col>
           <Col span={12}>
-            <Card size="small" title={<span><BankOutlined /> A/P Aging</span>}><AgingBar data={ap} /></Card>
+            <Card size="small" title={<span><BankOutlined /> A/P Aging</span>}><AgingBar data={ap} cSym={cSym} /></Card>
           </Col>
         </Row>
       )}
@@ -225,7 +238,7 @@ const AnalyticsDashboard = () => {
                 {anoms.slice(0, 20).map((a, idx) => (
                   <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', borderBottom: '1px solid #f5f5f5', fontSize: 12 }}>
                     <span>{a.ym} {a.category}</span>
-                    <span style={{ color: '#cf1322', fontWeight: 500 }}>${Number(a.amount).toFixed(2)} (z={a.z})</span>
+                    <span style={{ color: '#cf1322', fontWeight: 500 }}>{cSym}{Number(a.amount).toFixed(2)} (z={a.z})</span>
                   </div>
                 ))}
               </div>

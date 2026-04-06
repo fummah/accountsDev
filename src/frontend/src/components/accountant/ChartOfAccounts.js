@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Form, Input, Modal, message, Select, Space } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
 const ChartOfAccounts = () => {
+  const { symbol: cSym } = useCurrency();
   const [accounts, setAccounts] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [form] = Form.useForm();
@@ -88,7 +90,7 @@ const ChartOfAccounts = () => {
       title: 'Balance',
       dataIndex: 'balance',
       key: 'balance',
-      render: (balance) => typeof balance === 'number' ? `$${balance.toFixed(2)}` : '$0.00',
+      render: (balance) => typeof balance === 'number' ? `${cSym} ${balance.toFixed(2)}` : `${cSym} 0.00`,
     },
     {
       title: 'Actions',
@@ -165,7 +167,7 @@ const ChartOfAccounts = () => {
 
       <Modal
         title={editingId ? 'Edit Account' : 'Add Account'}
-        open={isModalVisible}
+        visible={isModalVisible}
         onOk={() => form.submit()}
         onCancel={() => {
           setIsModalVisible(false);

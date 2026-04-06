@@ -1,45 +1,49 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { useHistory } from 'react-router-dom';
+import { Card, Select, Row, Col, Statistic, Progress, Button, Space, message, Tag, Table } from 'antd';
+import { DollarOutlined, FileTextOutlined, ReloadOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../../utils/currency';
+
+const { Option } = Select;
 
 const Profitability = () => {
+  const { symbol: cSym } = useCurrency();
+  const history = useHistory();
   const [projects, setProjects] = useState([]);
-  const [projectId, setProjectId] = useState('');
+  const [projectId, setProjectId] = useState(null);
   const [data, setData] = useState(null);
   const [unbilled, setUnbilled] = useState(0);
+  const [timesheets, setTimesheets] = useState([]);
   const [busy, setBusy] = useState(false);
 
-  const loadProjects = async () => {
-    const list = await window.electronAPI.getProjects();
-    setProjects(Array.isArray(list) ? list : []);
-  };
-  useEffect(() => { loadProjects(); }, []);
+  const loadProjects = useCallback(async () => {
+    try {
+      const list = await window.electronAPI.getProjects();
+      setProjects(Array.isArray(list) ? list : []);
+    } catch (_) { setProjects([]); }
+  }, []);
 
-  const load = async () => {
-    if (!projectId) return;
-    const d = await window.electronAPI.getProjectProfitability(Number(projectId));
-    setData(d || null);
+  useEffect(() => { loadProjects(); }, [loadProjects]);
+
+  const load = useCallback(async () => {
+    if (!projectId) { setData(null); return; }
+    try {
+      const d = await window.electronAPI.getProjectProfitability(Number(projectId));
+      setData(d || null);
+    } catch (_) { setData(null); }
     try {
       const ts = await window.electronAPI.listTimesheetsByProject(Number(projectId));
-      const cnt = (Array.isArray(ts) ? ts : []).filter(t => !t.billed).length;
-      setUnbilled(cnt);
-    } catch {}
-  };
-  useEffect(() => { load(); }, [projectId]);
+      const list = Array.isArray(ts) ? ts : [];
+      setTimesheets(list);
+      setUnbilled(list.filter(t => !t.billed).length);
+    } catch (_) { setTimesheets([]); setUnbilled(0); }
+  }, [projectId]);
+
+  useEffect(() => { load(); }, [load]);
 
   const profit = Number((data?.totalRevenue || 0) - (data?.totalExpense || 0));
   const margin = (data?.totalRevenue || 0) > 0 ? (profit / data.totalRevenue) * 100 : 0;
-
-  const createInvoice = async () => {
-    try {
-      setBusy(true);
-      const res = await window.electronAPI.projectInvoiceFromTimesheets({ projectId: Number(projectId) });
-      if (res && res.success) {
-        alert(`Created invoice #${res.invoiceId}`);
-        await load();
-      } else {
-        alert(res?.error || 'Failed to create invoice');
-      }
-    } finally { setBusy(false); }
-  };
+  const totalExpense = Number(data?.totalExpense || 0);
 
   const blocks = [
     { label: 'Revenue', value: Number(data?.totalRevenue || 0), color: '#52c41a' },
@@ -49,59 +53,95 @@ const Profitability = () => {
   ];
   const maxVal = Math.max(...blocks.map(b => b.value), 1);
 
-  return (
-    <div className="gx-p-4">
-      <h2>Project Profitability</h2>
-      <div style={{ marginBottom: 8 }}>
-        <label>Project</label><br/>
-        <select value={projectId} onChange={e => setProjectId(e.target.value)}>
-          <option value="">Select project</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-      </div>
-      {projectId && (
-        <>
-          <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-            <div style={{ padding: 12, border: '1px solid #eee' }}>
-              <div>Total Revenue</div>
-              <div style={{ fontSize: 20 }}>{Number(data?.totalRevenue || 0).toFixed(2)}</div>
-            </div>
-            <div style={{ padding: 12, border: '1px solid #eee' }}>
-              <div>Total Expense</div>
-              <div style={{ fontSize: 20 }}>{Number(data?.totalExpense || 0).toFixed(2)}</div>
-            </div>
-            <div style={{ padding: 12, border: '1px solid #eee' }}>
-              <div>Profit</div>
-              <div style={{ fontSize: 20 }}>{profit.toFixed(2)}</div>
-            </div>
-            <div style={{ padding: 12, border: '1px solid #eee' }}>
-              <div>Margin %</div>
-              <div style={{ fontSize: 20 }}>{margin.toFixed(2)}%</div>
-            </div>
-          </div>
+  const createInvoice = async () => {
+    try {
+      setBusy(true);
+      const res = await window.electronAPI.projectInvoiceFromTimesheets({ projectId: Number(projectId) });
+      if (res && res.success) {
+        message.success(`Created invoice #${res.invoiceId}`);
+        await load();
+      } else {
+        message.error(res?.error || 'Failed to create invoice');
+      }
+    } catch (e) {
+      message.error(e?.message || 'Failed');
+    } finally { setBusy(false); }
+  };
 
-          <div style={{ marginBottom: 12 }}>
-            <h3>Costs by Type</h3>
-            <div style={{ border: '1px solid #f0f0f0', padding: 8 }}>
+  const tsColumns = [
+    { title: 'Date', dataIndex: 'date', key: 'date' },
+    { title: 'Employee', dataIndex: 'employeeName', key: 'employeeName', render: v => v || '-' },
+    { title: 'Hours', dataIndex: 'hours', key: 'hours', render: v => Number(v || 0).toFixed(1) },
+    { title: 'Rate', dataIndex: 'rate', key: 'rate', render: v => `${cSym} ${Number(v || 0).toFixed(2)}` },
+    { title: 'Total', key: 'total', render: (_, r) => `${cSym} ${(Number(r.hours || 0) * Number(r.rate || 0)).toFixed(2)}` },
+    { title: 'Billed', dataIndex: 'billed', key: 'billed', render: v => v ? <Tag color="green">Yes</Tag> : <Tag color="orange">No</Tag> },
+  ];
+
+  return (
+    <div style={{ padding: 24 }}>
+      <Card title={<span style={{ fontSize: 18, fontWeight: 600 }}>Project Profitability Report</span>}
+        extra={<Space><Button icon={<ArrowLeftOutlined />} onClick={() => { history.push('/main/projects/center'); }}>Projects Center</Button><Button icon={<ReloadOutlined />} onClick={load}>Refresh</Button></Space>}>
+
+        <div style={{ marginBottom: 16 }}>
+          <Select showSearch optionFilterProp="children" placeholder="Select a project to analyse"
+            value={projectId} onChange={v => setProjectId(v)} style={{ width: 360 }} allowClear size="large">
+            {projects.map(p => <Option key={p.id} value={p.id}>{p.name} {p.code ? `(${p.code})` : ''}</Option>)}
+          </Select>
+        </div>
+
+        {projectId && data && (
+          <>
+            <Row gutter={16} style={{ marginBottom: 20, flexDirection: 'row', flexWrap: 'wrap' }}>
+              <Col span={6}>
+                <Card size="small" style={{ textAlign: 'center' }}>
+                  <Statistic title="Total Revenue" value={Number(data.totalRevenue || 0)} prefix={cSym} precision={2} valueStyle={{ color: '#3f8600' }} />
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small" style={{ textAlign: 'center' }}>
+                  <Statistic title="Total Expense" value={totalExpense} prefix={cSym} precision={2} valueStyle={{ color: '#cf1322' }} />
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small" style={{ textAlign: 'center' }}>
+                  <Statistic title="Net Profit" value={profit} prefix={cSym} precision={2} valueStyle={{ color: profit >= 0 ? '#3f8600' : '#cf1322' }} />
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small" style={{ textAlign: 'center' }}>
+                  <Statistic title="Profit Margin" value={margin} precision={1} suffix="%" valueStyle={{ color: margin >= 0 ? '#3f8600' : '#cf1322' }} />
+                </Card>
+              </Col>
+            </Row>
+
+            <Card size="small" title="Cost Breakdown" style={{ marginBottom: 20 }}>
               {blocks.map(b => (
-                <div key={b.label} style={{ display:'flex', alignItems:'center', margin: '6px 0' }}>
-                  <div style={{ width: 100 }}>{b.label}</div>
-                  <div style={{ background:'#fafafa', height: 16, flex: 1, position:'relative' }}>
-                    <div style={{ position:'absolute', left:0, top:0, bottom:0, width: `${(b.value/maxVal)*100}%`, background: b.color }} />
+                <div key={b.label} style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span>{b.label}</span>
+                    <strong>{cSym} {b.value.toFixed(2)}</strong>
                   </div>
-                  <div style={{ width: 100, textAlign:'right', marginLeft: 8 }}>{b.value.toFixed(2)}</div>
+                  <Progress percent={Math.round((b.value / maxVal) * 100)} strokeColor={b.color} showInfo={false} size="small" />
                 </div>
               ))}
-            </div>
-          </div>
+            </Card>
 
-          <div>
-            <button disabled={!unbilled || busy} onClick={createInvoice}>
-              {busy ? 'Creating...' : `Create invoice from unbilled time (${unbilled})`}
-            </button>
-          </div>
-        </>
-      )}
+            <Card size="small" title={`Timesheets (${timesheets.length} entries, ${unbilled} unbilled)`}
+              extra={
+                <Button type="primary" icon={<FileTextOutlined />} disabled={!unbilled || busy} loading={busy} onClick={createInvoice}>
+                  Invoice Unbilled ({unbilled})
+                </Button>
+              }>
+              <Table columns={tsColumns} dataSource={timesheets} rowKey={(r, i) => r.id || i} size="small"
+                pagination={{ pageSize: 10, showSizeChanger: true }} />
+            </Card>
+          </>
+        )}
+
+        {projectId && !data && (
+          <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>No profitability data available for this project</div>
+        )}
+      </Card>
     </div>
   );
 };

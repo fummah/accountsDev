@@ -3,10 +3,12 @@ import { Table, Button, Form, Input, DatePicker, Select, Modal, message, Card, S
 import { PlusOutlined, FileTextOutlined, DollarOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useHistory } from 'react-router-dom';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
 const BillTracker = () => {
+  const { symbol: cSym } = useCurrency();
   const [bills, setBills] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -106,7 +108,7 @@ const BillTracker = () => {
       title: 'Amount',
       dataIndex: 'amount',
       key: 'amount',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      render: (amount) => `${cSym} ${amount.toFixed(2)}`,
     },
     {
       title: 'Status',
@@ -198,7 +200,7 @@ const BillTracker = () => {
             title="Total Unpaid Bills"
             value={bills.filter(b => b.status !== 'paid').reduce((acc, curr) => acc + curr.amount, 0)}
             precision={2}
-            prefix="$"
+            prefix={cSym}
           />
         </Card>
         <Card style={{ flex: 1 }}>
@@ -284,7 +286,7 @@ const BillTracker = () => {
             label="Amount"
             rules={[{ required: true }]}
           >
-            <Input prefix="$" type="number" />
+            <Input prefix={cSym} type="number" />
           </Form.Item>
 
           <Form.Item

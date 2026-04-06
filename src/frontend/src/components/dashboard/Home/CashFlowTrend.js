@@ -2,8 +2,10 @@ import React, { useState, useEffect } from "react";
 import {Bar, BarChart, ResponsiveContainer, Tooltip, XAxis} from "recharts";
 import Widget from "components/Widget/index";
 import {Badge} from "antd";
+import { useCurrency } from '../../../utils/currency';
 
 const CashFlowTrend = ({ summary: summaryProp }) => {
+  const { symbol: cSym } = useCurrency();
   const [trendData, setTrendData] = useState([]);
 
   useEffect(() => {
@@ -55,7 +57,7 @@ const CashFlowTrend = ({ summary: summaryProp }) => {
       <ResponsiveContainer width="100%" height={150}>
         <BarChart data={trendData}
                   margin={{top: 0, right: 0, left: 0, bottom: 0}}>
-          <Tooltip formatter={(value) => `$${value.toLocaleString()}`}/>
+          <Tooltip formatter={(value) => `${cSym}${value.toLocaleString()}`}/>
           <XAxis dataKey="name"/>
           <Bar dataKey="moneyin" stackId="a" fill="#038FDE" barSize={10}/>
           <Bar dataKey="moneyout" stackId="ab" fill="#FE9E15" barSize={10}/>

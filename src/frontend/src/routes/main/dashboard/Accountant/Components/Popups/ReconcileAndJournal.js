@@ -3,33 +3,25 @@ import { Tabs } from 'antd';
 import Reconcile from '../../../../../../components/accountant/Reconcile';
 import JournalEntries from '../../../../../../components/accountant/JournalEntries';
 
+const { TabPane } = Tabs;
+
 const ReconcileAndJournal = () => {
   const [activeKey, setActiveKey] = useState('reconcile');
 
-  const items = [
-    {
-      key: 'reconcile',
-      label: 'Reconcile Accounts',
-      children: (
-        <div style={{ paddingTop: 8 }}>
-          <Reconcile />
-        </div>
-      ),
-    },
-    {
-      key: 'journal',
-      label: 'Journal Entries',
-      children: (
-        <div style={{ paddingTop: 8 }}>
-          <JournalEntries />
-        </div>
-      ),
-    },
-  ];
-
   return (
     <div style={{ padding: 24 }}>
-      <Tabs activeKey={activeKey} onChange={setActiveKey} items={items} />
+      <Tabs activeKey={activeKey} onChange={setActiveKey}>
+        <TabPane tab="Reconcile Accounts" key="reconcile">
+          <div style={{ paddingTop: 8 }}>
+            <Reconcile />
+          </div>
+        </TabPane>
+        <TabPane tab="Journal Entries" key="journal">
+          <div style={{ paddingTop: 8 }}>
+            <JournalEntries />
+          </div>
+        </TabPane>
+      </Tabs>
     </div>
   );
 };

@@ -35,6 +35,21 @@ if (typeof window !== 'undefined') {
   window.addEventListener('error', (e) => {
     if (roErr.test(e.message)) { e.stopImmediatePropagation(); e.preventDefault(); }
   });
+  window.addEventListener('unhandledrejection', (e) => {
+    if (e.reason && roErr.test(String(e.reason))) { e.preventDefault(); }
+  });
+  // Suppress in React dev overlay (CRA iframe-based overlay)
+  const origAddEventListener = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function(type, fn, opts) {
+    if (type === 'error' && this === window) {
+      const wrapped = function(event) {
+        if (event && event.message && roErr.test(event.message)) { event.stopImmediatePropagation(); event.preventDefault(); return; }
+        return fn.call(this, event);
+      };
+      return origAddEventListener.call(this, type, wrapped, opts);
+    }
+    return origAddEventListener.call(this, type, fn, opts);
+  };
 }
 
 ReactDOM.render(<NextApp />, document.getElementById('root'));

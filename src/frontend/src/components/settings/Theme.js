@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Radio, Switch, Row, Col, Button, message, Select } from 'antd';
+import { useDispatch } from 'react-redux';
+import { setThemeType, setThemeColor } from '../../appRedux/actions/Setting';
+import { THEME_TYPE_DARK, THEME_TYPE_LITE } from '../../constants/ThemeSetting';
+
+const COLOR_MAP = { blue: 'blue', purple: 'light_purple', red: 'red', orange: 'orange', green: 'light_blue', corporate: 'dark_blue' };
 
 const Theme = () => {
+  const dispatch = useDispatch();
   const [theme, setTheme] = useState('light'); // light | dark | blue | corporate | system
   const [accentColor, setAccentColor] = useState('blue');
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -28,12 +34,12 @@ const Theme = () => {
       const body = document.body;
       body.classList.toggle('contrast-high', !!cfg.contrastHigh);
       body.classList.toggle('font-large', cfg.fontScale === 'large');
-      // legacy theme system hooks
-      if (cfg.theme === 'dark' || isDarkMode) {
-        body.classList.add('dark-theme');
-      } else {
-        body.classList.remove('dark-theme');
-      }
+      // Apply theme type via Redux (triggers CSS switch in App/index.js)
+      const isDark = cfg.theme === 'dark';
+      dispatch(setThemeType(isDark ? THEME_TYPE_DARK : THEME_TYPE_LITE));
+      // Apply color theme via Redux
+      const col = COLOR_MAP[cfg.theme] || COLOR_MAP[cfg.accentColor] || 'blue';
+      dispatch(setThemeColor(col));
     } catch {}
   };
 

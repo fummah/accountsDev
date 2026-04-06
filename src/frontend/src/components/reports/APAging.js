@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Card, DatePicker, Table, Row, Col, Statistic } from 'antd';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const APAging = () => {
+  const { symbol: cSym } = useCurrency();
   const [date, setDate] = useState(moment());
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState({ summary: { current: 0, '1-30': 0, '31-60': 0, '61-90': 0, '90+': 0, total: 0 }, bySupplier: [] });
@@ -26,12 +28,12 @@ const APAging = () => {
 
   const columns = [
     { title: 'Supplier', dataIndex: 'supplierName', key: 'supplierName' },
-    { title: 'Current', dataIndex: 'current', key: 'current', align: 'right', render: v => `$${(v || 0).toFixed(2)}` },
-    { title: '1-30', dataIndex: '1-30', key: '1-30', align: 'right', render: v => `$${(v || 0).toFixed(2)}` },
-    { title: '31-60', dataIndex: '31-60', key: '31-60', align: 'right', render: v => `$${(v || 0).toFixed(2)}` },
-    { title: '61-90', dataIndex: '61-90', key: '61-90', align: 'right', render: v => `$${(v || 0).toFixed(2)}` },
-    { title: '90+', dataIndex: '90+', key: '90+', align: 'right', render: v => `$${(v || 0).toFixed(2)}` },
-    { title: 'Total', dataIndex: 'total', key: 'total', align: 'right', render: v => `$${(v || 0).toFixed(2)}` },
+    { title: 'Current', dataIndex: 'current', key: 'current', align: 'right', render: v => `${cSym} ${(v || 0).toFixed(2)}` },
+    { title: '1-30', dataIndex: '1-30', key: '1-30', align: 'right', render: v => `${cSym} ${(v || 0).toFixed(2)}` },
+    { title: '31-60', dataIndex: '31-60', key: '31-60', align: 'right', render: v => `${cSym} ${(v || 0).toFixed(2)}` },
+    { title: '61-90', dataIndex: '61-90', key: '61-90', align: 'right', render: v => `${cSym} ${(v || 0).toFixed(2)}` },
+    { title: '90+', dataIndex: '90+', key: '90+', align: 'right', render: v => `${cSym} ${(v || 0).toFixed(2)}` },
+    { title: 'Total', dataIndex: 'total', key: 'total', align: 'right', render: v => `${cSym} ${(v || 0).toFixed(2)}` },
   ];
 
   const rows = (data.bySupplier || []).map(g => {
@@ -52,12 +54,12 @@ const APAging = () => {
         <DatePicker value={date} onChange={setDate} />
       </div>
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={4}><Card><Statistic title="Current" value={data.summary.current || 0} precision={2} prefix="$" /></Card></Col>
-        <Col span={4}><Card><Statistic title="1-30" value={data.summary['1-30'] || 0} precision={2} prefix="$" /></Card></Col>
-        <Col span={4}><Card><Statistic title="31-60" value={data.summary['31-60'] || 0} precision={2} prefix="$" /></Card></Col>
-        <Col span={4}><Card><Statistic title="61-90" value={data.summary['61-90'] || 0} precision={2} prefix="$" /></Card></Col>
-        <Col span={4}><Card><Statistic title="90+" value={data.summary['90+'] || 0} precision={2} prefix="$" /></Card></Col>
-        <Col span={4}><Card><Statistic title="Total" value={data.summary.total || 0} precision={2} prefix="$" /></Card></Col>
+        <Col span={4}><Card><Statistic title="Current" value={data.summary.current || 0} precision={2} prefix={cSym} /></Card></Col>
+        <Col span={4}><Card><Statistic title="1-30" value={data.summary['1-30'] || 0} precision={2} prefix={cSym} /></Card></Col>
+        <Col span={4}><Card><Statistic title="31-60" value={data.summary['31-60'] || 0} precision={2} prefix={cSym} /></Card></Col>
+        <Col span={4}><Card><Statistic title="61-90" value={data.summary['61-90'] || 0} precision={2} prefix={cSym} /></Card></Col>
+        <Col span={4}><Card><Statistic title="90+" value={data.summary['90+'] || 0} precision={2} prefix={cSym} /></Card></Col>
+        <Col span={4}><Card><Statistic title="Total" value={data.summary.total || 0} precision={2} prefix={cSym} /></Card></Col>
       </Row>
       <Card>
         <Table columns={columns} dataSource={rows} loading={loading} pagination={{ pageSize: 20 }} />

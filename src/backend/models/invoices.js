@@ -187,8 +187,14 @@ const Invoices = {
   getInvoiceReport: function (){
     const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Pending' ");
     const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Pending' AND i.last_date < ?");
-    const stmt_paid = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS paid_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Paid' ");
+    const stmt_paid = db.prepare("SELECT COUNT(DISTINCT i.id) AS paid_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS paid_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Paid' ");
     
+    // Credit notes summary (Draft + Issued = available credits)
+    let credit_notes = [{ credit_count: 0, credit_total: 0 }];
+    try {
+      credit_notes = db.prepare("SELECT COUNT(*) AS credit_count, COALESCE(SUM(total),0) AS credit_total FROM credit_notes WHERE status IN ('Draft','Issued')").all();
+    } catch (_) {}
+
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -198,7 +204,7 @@ const Invoices = {
     const paid_invoice = stmt_paid.all();
     const due_invoice = stmt_due.all(due_date);
 
-    return {open_invoice,due_invoice, paid_invoice};
+    return {open_invoice,due_invoice, paid_invoice, credit_notes};
   },
   getDashboardSummary: function () {
     // Not due invoices (pending but not overdue)

@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Card, Table, DatePicker, Select, Button, Row, Col, Form, Statistic } from 'antd';
 import { ClockCircleOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 
 const TimeTracking = () => {
+  const { symbol: cSym } = useCurrency();
   const [dateRange, setDateRange] = useState([moment().startOf('month'), moment()]);
   const [selectedEmployee, setSelectedEmployee] = useState('all');
   const [selectedProject, setSelectedProject] = useState('all');
@@ -192,7 +194,7 @@ const TimeTracking = () => {
             title="Average Hourly Rate"
             value={averageRate}
             precision={2}
-            prefix="$"
+            prefix={cSym}
             suffix="/hr"
           />
         </Col>
@@ -201,7 +203,7 @@ const TimeTracking = () => {
             title="Total Value"
             value={totalValue}
             precision={2}
-            prefix="$"
+            prefix={cSym}
           />
         </Col>
       </Row>

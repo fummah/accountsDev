@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Tag, Modal, Form, Input, InputNumber, Select, DatePicker, message, Popconfirm, Space } from 'antd';
 import { PlusOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../../utils/currency';
 
 const CreditNoteList = () => {
+  const { symbol: cSym } = useCurrency();
   const [creditNotes, setCreditNotes] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
@@ -104,7 +106,7 @@ const CreditNoteList = () => {
     { title: 'Customer', dataIndex: 'customer_name', key: 'cust' },
     { title: 'Date', dataIndex: 'date', key: 'date', width: 110 },
     { title: 'Reason', dataIndex: 'reason', key: 'reason', ellipsis: true },
-    { title: 'Total', dataIndex: 'total', key: 'total', width: 100, render: v => `$${(Number(v) || 0).toFixed(2)}` },
+    { title: 'Total', dataIndex: 'total', key: 'total', width: 100, render: v => `${cSym} ${(Number(v) || 0).toFixed(2)}` },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 90, render: s => <Tag color={statusColor[s] || 'default'}>{s}</Tag> },
     { title: 'Actions', key: 'actions', width: 180, render: (_, r) => (
       <Space>

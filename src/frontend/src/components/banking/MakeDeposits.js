@@ -1,56 +1,67 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, DatePicker, Form, Input, InputNumber, Select, Button, Table, Space, message, Modal } from 'antd';
-import { PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import { Card, DatePicker, Form, Input, InputNumber, Select, Button, Table, Space, message, Modal, Row, Col, Statistic, Typography, Tag, Tooltip, Alert } from 'antd';
+import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutlined, HistoryOutlined, DollarOutlined, SearchOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
+const { Title, Text } = Typography;
+const fmt = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Rebuilt Make Deposits page from scratch
 const MakeDeposits = () => {
+  const { symbol: cSym } = useCurrency();
   const [form] = Form.useForm();
-  const [addForm] = Form.useForm();
   const [accounts, setAccounts] = useState([]);
-  const [recent, setRecent] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [depositHistory, setDepositHistory] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [selectedAccountId, setSelectedAccountId] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [formItems, setFormItems] = useState([]);
 
-  useEffect(() => {
-    loadAccounts();
-    loadRecent();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
-  const loadAccounts = async () => {
+  const loadData = async () => {
     try {
-      const data = await window.electronAPI.getChartOfAccounts();
-      const list = Array.isArray(data) ? data : (data && data.data) ? data.data : [];
-      setAccounts(list);
-    } catch (e) {
-      message.error('Failed to load accounts');
-      setAccounts([]);
-    }
+      const [accRes, txnRes] = await Promise.all([
+        window.electronAPI.getChartOfAccounts().catch(() => []),
+        window.electronAPI.getTransactions().catch(() => []),
+      ]);
+      const accs = Array.isArray(accRes) ? accRes : [];
+      setAccounts(accs);
+      const banks = accs.filter(a => {
+        const t = (a.accountType || a.type || '').toLowerCase();
+        const n = (a.accountName || a.name || '').toLowerCase();
+        return t.includes('bank') || t.includes('cash') || n.includes('bank') || n.includes('checking') || n.includes('savings');
+      });
+      setBankAccounts(banks.length > 0 ? banks : accs);
+
+      const txns = Array.isArray(txnRes) ? txnRes : [];
+      const deps = txns.filter(t => (t.type || '').toLowerCase() === 'deposit')
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      setDepositHistory(deps);
+    } catch { setAccounts([]); setDepositHistory([]); }
   };
 
-  const loadRecent = async () => {
-    try {
-      const txs = await window.electronAPI.getTransactions();
-      const deposits = (txs || []).filter(t => (t.type || '').toLowerCase() === 'deposit');
-      setRecent(deposits);
-    } catch (e) {
-      setRecent([]);
-    }
+  const onFormValuesChange = (_, allValues) => {
+    const itms = allValues.items || [];
+    setFormItems(itms);
+    setTotal(itms.reduce((s, it) => s + (Number(it?.amount) || 0), 0));
   };
-
-  const items = Form.useWatch('items', form) || [];
-  const total = useMemo(() => items.reduce((s, it) => s + (Number(it?.amount) || 0), 0), [items]);
 
   const onFinish = async (values) => {
+    if (!values.items || values.items.length === 0) {
+      message.warning('Add at least one deposit item');
+      return;
+    }
     try {
       setLoading(true);
       const payload = {
         accountId: Number(values.accountId),
         date: values.date.format('YYYY-MM-DD'),
-        items: (values.items || []).map(it => ({
-          type: it.type,
+        items: values.items.map(it => ({
+          type: it.type || 'Cash',
           reference: it.reference || '',
           description: it.description || '',
           amount: Number(it.amount) || 0,
@@ -59,9 +70,10 @@ const MakeDeposits = () => {
       };
       const res = await window.electronAPI.createDeposit(payload);
       if (res && res.success) {
-        message.success('Deposit recorded successfully');
+        message.success(`Deposit of ${cSym} ${fmt(total)} recorded successfully`);
         form.resetFields();
-        loadRecent();
+        form.setFieldsValue({ date: moment(), items: [{ type: 'Cash' }] });
+        loadData();
       } else {
         throw new Error(res?.error || 'Failed to record deposit');
       }
@@ -72,155 +84,198 @@ const MakeDeposits = () => {
     }
   };
 
-  const columns = [
-    { title: 'Date', dataIndex: 'date', key: 'date' },
-    { title: 'Account', dataIndex: 'accountId', key: 'accountId' },
-    { title: 'Description', dataIndex: 'description', key: 'description' },
-    { title: 'Reference', dataIndex: 'reference', key: 'reference' },
-    { title: 'Amount', dataIndex: 'debit', key: 'debit', render: (v, r) => `$${Number(r.debit || r.amount || 0).toFixed(2)}` },
-  ];
-
-  const exportCSV = async () => {
+  const exportCSV = () => {
     try {
-      const txs = await window.electronAPI.getTransactions();
-      const deposits = (txs || []).filter(t => (t.type || '').toLowerCase() === 'deposit');
-      const headers = ['id','date','accountId','reference','description','amount'];
-      const rows = deposits.map(d => headers.map(h => `"${(d[h] ?? '').toString().replace(/"/g,'""')}"`).join(','));
+      const headers = ['Date', 'Reference', 'Description', 'Amount'];
+      const rows = depositHistory.map(d => [
+        d.date || '', d.reference || '', (d.description || '').replace(/"/g, '""'), Number(d.debit || d.amount || 0).toFixed(2)
+      ].map(v => `"${v}"`).join(','));
       const csv = [headers.join(','), ...rows].join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `deposits_${new Date().toISOString().slice(0,10)}.csv`;
+      const a = document.createElement('a'); a.href = url;
+      a.download = `deposits_${moment().format('YYYY-MM-DD')}.csv`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    } catch (e) {
-      message.error('Failed to export CSV');
-    }
+      message.success('Exported CSV');
+    } catch { message.error('Export failed'); }
   };
 
-  const handleAccountChange = (val) => {
-    try {
-      form.setFieldsValue({ accountId: val });
-      form.validateFields(['accountId']).catch(() => {});
-    } catch (e) {}
+  const filteredHistory = useMemo(() => {
+    if (!historySearch) return depositHistory;
+    const s = historySearch.toLowerCase();
+    return depositHistory.filter(d =>
+      (d.reference || '').toLowerCase().includes(s) ||
+      (d.description || '').toLowerCase().includes(s) ||
+      (d.date || '').includes(s)
+    );
+  }, [depositHistory, historySearch]);
+
+  const totalDeposits = depositHistory.reduce((s, d) => s + Number(d.debit || d.amount || 0), 0);
+  const thisMonthDeps = depositHistory.filter(d => d.date && moment(d.date).isSame(moment(), 'month'));
+  const thisMonthTotal = thisMonthDeps.reduce((s, d) => s + Number(d.debit || d.amount || 0), 0);
+
+  const selectedAccount = useMemo(() => {
+    return accounts.find(a => String(a.id) === String(selectedAccountId));
+  }, [accounts, selectedAccountId]);
+
+  const getAccName = (id) => {
+    if (!id) return '-';
+    const acc = accounts.find(a => String(a.id) === String(id));
+    return acc?.accountName || acc?.name || `#${id}`;
   };
+
+  const historyColumns = [
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('DD MMM YY') : '-', sorter: (a, b) => new Date(a.date || 0) - new Date(b.date || 0) },
+    { title: 'Bank Account', dataIndex: 'accountId', key: 'accountId', width: 150, render: v => getAccName(v) },
+    { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true },
+    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    { title: 'Amount', dataIndex: 'debit', key: 'debit', width: 120, align: 'right', render: (v, r) => <Text strong style={{ color: '#52c41a' }}>{cSym} {fmt(v || r.amount || 0)}</Text> },
+    { title: 'Status', key: 'status', width: 80, render: (_, r) => {
+      const s = (r.status || 'active').toLowerCase();
+      return s === 'voided' ? <Tag color="red">Void</Tag> : <Tag color="green">Active</Tag>;
+    }},
+  ];
 
   return (
     <div style={{ padding: 24 }}>
-      <h2>Make Deposits</h2>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <Title level={3} style={{ margin: 0 }}><BankOutlined style={{ marginRight: 8 }} />Make Deposits</Title>
+          <Text type="secondary">Record bank deposits &middot; {depositHistory.length} deposits on file</Text>
+        </div>
+      </div>
 
-      <Card style={{ marginBottom: 24 }}>
-        <Form form={form} layout="vertical" onFinish={onFinish} initialValues={{ date: moment(), items: [{ type: 'Cash' }] }}>
-          <Form.Item name="accountId" label="Deposit To" rules={[{ required: true, message: 'Please select account' }]} validateTrigger="onChange" hasFeedback> 
-            <Select 
-              placeholder={accounts.length ? 'Select account' : 'No accounts available'}
-              showSearch
-              optionFilterProp="children"
-              onChange={handleAccountChange}
-              getPopupContainer={(trigger) => trigger.parentNode}
-              dropdownRender={(menu) => (
-                <div>
-                  {menu}
-                  <div style={{ display: 'flex', gap: 8, padding: 8 }}>
-                    <Button type="link" icon={<PlusOutlined />} onClick={() => { addForm.setFieldsValue({ type: 'Bank' }); setShowAddAccount(true); }}>Add Account</Button>
-                  </div>
-                </div>
-              )}
-            >
-              {accounts.map(a => (
-                <Option key={a.id} value={String(a.id)}>{a.accountName}{a.accountNumber ? ` (${a.accountNumber})` : ''}</Option>
-              ))}
-            </Select>
-          </Form.Item>
+      {/* Stats */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ borderTop: '3px solid #52c41a' }}>
+            <Statistic title="Total Deposits" value={depositHistory.length} valueStyle={{ fontSize: 18, color: '#52c41a' }} />
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ borderTop: '3px solid #1890ff' }}>
+            <Statistic title="Total Deposited" value={totalDeposits} precision={2} prefix={cSym} valueStyle={{ fontSize: 18, color: '#1890ff' }} />
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ borderTop: '3px solid #722ed1' }}>
+            <Statistic title="This Month" value={thisMonthDeps.length} valueStyle={{ fontSize: 18, color: '#722ed1' }} />
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ borderTop: '3px solid #fa8c16' }}>
+            <Statistic title="Month Total" value={thisMonthTotal} precision={2} prefix={cSym} valueStyle={{ fontSize: 18, color: '#fa8c16' }} />
+          </Card>
+        </Col>
+      </Row>
 
-          <Space size="middle" style={{ width: '100%' }}>
-            <Form.Item name="date" label="Date" rules={[{ required: true }]} style={{ flex: 1 }}>
-              <DatePicker style={{ width: '100%' }} />
-            </Form.Item>
-          </Space>
+      {/* Deposit Form */}
+      <Card title={<><DollarOutlined style={{ marginRight: 4 }} /> New Deposit</>} size="small" style={{ marginBottom: 16 }}>
+        <Form form={form} layout="vertical" onFinish={onFinish} onValuesChange={onFormValuesChange} initialValues={{ date: moment(), items: [{ type: 'Cash' }] }}>
+          <Row gutter={16}>
+            <Col xs={24} sm={12}>
+              <Form.Item name="accountId" label="Deposit To (Bank Account)" rules={[{ required: true, message: 'Select bank account' }]}>
+                <Select showSearch optionFilterProp="children" placeholder="Select bank account"
+                  onChange={(val) => setSelectedAccountId(val)}>
+                  {bankAccounts.map(a => (
+                    <Option key={String(a.id)} value={String(a.id)}>{a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={6}>
+              <Form.Item name="date" label="Date" rules={[{ required: true }]}>
+                <DatePicker style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={6}>
+              <Form.Item label="Deposit Total">
+                <InputNumber value={total} readOnly style={{ width: '100%', fontWeight: 700, background: '#f6ffed' }} formatter={v => `${cSym} ${fmt(v)}`} />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.List name="items">
             {(fields, { add, remove }) => (
-              <Card size="small" title={<span>Deposit Items</span>} extra={<Button onClick={() => add({ type: 'Cash' })} icon={<PlusOutlined />}>Add Item</Button>} style={{ marginBottom: 16 }}>
+              <Card size="small" title="Deposit Items" style={{ marginBottom: 16 }}
+                extra={<Button type="dashed" onClick={() => add({ type: 'Cash' })} icon={<PlusOutlined />} size="small">Add Item</Button>}
+              >
+                {fields.length === 0 && <Alert message="Add at least one deposit item" type="info" showIcon style={{ marginBottom: 8 }} />}
                 {fields.map((field) => (
-                  <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
-                    <Form.Item {...field} name={[field.name, 'type']} fieldKey={[field.fieldKey, 'type']} rules={[{ required: true }]}>
-                      <Select style={{ width: 140 }}>
-                        <Option value="Cash">Cash</Option>
-                        <Option value="Check">Check</Option>
-                        <Option value="Card">Card</Option>
-                        <Option value="Other">Other</Option>
-                      </Select>
-                    </Form.Item>
-                    <Form.Item {...field} name={[field.name, 'reference']} fieldKey={[field.fieldKey, 'reference']}>
-                      <Input placeholder="Reference" style={{ width: 140 }} />
-                    </Form.Item>
-                    <Form.Item {...field} name={[field.name, 'description']} fieldKey={[field.fieldKey, 'description']} style={{ minWidth: 260, flex: 1 }}>
-                      <Input placeholder="Description" />
-                    </Form.Item>
-                    <Form.Item {...field} name={[field.name, 'amount']} fieldKey={[field.fieldKey, 'amount']} rules={[{ required: true, message: 'Amount required' }]}> 
-                      <InputNumber style={{ width: 160 }} prefix="$" min={0} step={0.01} />
-                    </Form.Item>
-                    <Button danger onClick={() => remove(field.name)}>Remove</Button>
-                  </Space>
+                  <Row key={field.key} gutter={8} style={{ marginBottom: 8 }} align="middle">
+                    <Col xs={24} sm={4}>
+                      <Form.Item {...field} name={[field.name, 'type']} noStyle rules={[{ required: true }]}>
+                        <Select style={{ width: '100%' }} placeholder="Type">
+                          <Option value="Cash">Cash</Option>
+                          <Option value="Check">Check</Option>
+                          <Option value="Card">Card</Option>
+                          <Option value="Wire">Wire</Option>
+                          <Option value="EFT">EFT</Option>
+                          <Option value="Other">Other</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={4}>
+                      <Form.Item {...field} name={[field.name, 'reference']} noStyle>
+                        <Input placeholder="Reference #" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={10}>
+                      <Form.Item {...field} name={[field.name, 'description']} noStyle>
+                        <Input placeholder="Description" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={4}>
+                      <Form.Item {...field} name={[field.name, 'amount']} noStyle rules={[{ required: true, message: 'Required' }]}>
+                        <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="Amount" formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={2} style={{ textAlign: 'center' }}>
+                      <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                    </Col>
+                  </Row>
                 ))}
-                <div style={{ textAlign: 'right', fontWeight: 600 }}>Total: ${total.toFixed(2)}</div>
+                {fields.length > 0 && (
+                  <div style={{ textAlign: 'right', paddingTop: 8, borderTop: '1px solid #f0f0f0', fontWeight: 700, fontSize: 16 }}>
+                    Total: <span style={{ color: '#52c41a' }}>${fmt(total)}</span>
+                  </div>
+                )}
               </Card>
             )}
           </Form.List>
 
           <Space>
-            <Button onClick={() => form.resetFields()}>Reset</Button>
-            <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={loading}>Save Deposit</Button>
+            <Button onClick={() => { form.resetFields(); form.setFieldsValue({ date: moment(), items: [{ type: 'Cash' }] }); }}>Reset</Button>
+            <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={loading} disabled={formItems.length === 0}>Record Deposit</Button>
           </Space>
         </Form>
       </Card>
 
-      <Card title="Recent Deposits" extra={<Button onClick={exportCSV}>Export CSV</Button>}>
-        <Table columns={columns} dataSource={recent} rowKey="id" pagination={{ pageSize: 8 }} />
+      {/* Deposit History */}
+      <Card title={<><HistoryOutlined style={{ marginRight: 4 }} /> Deposit History</>} size="small"
+        extra={<Space>
+          <Input placeholder="Search..." prefix={<SearchOutlined />} value={historySearch} onChange={e => setHistorySearch(e.target.value)} allowClear style={{ width: 180 }} />
+          <Button icon={<DownloadOutlined />} onClick={exportCSV} size="small">CSV</Button>
+        </Space>}
+      >
+        <Table
+          columns={historyColumns}
+          dataSource={filteredHistory}
+          rowKey={(r, i) => r.id || i}
+          size="small"
+          pagination={{ pageSize: 10, showSizeChanger: true, showTotal: t => `${t} deposits` }}
+          scroll={{ x: 600 }}
+          locale={{ emptyText: 'No deposits recorded yet' }}
+          summary={() => filteredHistory.length > 0 ? (
+            <Table.Summary.Row>
+              <Table.Summary.Cell index={0} colSpan={4}><Text strong>Total</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: '#52c41a' }}>${fmt(filteredHistory.reduce((s, d) => s + Number(d.debit || d.amount || 0), 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={5} />
+            </Table.Summary.Row>
+          ) : null}
+        />
       </Card>
-
-      <Modal title="Add Account" open={showAddAccount} onCancel={() => setShowAddAccount(false)} onOk={() => addForm.submit()} okText="Create">
-        <Form form={addForm} layout="vertical" onFinish={async (values) => {
-          try {
-            const name = (values.name || values.accountName || '').toString().trim();
-            const type = (values.type || values.accountType || 'Bank').toString().trim();
-            const number = values.number ? String(values.number).trim() : null;
-            const res = await window.electronAPI.insertChartAccount(name, type, number, 'current_user');
-            if (res && res.success) {
-              message.success('Account created');
-              setShowAddAccount(false);
-              addForm.resetFields();
-              await loadAccounts();
-              if (res.id) {
-                form.setFieldsValue({ accountId: String(res.id) });
-                form.validateFields(['accountId']).catch(() => {});
-              }
-            } else {
-              throw new Error(res?.error || 'Failed to create account');
-            }
-          } catch (e) {
-            message.error(e.message || 'Failed to create account');
-          }
-        }}>
-          <Form.Item name="number" label="Account Number">
-            <Input placeholder="Optional" />
-          </Form.Item>
-          <Form.Item name="name" label="Account Name" rules={[{ required: true, message: 'Please enter account name' }]}> 
-            <Input />
-          </Form.Item>
-          <Form.Item name="type" label="Account Type" rules={[{ required: true, message: 'Please select account type' }]} initialValue="Bank">
-            <Select placeholder="Select account type">
-              <Option value="Asset">Asset</Option>
-              <Option value="Liability">Liability</Option>
-              <Option value="Equity">Equity</Option>
-              <Option value="Income">Income</Option>
-              <Option value="Expense">Expense</Option>
-              <Option value="Bank">Bank</Option>
-              <Option value="Cash">Cash</Option>
-            </Select>
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   );
 };

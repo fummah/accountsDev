@@ -21,6 +21,7 @@ const MenuItemGroup = Menu.ItemGroup;
 const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
   const {navStyle, themeType} = useSelector(({settings}) => settings);
   const pathname = useSelector(({common}) => common.pathname);
+  const width = useSelector(({common}) => common.width);
 
   const getNoHeaderClass = (navStyle) => {
     if (navStyle === NAV_STYLE_NO_HEADER_MINI_SIDEBAR || navStyle === NAV_STYLE_NO_HEADER_EXPANDED_SIDEBAR) {
@@ -39,10 +40,27 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
   const selectedKeys = pathname.substr(1);
   const defaultOpenKeys = selectedKeys.split('/')[1];
 
+  // Layout-only CSS for collapsed mode. Text hiding is done by React conditional rendering.
+  const collapsedLayoutCSS = `
+    .sidebar-collapsed-mode .ant-menu-item-group-title { display: none !important; }
+    .sidebar-collapsed-mode .ant-menu-submenu-arrow { display: none !important; }
+    .sidebar-collapsed-mode .ant-menu-item,
+    .sidebar-collapsed-mode .ant-menu-submenu-title {
+      padding: 0 28px !important;
+      text-align: center !important;
+    }
+    .sidebar-collapsed-mode i[class*="icon"] {
+      margin-right: 0 !important;
+      font-size: 20px !important;
+    }
+  `;
+
   return (
     <>
+      {sidebarCollapsed && <style>{collapsedLayoutCSS}</style>}
       <SidebarLogo sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}/>
-      <div className="gx-sidebar-content">
+      <div className={`gx-sidebar-content ${sidebarCollapsed ? 'sidebar-collapsed-mode' : ''}`}>
+        {!sidebarCollapsed && (
         <div className={`gx-sidebar-notifications ${getNoHeaderClass(navStyle)}`}>
         <div style={{ padding: '1px' }}>
         <Popover
@@ -66,12 +84,14 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
           </Popover>
         </div>
         </div>
+        )}
         <CustomScrollbars className="gx-layout-sider-scrollbar">
           <Menu
-            defaultOpenKeys={[defaultOpenKeys]}
+            defaultOpenKeys={sidebarCollapsed ? [] : [defaultOpenKeys]}
             selectedKeys={[selectedKeys]}
             theme={themeType === THEME_TYPE_LITE ? 'lite' : 'dark'}
-            mode="vertical">
+            mode="inline"
+            inlineCollapsed={sidebarCollapsed}>
 
             <MenuItemGroup key="main" className="gx-menu-group" title={<IntlMessages id="accounts.menu"/>}>
               <SubMenu key="dashboard" popupClassName={getNavStyleSubMenuClass(navStyle)}
@@ -79,11 +99,11 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                      
 <span>
 <i className="icon icon-dasbhoard" />
-<Link to="/main/dashboard/home-dash">
+{!sidebarCollapsed && <Link to="/main/dashboard/home-dash">
   <span>
     <IntlMessages id="sidebar.dashboard" />
   </span>
-</Link>
+</Link>}
 </span>
 
                         }>
@@ -111,11 +131,11 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
   title={
     <span>
       <i className="icon icon-crm" />
-      <Link to="/inner/sales">
+      {!sidebarCollapsed && <Link to="/inner/sales">
         <span>
           <IntlMessages id="accounts.sales" />
         </span>
-      </Link>
+      </Link>}
     </span>
   }
 >
@@ -163,34 +183,36 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                        title={
 <span>
 <i className="icon icon-contacts" />
-<Link to="/inner/expenses">
+{!sidebarCollapsed && <Link to="/main/expenses/tracking">
   <span>
     <IntlMessages id="accounts.expenses" />
   </span>
-</Link>
+</Link>}
 </span>
                         }>
-                         <Menu.Item key="inner/expenses">
-                         <Link to={{ pathname: "/inner/expenses", state: { tabKey: "1" } }}>
-                <i className="icon icon-contacts"/><span><IntlMessages
-                  id="accounts.expenses"/></span></Link>
+                         <Menu.Item key="main/expenses/tracking">
+                         <Link to="/main/expenses/tracking">
+                <i className="icon icon-contacts"/><span>Expenses & Bills</span></Link>
               </Menu.Item>
-              <Menu.Item key="lists/policyholders0">
-              <Link to={{ pathname: "/inner/expenses", state: { tabKey: "2" } }}>
-                <i className="icon icon-user"/><span><IntlMessages
-                  id="accounts.suppliers"/></span></Link>
-              </Menu.Item>             
+              <Menu.Item key="main/expenses/suppliers">
+              <Link to="/main/expenses/suppliers">
+                <i className="icon icon-user"/><span>Suppliers / Vendors</span></Link>
+              </Menu.Item>
+              <Menu.Item key="main/expenses/categories">
+              <Link to="/main/expenses/categories">
+                <i className="icon icon-tag"/><span>Expense Categories</span></Link>
+              </Menu.Item>
 </SubMenu>
 
 <SubMenu key="customersandleads" popupClassName={getNavStyleSubMenuClass(navStyle)}
                        title={                     
   <span>
   <i className="icon icon-all-contacts" />
-  <Link to="/inner/customersleads">
+  {!sidebarCollapsed && <Link to="/inner/customersleads">
     <span>
       <IntlMessages id="accounts.customersandleads" />
     </span>
-  </Link>
+  </Link>}
 </span>
                         }>
               <Menu.Item key="inner/customersleads">
@@ -209,17 +231,17 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
 
 <span>
 <i className="icon icon-card" />
-<Link to="/inner/transactions">
+{!sidebarCollapsed && <Link to="/inner/transactions">
   <span>
     <IntlMessages id="accounts.transactions" />
   </span>
-</Link>
+</Link>}
 </span>
                         }>
             
            
-              <Menu.Item key="lists/receipts3">
-              <Link to={{ pathname: "/inner/transactions", state: { tabKey: "1" } }}>
+              <Menu.Item key="main/banking/reconcile">
+              <Link to="/main/banking/reconcile">
                 <i className="icon icon icon-check-square-o -flex-column-reverse"/><span><IntlMessages
                   id="accounts.reconcile"/></span></Link>
               </Menu.Item>
@@ -229,25 +251,38 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
             
               <Menu.Item key="inner/vat">
                 <Link to="/inner/vat"><i
-                  className="icon icon-inbuilt-apps"/><span><IntlMessages
-                  id="accounts.vat"/></span></Link>
+                  className="icon icon-inbuilt-apps"/>{!sidebarCollapsed && <span><IntlMessages
+                  id="accounts.vat"/></span>}</Link>
               </Menu.Item>
              
-              <Menu.Item key="inner/employees">
-                <Link to="/main/employees/center">
-                  <i className="icon icon-profile2"/>
-                  <span><IntlMessages id="accounts.employees"/></span>
-                </Link>
-              </Menu.Item>
+              <SubMenu key="employees" popupClassName={getNavStyleSubMenuClass(navStyle)}
+                       title={
+<span>
+<i className="icon icon-profile2"/>
+{!sidebarCollapsed && <Link to="/main/employees/center">
+  <span><IntlMessages id="accounts.employees"/></span>
+</Link>}
+</span>
+                       }>
+                <Menu.Item key="main/employees/center">
+                  <Link to="/main/employees/center"><i className="icon icon-profile2"/><span>Employee Center</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/employees/departments">
+                  <Link to="/main/employees/departments"><i className="icon icon-apps"/><span>Departments</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/employees/roles">
+                  <Link to="/main/employees/roles"><i className="icon icon-auth-screen"/><span>Roles</span></Link>
+                </Menu.Item>
+              </SubMenu>
               <SubMenu key="reports" popupClassName={getNavStyleSubMenuClass(navStyle)}
                        title={
 <span>
 <i className="icon icon-chart" />
-<Link to="/inner/reports">
+{!sidebarCollapsed && <Link to="/inner/reports">
   <span>
     <IntlMessages id="accounts.reports" />
   </span>
-</Link>
+</Link>}
 </span>
                         }>
                          <Menu.Item key="inner/reports">
@@ -277,10 +312,10 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
               <SubMenu key="inventory" popupClassName={getNavStyleSubMenuClass(navStyle)}
                        title={
 <span>
-<i className="icon icon-list"/>
-<Link to="/main/inventory/stock">
+<i className="icon icon-shopping-cart"/>
+{!sidebarCollapsed && <Link to="/main/inventory/stock">
   <span>Inventory</span>
-</Link>
+</Link>}
 </span>
                        }>
                 <Menu.Item key="main/inventory/items">
@@ -310,9 +345,9 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                        title={
 <span>
 <i className="icon icon-widgets"/>
-<Link to="/main/projects/center">
+{!sidebarCollapsed && <Link to="/main/projects/center">
   <span>Projects</span>
-</Link>
+</Link>}
 </span>
                        }>
                 <Menu.Item key="main/projects/center">
@@ -329,10 +364,10 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
               <SubMenu key="pos" popupClassName={getNavStyleSubMenuClass(navStyle)}
                        title={
 <span>
-<i className="icon icon-cart"/>
-<Link to="/main/pos/session">
+<i className="icon icon-orders"/>
+{!sidebarCollapsed && <Link to="/main/pos/session">
   <span>Point of Sale</span>
-</Link>
+</Link>}
 </span>
                        }>
                 <Menu.Item key="main/pos/session">
@@ -350,9 +385,9 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                        title={
 <span>
 <i className="icon icon-all-contacts"/>
-<Link to="/main/customers/leads">
+{!sidebarCollapsed && <Link to="/main/customers/leads">
   <span>CRM</span>
-</Link>
+</Link>}
 </span>
                        }>
                 <Menu.Item key="main/customers/leads">
@@ -367,9 +402,9 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                        title={
 <span>
 <i className="icon icon-card"/>
-<Link to="/main/bank-statements/list">
+{!sidebarCollapsed && <Link to="/main/bank-statements/list">
   <span>Bank Statements</span>
-</Link>
+</Link>}
 </span>
                        }>
                 <Menu.Item key="main/bank-statements/upload">
@@ -381,11 +416,11 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
               </SubMenu>
 
               <Menu.Item key="main/analytics">
-                <Link to="/main/analytics"><i className="icon icon-chart-area-new"/><span>Analytics</span></Link>
+                <Link to="/main/analytics"><i className="icon icon-chart-area-new"/>{!sidebarCollapsed && <span>Analytics</span>}</Link>
               </Menu.Item>
               <Menu.Item key="inner/profile">
                 <Link to="/inner/profile"><i
-                  className="icon icon-user"/><span>Profile</span></Link>
+                  className="icon icon-user"/>{!sidebarCollapsed && <span>Profile</span>}</Link>
               </Menu.Item>
             </MenuItemGroup>
           </Menu>

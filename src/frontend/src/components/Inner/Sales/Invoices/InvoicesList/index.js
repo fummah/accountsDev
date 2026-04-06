@@ -157,6 +157,7 @@ const InvoicesList = ({ dataList, loading = false, total = 0, page = 1, pageSize
             typeof onStatusFilterChange === 'function' && onStatusFilterChange(value)
           }
         >
+          <Select.Option value="Open">Open</Select.Option>
           <Select.Option value="Pending">Pending</Select.Option>
           <Select.Option value="Paid">Paid</Select.Option>
           <Select.Option value="Partially Paid">Partially Paid</Select.Option>

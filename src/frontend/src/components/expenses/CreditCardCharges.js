@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Modal, Form, DatePicker, Input, InputNumber, message } from 'antd';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const CreditCardCharges = () => {
+  const { symbol: cSym } = useCurrency();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -12,7 +14,7 @@ const CreditCardCharges = () => {
     { title: 'Date', dataIndex: 'date', key: 'date' },
     { title: 'Card', dataIndex: 'card', key: 'card' },
     { title: 'Description', dataIndex: 'description', key: 'description' },
-    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: a => `$${Number(a||0).toFixed(2)}` },
+    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: a => `${cSym} ${Number(a||0).toFixed(2)}` },
   ];
 
   const loadCharges = async () => {
@@ -86,7 +88,7 @@ const CreditCardCharges = () => {
 
       <Modal
         title="Add Credit Card Charge"
-        open={showModal}
+        visible={showModal}
         onCancel={() => { setShowModal(false); form.resetFields(); }}
         onOk={() => form.submit()}
         okText="Add"

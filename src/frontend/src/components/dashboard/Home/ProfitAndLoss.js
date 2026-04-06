@@ -4,6 +4,7 @@ import Widget from "components/Widget/index";
 import {Button, Col, Row,Select,Typography, Avatar} from "antd";
 import LineIndicator from "./LineIndicator";
 import { FileTextOutlined, WalletOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../../utils/currency';
 
 const Option = Select.Option;
 const { Text } = Typography;
@@ -16,8 +17,8 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
 
 
 const ProfitAndLoss = ({ CurrentBalance, Invoiced, Expensed }) => {
+  const { symbol: cSym } = useCurrency();
 
- 
   // Safe percentage calculations. If totals are zero, show 0%.
   const total = (Number(Invoiced) || 0) + (Number(Expensed) || 0);
   const perc1 = total > 0 ? Math.round((Number(Invoiced) || 0) / total * 100) : 0; // Income %
@@ -75,7 +76,7 @@ const ProfitAndLoss = ({ CurrentBalance, Invoiced, Expensed }) => {
         <Col lg={12} md={12} sm={12} xs={24}>
 
           <div className="ant-row-flex">
-            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">${formattedNumber(CurrentBalance)}</h2>
+            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">{cSym}{formattedNumber(CurrentBalance)}</h2>
             <h4 className="gx-pt-2 gx-chart-up">0% <i className="icon icon-menu-up gx-fs-sm"/></h4>
           </div>
           <p className="gx-text-grey">Net profit for December</p>
@@ -97,10 +98,10 @@ const ProfitAndLoss = ({ CurrentBalance, Invoiced, Expensed }) => {
             <h5 className="gx-mb-3">Distribution</h5>
             <ul className="gx-line-indicator gx-fs-sm gx-pb-1 gx-pb-sm-0">
               <li>
-                <LineIndicator width={`${perc1}%`} title="Income" title2={`$${formattedNumber(Invoiced)}`} color="primary" value={`${perc1}%`}/>
+                <LineIndicator width={`${perc1}%`} title="Income" title2={`${cSym}${formattedNumber(Invoiced)}`} color="primary" value={`${perc1}%`}/>
               </li>
               <li>
-                <LineIndicator width={`${perc2}%`} title="Expenses" title2={`$${formattedNumber(Expensed)}`} color="pink" value={`${perc2}%`}/>
+                <LineIndicator width={`${perc2}%`} title="Expenses" title2={`${cSym}${formattedNumber(Expensed)}`} color="pink" value={`${perc2}%`}/>
               </li>
              
             </ul>

@@ -75,29 +75,6 @@ const columns = [
 ];
 
   const [activeKey, setActiveKey] = useState('all');
-  const items = [
-    {
-      key: 'all',
-      label: 'All Accounts',
-      children: (
-        <Table columns={columns} dataSource={data} pagination={{ pageSize: 5 }} loading={loading} />
-      ),
-    },
-    {
-      key: 'cash',
-      label: 'Cash',
-      children: (
-        <Table columns={columns} dataSource={data.filter((item) => item.account === "Cash")} pagination={{ pageSize: 5 }} loading={loading} />
-      ),
-    },
-    {
-      key: 'ar',
-      label: 'Accounts Receivable',
-      children: (
-        <Table columns={columns} dataSource={data.filter((item) => item.account === "Accounts Receivable")} pagination={{ pageSize: 5 }} loading={loading} />
-      ),
-    },
-  ];
 
   return (
     <Card
@@ -110,7 +87,17 @@ const columns = [
       }
     >
       {error && <div style={{ color: 'red', margin: 8 }}>{error}</div>}
-      <Tabs activeKey={activeKey} onChange={setActiveKey} items={items} />
+      <Tabs activeKey={activeKey} onChange={setActiveKey}>
+        <TabPane tab="All Accounts" key="all">
+          <Table columns={columns} dataSource={data} pagination={{ pageSize: 5 }} loading={loading} />
+        </TabPane>
+        <TabPane tab="Cash" key="cash">
+          <Table columns={columns} dataSource={data.filter((item) => item.account === "Cash")} pagination={{ pageSize: 5 }} loading={loading} />
+        </TabPane>
+        <TabPane tab="Accounts Receivable" key="ar">
+          <Table columns={columns} dataSource={data.filter((item) => item.account === "Accounts Receivable")} pagination={{ pageSize: 5 }} loading={loading} />
+        </TabPane>
+      </Tabs>
     </Card>
   );
 };

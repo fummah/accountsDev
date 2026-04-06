@@ -2,8 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Table, Button, Input, Card, Space, Tag, message, Popconfirm } from 'antd';
 import { PlusOutlined, ReloadOutlined, SearchOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
+import { useCurrency } from '../../utils/currency';
 
 const CustomerList = () => {
+  const { symbol: cSym } = useCurrency();
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -43,7 +45,15 @@ const CustomerList = () => {
 
   const handleDelete = async (id) => {
     try {
-      await window.electronAPI.deleteRecord?.(id, 'customers');
+      const res = await window.electronAPI.deleteRecord?.(id, 'customers');
+      if (res && res.error) {
+        message.error(res.error, 6);
+        return;
+      }
+      if (res && res.success === false) {
+        message.error(res.error || 'Delete failed — customer may have linked transactions', 6);
+        return;
+      }
       message.success('Customer deleted');
       load(pagination.current, pagination.pageSize, search);
     } catch {
@@ -70,7 +80,7 @@ const CustomerList = () => {
       key: 'balance',
       width: 110,
       sorter: (a, b) => (Number(a.opening_balance) || 0) - (Number(b.opening_balance) || 0),
-      render: v => <span style={{ fontWeight: 500 }}>R {Number(v || 0).toFixed(2)}</span>,
+      render: v => <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span>,
     },
     {
       title: 'Status',

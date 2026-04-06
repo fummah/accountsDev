@@ -458,6 +458,7 @@ const registerAllHandlers = async () => {
     { name: 'Currency', register: require('./handlers/currencyHandlers') },
     { name: 'CreditNotes', register: require('./handlers/creditNoteHandlers') },
     { name: 'Webhooks', register: require('./handlers/webhookHandlers') },
+    { name: 'ExpenseCategories', register: require('./handlers/expenseCategoryHandlers') },
     { name: 'IPC', register: registerIpcHandlers }              // Keep IPC handlers last
   ];
 

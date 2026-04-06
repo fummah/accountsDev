@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Card, Table, Tag, Button, Row, Col, Statistic, Space, message } from 'antd';
 import { ReloadOutlined, ArrowLeftOutlined, DollarOutlined, ShoppingCartOutlined } from '@ant-design/icons';
 import { useHistory } from 'react-router-dom';
+import { useCurrency } from '../../../utils/currency';
 
 const Sales = () => {
+  const { symbol: cSym } = useCurrency();
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const history = useHistory();
@@ -34,9 +36,9 @@ const Sales = () => {
     { title: 'Customer', dataIndex: 'customerId', key: 'customerId', width: 100,
       render: v => v || <span style={{ color: '#8c8c8c' }}>Walk-in</span> },
     { title: 'Subtotal', dataIndex: 'subtotal', key: 'subtotal', width: 110, align: 'right',
-      render: v => `R ${Number(v || 0).toFixed(2)}` },
+      render: v => `${cSym} ${Number(v || 0).toFixed(2)}` },
     { title: 'Total', dataIndex: 'total', key: 'total', width: 110, align: 'right',
-      render: v => <strong style={{ color: '#1890ff' }}>R {Number(v || 0).toFixed(2)}</strong>,
+      render: v => <strong style={{ color: '#1890ff' }}>{cSym} {Number(v || 0).toFixed(2)}</strong>,
       sorter: (a, b) => Number(a.total || 0) - Number(b.total || 0) },
     { title: 'Payment', dataIndex: 'paymentType', key: 'paymentType', width: 100, align: 'center',
       filters: [
@@ -66,7 +68,7 @@ const Sales = () => {
             <Card size="small"><Statistic title="Total Sales" value={sales.length} /></Card>
           </Col>
           <Col xs={12} sm={6}>
-            <Card size="small"><Statistic title="Revenue" value={totalRevenue.toFixed(2)} prefix="R" valueStyle={{ color: '#1890ff' }} /></Card>
+            <Card size="small"><Statistic title="Revenue" value={totalRevenue.toFixed(2)} prefix={cSym} valueStyle={{ color: '#1890ff' }} /></Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small"><Statistic title="Cash Sales" value={cashSales.length} valueStyle={{ color: '#52c41a' }} /></Card>

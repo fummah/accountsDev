@@ -28,6 +28,7 @@ import {useRouteMatch} from "react-router-dom";
 import {updateWindowWidth} from "../../appRedux/actions";
 import AppSidebar from "./AppSidebar";
 import CommandPalette from "../../components/CommandPalette";
+import { loadBaseCurrency } from "../../utils/currency";
 
 const {Content, Footer} = Layout;
 
@@ -89,6 +90,8 @@ const MainApp = () => {
     window.addEventListener('resize', () => {
       dispatch(updateWindowWidth(window.innerWidth));
     });
+    // Prime the base-currency cache for the whole app
+    loadBaseCurrency();
     // Fetch company info for footer + onboarding check
     (async () => {
       try {

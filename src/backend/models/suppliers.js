@@ -164,9 +164,36 @@ const Suppliers = {
       throw error;
     }
   },
+
+  // Activate / Deactivate
+  toggleStatus: (id, status) => {
+    try {
+      db.prepare('UPDATE suppliers SET status = ? WHERE id = ?').run(status || 'Active', id);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  },
+
+  deleteSupplier: (id) => {
+    try {
+      db.prepare('DELETE FROM suppliers WHERE id = ?').run(id);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  },
 };
 
 // Ensure the Suppliers table is created
 Suppliers.createTable();
+
+// Migration: add status column if missing
+try {
+  const cols = db.prepare("PRAGMA table_info(suppliers)").all();
+  if (!cols.some(c => c.name === 'status')) {
+    db.prepare("ALTER TABLE suppliers ADD COLUMN status TEXT DEFAULT 'Active'").run();
+  }
+} catch (e) { console.error('[suppliers] status migration:', e); }
 
 module.exports = Suppliers;

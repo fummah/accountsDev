@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Table, Button, Input, Select, Space, Modal, Form, DatePicker, message, Card, Row, Col } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 const { Search } = Input;
 
 const EmployeeList = () => {
+  const { symbol: cSym } = useCurrency();
   const [form] = Form.useForm();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -14,9 +16,27 @@ const EmployeeList = () => {
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [departments, setDepartments] = useState([]);
+  const [roles, setRoles] = useState([]);
+
+  const loadDepartments = async () => {
+    try {
+      const res = await window.electronAPI.listDepartments?.();
+      setDepartments(Array.isArray(res) ? res : []);
+    } catch { setDepartments([]); }
+  };
+
+  const loadRoles = async () => {
+    try {
+      const res = await window.electronAPI.listRoles?.();
+      setRoles(Array.isArray(res) ? res : []);
+    } catch { setRoles([]); }
+  };
 
   useEffect(() => {
     loadEmployees();
+    loadDepartments();
+    loadRoles();
   }, []);
 
   const loadEmployees = async () => {
@@ -132,13 +152,17 @@ const EmployeeList = () => {
       title: 'Department',
       dataIndex: 'department',
       key: 'department',
-      filters: [
-        { text: 'Sales', value: 'Sales' },
-        { text: 'IT', value: 'IT' },
-        { text: 'HR', value: 'HR' },
-        { text: 'Finance', value: 'Finance' },
-      ],
+      render: v => v || '-',
+      filters: departments.map(d => ({ text: d.name, value: d.name })),
       onFilter: (value, record) => record.department === value,
+    },
+    {
+      title: 'Role',
+      dataIndex: 'role',
+      key: 'role',
+      render: v => v || 'Staff',
+      filters: roles.map(r => ({ text: r.name, value: r.name })),
+      onFilter: (value, record) => record.role === value,
     },
     {
       title: 'Date Hired',
@@ -262,11 +286,8 @@ const EmployeeList = () => {
               label="Department"
               rules={[{ required: true, message: 'Please select department' }]}
             >
-              <Select>
-                <Option value="Sales">Sales</Option>
-                <Option value="IT">IT</Option>
-                <Option value="HR">HR</Option>
-                <Option value="Finance">Finance</Option>
+              <Select showSearch optionFilterProp="children" placeholder="Select department">
+                {departments.map(d => <Option key={d.id} value={d.name}>{d.name}</Option>)}
               </Select>
             </Form.Item>
           </Col>
@@ -282,16 +303,26 @@ const EmployeeList = () => {
         </Row>
 
         <Row gutter={16}>
-          <Col span={12}>
+          <Col span={8}>
             <Form.Item
               name="salary"
               label="Salary"
               rules={[{ required: true, message: 'Please enter salary' }]}
             >
-              <Input type="number" prefix="$" />
+              <Input type="number" prefix={cSym} />
             </Form.Item>
           </Col>
-          <Col span={12}>
+          <Col span={8}>
+            <Form.Item
+              name="role"
+              label="Role"
+            >
+              <Select showSearch optionFilterProp="children" placeholder="Select role" allowClear>
+                {roles.map(r => <Option key={r.id} value={r.name}>{r.name}</Option>)}
+              </Select>
+            </Form.Item>
+          </Col>
+          <Col span={8}>
             <Form.Item
               name="status"
               label="Status"

@@ -123,6 +123,7 @@ const SalesList = ({ sales = [], loading = false, total = 0, page = 1, pageSize 
           columns={columns}
           dataSource={sales}
           loading={loading}
+          tableLayout="fixed"
           pagination={typeof onTableChange === 'function' ? {
             current: page,
             pageSize,

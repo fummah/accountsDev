@@ -2,16 +2,19 @@ import React from "react";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 import { DownloadOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../../../../utils/currency';
 
- const formattedNumber = (number) => { 
+const InvoicePDF = ({ invoice, type }) => {
+  const { symbol: cSym } = useCurrency();
+
+  const formattedNumber = (number) => { 
         const num = new Intl.NumberFormat('en-US', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       }).format(number); 
-      return `$${num}`;
+      return `${cSym}${num}`;
       };
 
-const InvoicePDF = ({ invoice, type }) => {
   const generatePDF = () => {
     const doc = new jsPDF();
     
@@ -35,7 +38,7 @@ const InvoicePDF = ({ invoice, type }) => {
       line.description,
       line.quantity,
       formattedNumber(line.amount),
-      `$${(line.quantity * line.amount).toFixed(2)}`,
+      `${cSym}${(line.quantity * line.amount).toFixed(2)}`,
     ]);
 
     doc.autoTable({
@@ -48,8 +51,8 @@ const InvoicePDF = ({ invoice, type }) => {
     const mTotal = subtotal + calculatedVat;
     // Add Total and Notes
     const finalY = doc.lastAutoTable.finalY; // Get the last Y position after the table
-    doc.text(`Tax: $${calculatedVat.toFixed(2)}`, 14, finalY + 10);
-    doc.text(`Total: $${mTotal.toFixed(2)}`, 14, finalY + 20);
+    doc.text(`Tax: ${cSym}${calculatedVat.toFixed(2)}`, 14, finalY + 10);
+    doc.text(`Total: ${cSym}${mTotal.toFixed(2)}`, 14, finalY + 20);
 
     // Save PDF
     doc.save(`${invoice.number}.pdf`);

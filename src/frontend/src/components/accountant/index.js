@@ -18,10 +18,12 @@ import ManageAssets from './ManageAssets';
 import CheckPrinting from './CheckPrinting';
 import QBImport from './QBImport';
 import RecurringTransactions from './RecurringTransactions';
+import AccountantCenter from './AccountantCenter';
 
 const AccountantRoutes = ({ match }) => {
   return (
     <Switch>
+      <Route exact path={`${match.path}/center`} component={AccountantCenter} />
       <Route path={`${match.path}/chart-of-accounts`} component={ChartOfAccounts} />
       <Route path={`${match.path}/fixed-assets`} component={FixedAssets} />
       <Route path={`${match.path}/enter-transaction`} component={Transaction} />
@@ -37,7 +39,7 @@ const AccountantRoutes = ({ match }) => {
       <Route path={`${match.path}/general-ledger`} component={GeneralLedger} />
       <Route path={`${match.path}/journal-entries`} component={JournalEntries} />
       <Route path={`${match.path}/closing-date`} component={ClosingDate} />
-      <Route path={`${match.path}/manage-assets`} component={ManageAssets} />
+      <Route path={`${match.path}/manage-assets`} component={FixedAssets} />
       <Route path={`${match.path}/check-printing`} component={CheckPrinting} />
       <Route path={`${match.path}/recurring`} component={RecurringTransactions} />
     </Switch>

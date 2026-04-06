@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, DatePicker, Select, InputNumber, Input, message } from 'antd';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
 const Transactions = () => {
+  const { symbol: cSym } = useCurrency();
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -59,7 +61,7 @@ const Transactions = () => {
     { title: 'Date', dataIndex: 'date', key: 'date' },
     { title: 'Type', dataIndex: 'type', key: 'type' },
     { title: 'Description', dataIndex: 'description', key: 'description' },
-    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: a => `$${Number(a||0).toFixed(2)}` },
+    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: a => `${cSym} ${Number(a||0).toFixed(2)}` },
     { title: 'Status', dataIndex: 'status', key: 'status' },
   ];
 
@@ -70,7 +72,7 @@ const Transactions = () => {
       </div>
       <Table columns={columns} dataSource={transactions} loading={loading} rowKey={r => r.id || r.key} pagination={{ pageSize: 20, showSizeChanger: true }} />
 
-      <Modal title="New Transaction" open={showModal} onCancel={hideModal} onOk={() => form.submit()} okText="Save">
+      <Modal title="New Transaction" visible={showModal} onCancel={hideModal} onOk={() => form.submit()} okText="Save">
         <Form form={form} layout="vertical" onFinish={handleCreate}>
           <Form.Item name="date" label="Date">
             <DatePicker style={{ width: '100%' }} />

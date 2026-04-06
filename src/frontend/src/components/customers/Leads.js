@@ -4,6 +4,7 @@ import {
   Drawer, Tabs, Tag, Badge, Progress, Row, Col, Statistic, Popconfirm,
   Timeline, Divider, Empty, Alert, InputNumber, DatePicker, Tooltip,
 } from 'antd';
+import { useCurrency } from '../../utils/currency';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, UserAddOutlined,
   PhoneOutlined, MailOutlined, GlobalOutlined, EnvironmentOutlined,
@@ -42,9 +43,9 @@ const PIE_COLORS = ['#1890ff','#52c41a','#fa8c16','#f5222d','#722ed1','#eb2f96',
 
 const stageMap = Object.fromEntries(STAGES.map(s => [s.key, s]));
 const prioMap  = Object.fromEntries(PRIORITIES.map(p => [p.key, p]));
-const fmtMoney = v => `R ${Number(v || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 const Leads = () => {
+  const { symbol: cSym } = useCurrency();
+  const fmtMoney = v => `${cSym} ${Number(v || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const [activeTab, setActiveTab]             = useState('pipeline');
   const [leads, setLeads]                     = useState([]);
   const [loading, setLoading]                 = useState(true);
@@ -774,8 +775,8 @@ const Leads = () => {
             <Col span={12}>
               <Form.Item name="value" label="Deal Value (R)" initialValue={0}>
                 <InputNumber min={0} style={{ width:'100%' }}
-                  formatter={v => `R ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  parser={v => v.replace(/R\s?|(,*)/g, '')} />
+                  formatter={v => `${cSym} ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                  parser={v => v.replace(new RegExp(`${cSym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s?|(,*)`, 'g'), '')} />
               </Form.Item>
             </Col>
             <Col span={12}>

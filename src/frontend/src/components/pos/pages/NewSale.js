@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Card, Button, InputNumber, Select, Row, Col, Tag, Space, message, Alert, Divider, Empty } from 'antd';
 import { PlusOutlined, DeleteOutlined, ShoppingCartOutlined, ArrowLeftOutlined, DollarOutlined, CreditCardOutlined, MobileOutlined } from '@ant-design/icons';
 import { useHistory } from 'react-router-dom';
+import { useCurrency } from '../../../utils/currency';
 
 const { Option } = Select;
 
 const NewSale = () => {
+  const { symbol: cSym } = useCurrency();
   const [session, setSession] = useState(null);
   const [items, setItems] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -150,8 +152,8 @@ const NewSale = () => {
             <Button type="dashed" icon={<PlusOutlined />} onClick={addLine} style={{ marginTop: 8, width: '100%' }}>Add Item</Button>
 
             <div style={{ marginTop: 16, padding: '16px 20px', background: '#fafafa', borderRadius: 8, textAlign: 'right' }}>
-              <div style={{ fontSize: 14, marginBottom: 4 }}>Subtotal: <strong>R {subtotal.toFixed(2)}</strong></div>
-              <div style={{ fontSize: 20, color: '#1890ff', fontWeight: 700 }}>Total: R {total.toFixed(2)}</div>
+              <div style={{ fontSize: 14, marginBottom: 4 }}>Subtotal: <strong>{cSym} {subtotal.toFixed(2)}</strong></div>
+              <div style={{ fontSize: 20, color: '#1890ff', fontWeight: 700 }}>Total: {cSym} {total.toFixed(2)}</div>
             </div>
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>

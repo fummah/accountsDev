@@ -4,11 +4,13 @@ import { UserOutlined, DollarOutlined, TeamOutlined, SearchOutlined, EditOutline
 import moment from 'moment';
 import { useHistory } from 'react-router-dom';
 import AddEmployee from '../Inner/Employees/AddEmployee';
+import { useCurrency } from '../../utils/currency';
 
 const { Search } = Input;
 const { Option } = Select;
 
 const EmployeeCenter = () => {
+  const { symbol: cSym } = useCurrency();
   const history = useHistory();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -280,7 +282,7 @@ const EmployeeCenter = () => {
               title="Monthly Payroll"
               value={stats.totalPayroll}
               precision={2}
-              prefix={<DollarOutlined />}
+              prefix={cSym}
             />
           </Card>
         </Col>
@@ -290,7 +292,7 @@ const EmployeeCenter = () => {
               title="Average Salary"
               value={stats.avgSalary}
               precision={2}
-              prefix={<DollarOutlined />}
+              prefix={cSym}
             />
           </Card>
         </Col>
@@ -376,7 +378,7 @@ const EmployeeCenter = () => {
             <p><strong>Phone:</strong> {detailsEmployee.phone}</p>
             <p><strong>Address:</strong> {detailsEmployee.address}</p>
             <p><strong>Hire Date:</strong> {detailsEmployee.date_hired ? moment(detailsEmployee.date_hired).format('MM/DD/YYYY') : 'N/A'}</p>
-            <p><strong>Salary:</strong> {detailsEmployee.salary ? `$${Number(detailsEmployee.salary).toFixed(2)}` : 'N/A'}</p>
+            <p><strong>Salary:</strong> {detailsEmployee.salary ? `${cSym} ${Number(detailsEmployee.salary).toFixed(2)}` : 'N/A'}</p>
             <p><strong>Role:</strong> {detailsEmployee.role}</p>
             <p><strong>Status:</strong> {detailsEmployee.status}</p>
           </div>

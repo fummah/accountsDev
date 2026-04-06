@@ -4,8 +4,10 @@ import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, SwapOutl
 import { handleDocumentPDF } from '../shared/generateDocumentPDF';
 import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
+import { useCurrency } from '../../../utils/currency';
 
 const CreateQuote = () => {
+  const { symbol: cSym } = useCurrency();
   const { id } = useParams();
   const history = useHistory();
   const location = useLocation();
@@ -122,6 +124,7 @@ const CreateQuote = () => {
           status: q.status || 'Open',
           vat: q.vat != null ? Number(q.vat) : 0,
         });
+        setVatPercent(q.vat != null ? Number(q.vat) : 0);
         if (Array.isArray(q.lines) && q.lines.length > 0) {
           setLines(q.lines.map((l, i) => ({
             key: Date.now() + i,
@@ -165,8 +168,8 @@ const CreateQuote = () => {
     }
   };
 
+  const [vatPercent, setVatPercent] = useState(0);
   const subtotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  const vatPercent = Form.useWatch('vat', form) || 0;
   const vatAmount = subtotal * (Number(vatPercent) || 0) / 100;
   const grandTotal = subtotal + vatAmount;
 
@@ -267,6 +270,7 @@ const CreateQuote = () => {
         address: company.address || '',
         logo: company.logo || null,
       },
+      currencySymbol: cSym,
     });
   };
 
@@ -285,9 +289,9 @@ const CreateQuote = () => {
     { title: 'Qty', key: 'qty', width: 80,
       render: (_, r) => <InputNumber size="small" min={1} value={r.quantity} onChange={v => updateLine(r.key, 'quantity', v)} style={{ width: '100%' }} /> },
     { title: 'Rate', key: 'rate', width: 110,
-      render: (_, r) => <InputNumber size="small" min={0} step={0.01} value={r.rate} onChange={v => updateLine(r.key, 'rate', v)} style={{ width: '100%' }} prefix="R" /> },
+      render: (_, r) => <InputNumber size="small" min={0} step={0.01} value={r.rate} onChange={v => updateLine(r.key, 'rate', v)} style={{ width: '100%' }} prefix={cSym} /> },
     { title: 'Amount', key: 'amount', width: 110,
-      render: (_, r) => <span style={{ fontWeight: 500 }}>R {Number(r.amount || 0).toFixed(2)}</span> },
+      render: (_, r) => <span style={{ fontWeight: 500 }}>{cSym} {Number(r.amount || 0).toFixed(2)}</span> },
     { title: '', key: 'actions', width: 50,
       render: (_, r) => lines.length > 1 ? <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeLine(r.key)} /> : null },
   ];
@@ -347,6 +351,7 @@ const CreateQuote = () => {
             <Col span={8}>
               <Form.Item name="vat" label="VAT/Tax Rate (%)" initialValue={0}>
                 <Select allowClear placeholder="Select VAT rate"
+                  onChange={(v) => setVatPercent(Number(v) || 0)}
                   dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setVatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New VAT Rate</Button></>)}>
                   <Select.Option value={0}>No Tax (0%)</Select.Option>
                   {vatRates.map(v => <Select.Option key={v.id} value={v.vat_percentage}>{v.vat_name} ({v.vat_percentage}%)</Select.Option>)}
@@ -419,7 +424,7 @@ const CreateQuote = () => {
           <Form.Item name="name" label="Product Name" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="sku" label="SKU"><Input /></Form.Item>
           <Form.Item name="description" label="Description"><Input /></Form.Item>
-          <Form.Item name="price" label="Selling Price" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix="R" /></Form.Item>
+          <Form.Item name="price" label="Selling Price" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix={cSym} /></Form.Item>
         </Form>
       </Modal>
 

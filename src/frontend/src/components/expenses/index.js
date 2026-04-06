@@ -4,14 +4,18 @@ import BillManagement from './BillManagement';
 import ExpenseTracking from './ExpenseTracking';
 import CreditCardCharges from './CreditCardCharges';
 import Transactions from './Transactions';
+import CategoryManagement from './CategoryManagement';
+import SupplierVendorList from '../vendors/SupplierVendorList';
 
 const ExpenseRoutes = ({ match }) => {
   return (
     <Switch>
-      <Route path={`${match.path}/bills`} component={BillManagement} />
+      <Route path={`${match.path}/bills`} component={ExpenseTracking} />
       <Route path={`${match.path}/tracking`} component={ExpenseTracking} />
       <Route path={`${match.path}/credit-cards`} component={CreditCardCharges} />
       <Route path={`${match.path}/transactions`} component={Transactions} />
+      <Route path={`${match.path}/categories`} component={CategoryManagement} />
+      <Route path={`${match.path}/suppliers`} component={SupplierVendorList} />
     </Switch>
   );
 };

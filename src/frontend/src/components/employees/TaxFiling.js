@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, DatePicker, Select, Form, Modal, Upload, message, Input } from 'antd';
 import { UploadOutlined, FileTextOutlined, PrinterOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const TaxFiling = () => {
+  const { symbol: cSym } = useCurrency();
   const [taxRecords, setTaxRecords] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -76,7 +78,7 @@ const TaxFiling = () => {
       title: 'Total Amount',
       dataIndex: 'total_amount',
       key: 'total_amount',
-      render: (amount) => amount ? `$${Number(amount).toFixed(2)}` : '$0.00',
+      render: (amount) => amount ? `${cSym} ${Number(amount).toFixed(2)}` : `${cSym} 0.00`,
     },
     {
       title: 'Status',
@@ -139,7 +141,7 @@ const TaxFiling = () => {
             <h1>Tax Filing</h1>
             <div class="field"><span class="label">Type:</span> ${data.type || ''}</div>
             <div class="field"><span class="label">Period:</span> ${data.period_start ? moment(data.period_start).format('MM/DD/YYYY') : ''} - ${data.period_end ? moment(data.period_end).format('MM/DD/YYYY') : ''}</div>
-            <div class="field"><span class="label">Total Amount:</span> ${data.total_amount ? `$${Number(data.total_amount).toFixed(2)}` : '$0.00'}</div>
+            <div class="field"><span class="label">Total Amount:</span> ${data.total_amount ? `${cSym} ${Number(data.total_amount).toFixed(2)}` : `${cSym} 0.00`}</div>
             <div class="field"><span class="label">Status:</span> ${data.status || ''}</div>
             <div class="field"><span class="label">Due Date:</span> ${data.due_date ? moment(data.due_date).format('MM/DD/YYYY') : 'N/A'}</div>
             <div class="field"><span class="label">Notes:</span> ${data.notes || ''}</div>
@@ -253,7 +255,7 @@ const TaxFiling = () => {
           <div>
             <p><strong>Type:</strong> {selectedRecord.type}</p>
             <p><strong>Period:</strong> {selectedRecord.period_start ? moment(selectedRecord.period_start).format('MM/DD/YYYY') : 'N/A'} - {selectedRecord.period_end ? moment(selectedRecord.period_end).format('MM/DD/YYYY') : 'N/A'}</p>
-            <p><strong>Total Amount:</strong> {selectedRecord.total_amount ? `$${Number(selectedRecord.total_amount).toFixed(2)}` : '$0.00'}</p>
+            <p><strong>Total Amount:</strong> {selectedRecord.total_amount ? `${cSym} ${Number(selectedRecord.total_amount).toFixed(2)}` : `${cSym} 0.00`}</p>
             <p><strong>Status:</strong> {selectedRecord.status}</p>
             <p><strong>Due Date:</strong> {selectedRecord.due_date ? moment(selectedRecord.due_date).format('MM/DD/YYYY') : 'N/A'}</p>
             <p><strong>Notes:</strong> {selectedRecord.notes}</p>

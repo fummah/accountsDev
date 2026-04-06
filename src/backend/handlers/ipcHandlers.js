@@ -553,11 +553,45 @@ safeHandle('updatesupplier', async (event,supplierData) => {
   }
 });
 
+// Supplier toggle status (activate/deactivate)
+safeHandle('supplier-toggle-status', async (event, id, status) => {
+  try {
+    return Suppliers.toggleStatus(id, status);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Delete supplier
+safeHandle('delete-supplier', async (event, id) => {
+  try {
+    return Suppliers.deleteSupplier(id);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 // Deleting record
 safeHandle('deletingrecord', async (event,id,table) => {
   try {
     table = (table || '').toLowerCase();
     switch (table) {
+      case 'customers': {
+        // Check for linked transactions before deleting
+        const db = require('../models/dbmgr');
+        const invCount = db.prepare('SELECT COUNT(*) AS cnt FROM invoices WHERE customer = ?').get(id)?.cnt || 0;
+        const quoteCount = db.prepare('SELECT COUNT(*) AS cnt FROM quotes WHERE customer = ?').get(id)?.cnt || 0;
+        const expCount = db.prepare("SELECT COUNT(*) AS cnt FROM expenses WHERE payee = ? AND category = 'customer'").get(id)?.cnt || 0;
+        const totalLinked = invCount + quoteCount + expCount;
+        if (totalLinked > 0) {
+          const parts = [];
+          if (invCount > 0) parts.push(`${invCount} invoice(s)`);
+          if (quoteCount > 0) parts.push(`${quoteCount} quote(s)`);
+          if (expCount > 0) parts.push(`${expCount} expense(s)`);
+          return { success: false, error: `Cannot delete this customer because they have ${totalLinked} linked transaction(s): ${parts.join(', ')}. Please delete or reassign these transactions first.` };
+        }
+        return await Vat.deleteRecord(id, table);
+      }
       case 'invoices':
         return await Invoices.deleteInvoice(id);
       case 'quotes':

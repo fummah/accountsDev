@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Modal, Form, Input, InputNumber, Select, Tag, Row, Col, Progress, Statistic, message, Popconfirm, Space } from 'antd';
 import { PlusOutlined, DeleteOutlined, BarChartOutlined, ReloadOutlined } from '@ant-design/icons';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { useCurrency } from '../../utils/currency';
 
 const BudgetVsActual = () => {
+  const { symbol: cSym } = useCurrency();
   const [budgets, setBudgets] = useState([]);
   const [comparison, setComparison] = useState([]);
   const [periods, setPeriods] = useState([]);
@@ -123,13 +125,13 @@ const BudgetVsActual = () => {
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
-          <Card size="small"><Statistic title="Total Budget" value={totalBudget.toFixed(2)} prefix="R" /></Card>
+          <Card size="small"><Statistic title="Total Budget" value={totalBudget.toFixed(2)} prefix={cSym} /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small"><Statistic title="Total Actual" value={totalActual.toFixed(2)} prefix="R" /></Card>
+          <Card size="small"><Statistic title="Total Actual" value={totalActual.toFixed(2)} prefix={cSym} /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small"><Statistic title="Variance" value={totalVariance.toFixed(2)} prefix="R"
+          <Card size="small"><Statistic title="Variance" value={totalVariance.toFixed(2)} prefix={cSym}
             valueStyle={{ color: totalVariance >= 0 ? '#52c41a' : '#f5222d' }} /></Card>
         </Col>
         <Col span={6}>
@@ -198,10 +200,10 @@ const BudgetVsActual = () => {
             <Input placeholder="2025-01" />
           </Form.Item>
           <Form.Item name="amount" label="Budget Amount" rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%' }} min={0} step={100} prefix="R" />
+            <InputNumber style={{ width: '100%' }} min={0} step={100} prefix={cSym} />
           </Form.Item>
           <Form.Item name="forecast" label="Forecast Amount">
-            <InputNumber style={{ width: '100%' }} min={0} step={100} prefix="R" />
+            <InputNumber style={{ width: '100%' }} min={0} step={100} prefix={cSym} />
           </Form.Item>
         </Form>
       </Modal>

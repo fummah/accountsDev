@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Table, Card, Button, Modal, Form, Input, DatePicker, InputNumber, Select, Space, message, notification } from 'antd';
 import moment from 'moment';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
 const RecurringTransactions = () => {
+  const { symbol: cSym } = useCurrency();
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -128,7 +130,7 @@ const RecurringTransactions = () => {
       title: 'Amount',
       dataIndex: 'amount',
       key: 'amount',
-      render: (amount) => `$${amount.toFixed(2)}`,
+      render: (amount) => `${cSym} ${amount.toFixed(2)}`,
     },
     {
       title: 'Frequency',

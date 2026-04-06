@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Card, DatePicker, Button, Table, Statistic, Row, Col, message, Divider, Tag } from 'antd';
 import { PrinterOutlined, DownloadOutlined, DollarOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { RangePicker } = DatePicker;
 
 const TaxSummary = () => {
+  const { symbol: cSym } = useCurrency();
   const [dateRange, setDateRange] = useState([
     moment().startOf('year'),
     moment().endOf('year')
@@ -82,7 +84,7 @@ const TaxSummary = () => {
   const taxColumns = [
     { title: 'Type', dataIndex: 'tax_type', key: 'type', render: (v, r) => v || r.type || '-' },
     { title: 'Period', dataIndex: 'period', key: 'period', width: 120 },
-    { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, render: (v, r) => `$${(Number(v || r.tax_amount || 0)).toFixed(2)}` },
+    { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, render: (v, r) => `${cSym} ${(Number(v || r.tax_amount || 0)).toFixed(2)}` },
     { title: 'Due Date', dataIndex: 'due_date', key: 'due', width: 110 },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 90, render: v => {
       const s = (v || '').toLowerCase();
@@ -94,9 +96,9 @@ const TaxSummary = () => {
   const vatColumns = [
     { title: 'VAT Rate', key: 'name', render: (_, r) => r.vat_name || `VAT ${r.vat || r.vat_percentage || 0}%` },
     { title: 'Rate', key: 'rate', width: 80, render: (_, r) => `${r.vat || r.vat_percentage || 0}%` },
-    { title: 'Net Sales', key: 'net_sales', width: 140, render: (_, r) => `$${(Number(r.pure_amount || 0)).toFixed(2)}` },
-    { title: 'Output VAT (Collected)', key: 'output', width: 160, render: (_, r) => `$${(Number(r.total_vat_sum || r.output_vat || 0)).toFixed(2)}` },
-    { title: 'Total Revenue', key: 'total', width: 140, render: (_, r) => `$${(Number(r.revenue_total_amount || 0)).toFixed(2)}` },
+    { title: 'Net Sales', key: 'net_sales', width: 140, render: (_, r) => `${cSym} ${(Number(r.pure_amount || 0)).toFixed(2)}` },
+    { title: 'Output VAT (Collected)', key: 'output', width: 160, render: (_, r) => `${cSym} ${(Number(r.total_vat_sum || r.output_vat || 0)).toFixed(2)}` },
+    { title: 'Total Revenue', key: 'total', width: 140, render: (_, r) => `${cSym} ${(Number(r.revenue_total_amount || 0)).toFixed(2)}` },
   ];
 
   const netVat = summary.totalVatCollected - summary.totalVatPaid;
@@ -117,16 +119,16 @@ const TaxSummary = () => {
       >
         <Row gutter={24} style={{ marginBottom: 24 }}>
           <Col span={6}>
-            <Statistic title="Total Tax Liability" value={summary.totalTaxLiability} precision={2} prefix="$" />
+            <Statistic title="Total Tax Liability" value={summary.totalTaxLiability} precision={2} prefix={cSym} />
           </Col>
           <Col span={6}>
-            <Statistic title="Total Tax Paid" value={summary.totalTaxPaid} precision={2} prefix="$" valueStyle={{ color: '#3f8600' }} />
+            <Statistic title="Total Tax Paid" value={summary.totalTaxPaid} precision={2} prefix={cSym} valueStyle={{ color: '#3f8600' }} />
           </Col>
           <Col span={6}>
-            <Statistic title="Outstanding" value={outstanding} precision={2} prefix="$" valueStyle={{ color: outstanding > 0 ? '#cf1322' : '#3f8600' }} />
+            <Statistic title="Outstanding" value={outstanding} precision={2} prefix={cSym} valueStyle={{ color: outstanding > 0 ? '#cf1322' : '#3f8600' }} />
           </Col>
           <Col span={6}>
-            <Statistic title="Net VAT Payable" value={netVat} precision={2} prefix="$" valueStyle={{ color: netVat >= 0 ? '#cf1322' : '#3f8600' }} />
+            <Statistic title="Net VAT Payable" value={netVat} precision={2} prefix={cSym} valueStyle={{ color: netVat >= 0 ? '#cf1322' : '#3f8600' }} />
           </Col>
         </Row>
 

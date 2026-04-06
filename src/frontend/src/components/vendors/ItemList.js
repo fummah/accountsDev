@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, message } from 'antd';
+import { useCurrency } from '../../utils/currency';
 
 const ItemList = () => {
+  const { symbol: cSym } = useCurrency();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -31,7 +33,7 @@ const ItemList = () => {
     { title: 'SKU', dataIndex: 'sku', key: 'sku' },
     { title: 'Name', dataIndex: 'name', key: 'name' },
     { title: 'Category', dataIndex: 'category', key: 'category' },
-    { title: 'Price', dataIndex: 'price', key: 'price', render: p => `$${Number(p||0).toFixed(2)}` },
+    { title: 'Price', dataIndex: 'price', key: 'price', render: p => `${cSym} ${Number(p||0).toFixed(2)}` },
   ];
 
   return (

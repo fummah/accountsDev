@@ -21,6 +21,7 @@ const Employees = {
         email TEXT,
         phone TEXT,
         address TEXT,
+        department TEXT DEFAULT '',
         date_hired TEXT,
         entered_by TEXT,
         salary REAL DEFAULT 0,
@@ -48,6 +49,7 @@ const Employees = {
       const tableInfo = db.prepare("PRAGMA table_info(employees)").all();
       const hasRole = tableInfo.some(col => col.name === 'role');
       const hasPermissions = tableInfo.some(col => col.name === 'permissions');
+      const hasDepartment = tableInfo.some(col => col.name === 'department');
       
       if (!hasRole) {
         db.prepare("ALTER TABLE employees ADD COLUMN role TEXT DEFAULT 'Staff'").run();
@@ -55,6 +57,10 @@ const Employees = {
       
       if (!hasPermissions) {
         db.prepare("ALTER TABLE employees ADD COLUMN permissions TEXT DEFAULT '[]'").run();
+      }
+
+      if (!hasDepartment) {
+        db.prepare("ALTER TABLE employees ADD COLUMN department TEXT DEFAULT ''").run();
       }
 
       console.log('Employee table migration completed successfully');
@@ -65,14 +71,10 @@ const Employees = {
   },
 
   // Insert a new employee
-  insertEmployee: async (first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status, role = 'Staff', permissions = []) => {
+  insertEmployee: async (first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status, role = 'Staff', permissions = [], department = '') => {
     try {
       if (!first_name || !last_name) {
         throw new Error('First name and last name are required');
-      }
-
-      if (!['Admin', 'Manager', 'Staff'].includes(role)) {
-        throw new Error('Invalid role specified');
       }
 
       // Create employee table with role and permissions if it doesn't exist
@@ -85,6 +87,7 @@ const Employees = {
           email TEXT,
           phone TEXT,
           address TEXT,
+          department TEXT DEFAULT '',
           date_hired TEXT,
           entered_by TEXT,
           salary REAL DEFAULT 0,
@@ -98,9 +101,9 @@ const Employees = {
       const stmt = db.prepare(`
         INSERT INTO employees (
           first_name, last_name, mi, email, phone, address,
-          date_hired, entered_by, salary, status, role, permissions
+          department, date_hired, entered_by, salary, status, role, permissions
         ) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const result = await stmt.run(
@@ -110,6 +113,7 @@ const Employees = {
         email || '',
         phone || '',
         address || '',
+        department || '',
         date_hired || null,
         entered_by || 'system',
         parseFloat(salary) || 0,
@@ -164,6 +168,7 @@ const Employees = {
           email,
           phone,
           address,
+          COALESCE(department, '') as department,
           date_hired,
           entered_by,
           salary,
@@ -192,6 +197,7 @@ const Employees = {
         ...emp,
         permissions: emp.permissions || '[]',
         role: emp.role || 'Staff',
+        department: emp.department || '',
         // Ensure all required fields have default values
         status: emp.status || 'Active',
         salary: parseFloat(emp.salary || 0),
@@ -218,12 +224,12 @@ const Employees = {
     let rows;
     if (searchParam) {
       total = db.prepare('SELECT COUNT(*) AS total FROM employees WHERE (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)').get(searchParam, searchParam, searchParam).total;
-      rows = db.prepare('SELECT id, first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status, COALESCE(role, \'Staff\') as role, COALESCE(permissions, \'[]\') as permissions, date_entered FROM employees WHERE (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?').all(searchParam, searchParam, searchParam, limit, offset);
+      rows = db.prepare('SELECT id, first_name, last_name, mi, email, phone, address, COALESCE(department, \'\') as department, date_hired, entered_by, salary, status, COALESCE(role, \'Staff\') as role, COALESCE(permissions, \'[]\') as permissions, date_entered FROM employees WHERE (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?').all(searchParam, searchParam, searchParam, limit, offset);
     } else {
       total = db.prepare('SELECT COUNT(*) AS total FROM employees').get().total;
-      rows = db.prepare('SELECT id, first_name, last_name, mi, email, phone, address, date_hired, entered_by, salary, status, COALESCE(role, \'Staff\') as role, COALESCE(permissions, \'[]\') as permissions, date_entered FROM employees ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
+      rows = db.prepare('SELECT id, first_name, last_name, mi, email, phone, address, COALESCE(department, \'\') as department, date_hired, entered_by, salary, status, COALESCE(role, \'Staff\') as role, COALESCE(permissions, \'[]\') as permissions, date_entered FROM employees ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
     }
-    const data = rows.map(emp => ({ ...emp, permissions: emp.permissions || '[]', role: emp.role || 'Staff', status: emp.status || 'Active', salary: parseFloat(emp.salary || 0) }));
+    const data = rows.map(emp => ({ ...emp, permissions: emp.permissions || '[]', role: emp.role || 'Staff', department: emp.department || '', status: emp.status || 'Active', salary: parseFloat(emp.salary || 0) }));
     return { data, total };
   },
 
@@ -239,10 +245,6 @@ const Employees = {
         throw new Error('First name and last name are required');
       }
 
-      if (employeeDetails.role && !['Admin', 'Manager', 'Staff'].includes(employeeDetails.role)) {
-        throw new Error('Invalid role specified');
-      }
-
       const stmt = db.prepare(`
         UPDATE employees 
         SET first_name = ?, 
@@ -250,7 +252,8 @@ const Employees = {
             mi = ?, 
             email = ?,
             phone = ?, 
-            address = ?, 
+            address = ?,
+            department = ?, 
             date_hired = ?, 
             salary = ?, 
             status = ?,
@@ -266,6 +269,7 @@ const Employees = {
         employeeDetails.email || '',
         employeeDetails.phone || '',
         employeeDetails.address || '',
+        employeeDetails.department || '',
         employeeDetails.date_hired || null,
         parseFloat(employeeDetails.salary) || 0,
         employeeDetails.status || 'Active',

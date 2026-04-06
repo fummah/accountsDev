@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, message } from 'antd';
+import { useCurrency } from '../../../utils/currency';
 
 const PayBills = () => {
+  const { symbol: cSym } = useCurrency();
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -51,7 +53,7 @@ const PayBills = () => {
     { title: 'Bill #', dataIndex: 'ref_no', key: 'ref_no' },
     { title: 'Vendor', dataIndex: 'payee_name', key: 'payee_name' },
     { title: 'Date', dataIndex: 'payment_date', key: 'payment_date' },
-    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: a => `$${Number(a||0).toFixed(2)}` },
+    { title: 'Amount', dataIndex: 'amount', key: 'amount', render: a => `${cSym} ${Number(a||0).toFixed(2)}` },
     { title: 'Status', dataIndex: 'approval_status', key: 'status' },
     { title: 'Action', key: 'action', render: (_, r) => <Button type="primary" onClick={() => handlePay(r)}>Pay</Button> }
   ];

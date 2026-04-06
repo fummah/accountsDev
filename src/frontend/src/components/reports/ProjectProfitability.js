@@ -90,11 +90,13 @@ const ProjectProfitability = () => {
     setLoading(true);
     setError(null);
     try {
-      // Pull live invoices and expenses within range
-      const [invoicesRes, expensesRes] = await Promise.all([
+      // Pull projects, invoices, and expenses
+      const [projectsRes, invoicesRes, expensesRes] = await Promise.all([
+        window.electronAPI.getProjects(),
         window.electronAPI.getAllInvoices(),
         window.electronAPI.getAllExpenses()
       ]);
+      const projects = Array.isArray(projectsRes) ? projectsRes : [];
       const invoices = Array.isArray(invoicesRes?.all) ? invoicesRes.all : (Array.isArray(invoicesRes) ? invoicesRes : []);
       const expenses = Array.isArray(expensesRes?.all) ? expensesRes.all : (Array.isArray(expensesRes) ? expensesRes : []);
 
@@ -104,35 +106,98 @@ const ProjectProfitability = () => {
       const invInRange = invoices.filter(inv => inv.start_date && moment(inv.start_date).isBetween(start, end, null, '[]'));
       const expInRange = expenses.filter(ex => ex.payment_date && moment(ex.payment_date).isBetween(start, end, null, '[]'));
 
-      // Aggregate revenue by customer (project)
+      // Initialize revenue and cost by actual project ID
       const revenueByProject = {};
+      const costByProject = {};
+      
+      // Initialize all projects with zero values
+      projects.forEach(p => {
+        revenueByProject[p.id] = 0;
+        costByProject[p.id] = 0;
+      });
+
+      // Aggregate revenue by project reference
       invInRange.forEach(inv => {
-        const name = inv.customer_name || inv.customer || 'Unknown';
+        const projectId = inv.projectId || inv.project_id || null;
         const amount = Number(inv.amount || 0);
         const vat = Number(inv.vat || 0);
         const gross = amount + (amount * vat / 100);
-        revenueByProject[name] = (revenueByProject[name] || 0) + gross;
+        
+        if (projectId && revenueByProject.hasOwnProperty(projectId)) {
+          revenueByProject[projectId] += gross;
+        } else {
+          // Fallback: group by customer name for unassigned invoices
+          const customerKey = `customer:${inv.customer_name || inv.customer || 'Unassigned'}`;
+          revenueByProject[customerKey] = (revenueByProject[customerKey] || 0) + gross;
+        }
       });
 
-      // Aggregate cost by payee (also treat as project if it matches customer)
-      const costByProject = {};
+      // Aggregate cost by project reference
       expInRange.forEach(ex => {
-        const name = ex.payee_name || ex.payee || 'Unknown';
+        const projectId = ex.projectId || ex.project_id || null;
         const amt = Number(ex.amount || 0);
-        costByProject[name] = (costByProject[name] || 0) + amt;
+        
+        if (projectId && costByProject.hasOwnProperty(projectId)) {
+          costByProject[projectId] += amt;
+        } else {
+          // Fallback: group by payee name for unassigned expenses
+          const payeeKey = `payee:${ex.payee_name || ex.payee || 'Unassigned'}`;
+          costByProject[payeeKey] = (costByProject[payeeKey] || 0) + amt;
+        }
       });
 
-      // Merge into rows
-      const projectNames = Array.from(new Set([...Object.keys(revenueByProject), ...Object.keys(costByProject)]));
-      const rows = projectNames.map((p, i) => ({
-        key: String(i + 1),
-        projectName: p,
-        startDate: dateRange[0].format('YYYY-MM-DD'),
-        revenue: Number(revenueByProject[p] || 0),
-        costs: Number(costByProject[p] || 0),
-      }));
+      // Build rows combining actual projects and fallback groupings
+      const rows = [];
+      const projectOptions = [{ id: 'all', name: 'All Projects' }];
+      
+      // Add actual projects
+      projects.forEach(p => {
+        rows.push({
+          key: `project:${p.id}`,
+          projectName: p.name || p.code || 'Unnamed Project',
+          projectId: p.id,
+          startDate: p.startDate || p.start_date || dateRange[0].format('YYYY-MM-DD'),
+          revenue: Number(revenueByProject[p.id] || 0),
+          costs: Number(costByProject[p.id] || 0),
+        });
+        projectOptions.push({ id: p.id, name: p.name || p.code || 'Unnamed Project' });
+      });
+      
+      // Add fallback groupings (unassigned invoices/expenses)
+      Object.keys(revenueByProject).forEach(key => {
+        if (key.startsWith('customer:')) {
+          const name = key.replace('customer:', '');
+          if (!rows.find(r => r.projectName === name)) {
+            rows.push({
+              key: key,
+              projectName: name,
+              projectId: key,
+              startDate: dateRange[0].format('YYYY-MM-DD'),
+              revenue: Number(revenueByProject[key] || 0),
+              costs: Number(costByProject[key] || 0),
+            });
+            projectOptions.push({ id: key, name: name });
+          }
+        }
+      });
+      
+      Object.keys(costByProject).forEach(key => {
+        if (key.startsWith('payee:') && !rows.find(r => r.key === key)) {
+          const name = key.replace('payee:', '');
+          rows.push({
+            key: key,
+            projectName: name,
+            projectId: key,
+            startDate: dateRange[0].format('YYYY-MM-DD'),
+            revenue: Number(revenueByProject[key] || 0),
+            costs: Number(costByProject[key] || 0),
+          });
+          projectOptions.push({ id: key, name: name });
+        }
+      });
+      
       setData(rows);
-      setProjects(projectNames);
+      setProjects(projectOptions);
     } catch (err) {
       console.error('Failed to load project profitability', err);
       setError(err.message || String(err));
@@ -161,7 +226,7 @@ const ProjectProfitability = () => {
 
   const filteredData = useMemo(() => {
     if (!selectedProject || selectedProject === 'all') return data;
-    return data.filter(r => (r.projectName || '').toString() === selectedProject);
+    return data.filter(r => (r.projectId || '').toString() === selectedProject);
   }, [data, selectedProject]);
 
   const handlePrint = () => {
@@ -193,7 +258,7 @@ const ProjectProfitability = () => {
                 style={{ width: '100%' }}
               >
                 <Option value="all">All Projects</Option>
-                {projects.map(p => (<Option key={p} value={p}>{p}</Option>))}
+                {projects.map(p => (<Option key={p.id} value={p.id}>{p.name}</Option>))}
               </Select>
             </Form.Item>
           </Col>

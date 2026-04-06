@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Card, Button, message, Modal, Form, InputNumber, Select, Space, Input } from 'antd';
 import { useHistory } from 'react-router-dom';
+import { useCurrency } from '../../../utils/currency';
 
 const { Option } = Select;
 
 const ReceivePayments = () => {
+  const { symbol: cSym } = useCurrency();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [customers, setCustomers] = useState([]);
@@ -129,13 +131,13 @@ const ReceivePayments = () => {
       title: 'Total',
       dataIndex: 'total',
       key: 'total',
-      render: (amount) => `$${Number(amount || 0).toFixed(2)}`,
+      render: (amount) => `${cSym} ${Number(amount || 0).toFixed(2)}`,
     },
     {
       title: 'Balance',
       dataIndex: 'balance',
       key: 'balance',
-      render: (amount) => `$${Number(amount || 0).toFixed(2)}`,
+      render: (amount) => `${cSym} ${Number(amount || 0).toFixed(2)}`,
     },
     {
       title: 'Action',
@@ -190,7 +192,7 @@ const ReceivePayments = () => {
             { title: 'Date', dataIndex: 'date', key: 'date', render: (d) => (d ? new Date(d).toLocaleString() : '-') },
             { title: 'Customer', dataIndex: 'customerName', key: 'customerName' },
             { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber' },
-            { title: 'Amount', dataIndex: 'amount', key: 'amount', render: (a) => `$${Number(a || 0).toFixed(2)}` },
+            { title: 'Amount', dataIndex: 'amount', key: 'amount', render: (a) => `${cSym} ${Number(a || 0).toFixed(2)}` },
             { title: 'Method', dataIndex: 'paymentMethod', key: 'paymentMethod' },
           ]}
           dataSource={payments}

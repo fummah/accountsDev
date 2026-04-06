@@ -1,7 +1,5 @@
-import React, {useState, useEffect} from "react";
-import {Col, Row,Tabs} from "antd";
-import Auxiliary from "util/Auxiliary";
-import AccountantCenter from "./Components/AccountantCenter";
+import React from "react";
+import AccountantCenter from "../../../../components/accountant/AccountantCenter";
 
 const Accountant = () => { 
 

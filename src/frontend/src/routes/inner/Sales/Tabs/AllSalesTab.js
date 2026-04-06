@@ -44,7 +44,7 @@ const AllSalesTab = () => {
         window.electronAPI.getCustomerReport ? window.electronAPI.getCustomerReport().catch(() => null) : Promise.resolve(null)
       ]);
       const invoiceReport = (invoiceReportRes && !invoiceReportRes.error) ? invoiceReportRes : {};
-      const customerReport = (customersRes && customersRes.success) ? (customersRes.report || {}) : {};
+      const customerReport = (customersRes && !customersRes.error) ? customersRes : {};
       const overdueAmt = invoiceReport?.due_invoice?.[0]?.due_total_amount || 0;
       const overdueCount = invoiceReport?.due_invoice?.[0]?.due_invoice || 0;
       const openAmt = invoiceReport?.open_invoice?.[0]?.open_total_amount || 0;
@@ -53,10 +53,15 @@ const AllSalesTab = () => {
       const paidCount = invoiceReport?.paid_invoice?.[0]?.paid_invoice || 0;
       const estAmt = customerReport?.due_quote?.[0]?.due_total_amount || 0;
       const estCount = customerReport?.due_quote?.[0]?.due_quote || 0;
+      const creditCount = invoiceReport?.credit_notes?.[0]?.credit_count || 0;
+      const creditAmt = invoiceReport?.credit_notes?.[0]?.credit_total || 0;
+      const openLabel = creditCount > 0
+        ? `${openCount} open invoices / ${creditCount} credits (R ${formattedNumber(creditAmt)})`
+        : `${openCount} open invoices / credits`;
       setCards([
         { title: `R ${formattedNumber(estAmt)}`, description: `${estCount} estimates`, color: '#40a9ff', wd: 6 },
         { title: `R ${formattedNumber(overdueAmt)}`, description: `${overdueCount} overdue invoices`, color: '#fa8c16', wd: 6 },
-        { title: `R ${formattedNumber(openAmt)}`, description: `${openCount} open invoices / credits`, color: '#d9d9d9', wd: 6 },
+        { title: `R ${formattedNumber(openAmt)}`, description: openLabel, color: '#d9d9d9', wd: 6 },
         { title: `R ${formattedNumber(paidAmt)}`, description: `${paidCount} recently paid`, color: '#52c41a', wd: 6 },
       ]);
     } catch (err) {

@@ -7,12 +7,12 @@ import Serials from './pages/Serials';
 import Barcodes from './pages/Barcodes';
 import Adjustments from './pages/Adjustments';
 import Alerts from './pages/Alerts';
-import ItemList from '../customers/ItemList';
+import UnifiedItemList from '../shared/UnifiedItemList';
 
 const InventoryRoutes = ({ match }) => {
   return (
     <Switch>
-      <Route path={`${match.path}/items`} component={ItemList} />
+      <Route path={`${match.path}/items`} component={UnifiedItemList} />
       <Route path={`${match.path}/warehouses`} component={Warehouses} />
       <Route path={`${match.path}/stock`} component={Stock} />
       <Route path={`${match.path}/bom`} component={BOM} />

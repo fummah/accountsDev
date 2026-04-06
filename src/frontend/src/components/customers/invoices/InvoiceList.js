@@ -3,10 +3,12 @@ import { Table, Button, Input, Card, Space, Tag, Select, message, Popconfirm, Ro
 import { PlusOutlined, ReloadOutlined, DeleteOutlined, EyeOutlined, PrinterOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
+import { useCurrency } from '../../../utils/currency';
 
 const statusColors = { Paid: 'green', Unpaid: 'orange', Sent: 'blue', Overdue: 'red', Draft: 'default', Void: 'volcano' };
 
 const InvoiceList = () => {
+  const { symbol: cSym } = useCurrency();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -73,7 +75,7 @@ const InvoiceList = () => {
       }},
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 110,
       sorter: (a, b) => (Number(a.amount) || 0) - (Number(b.amount) || 0),
-      render: v => <span style={{ fontWeight: 500 }}>R {Number(v || 0).toFixed(2)}</span> },
+      render: v => <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span> },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 90,
       filters: Object.keys(statusColors).map(s => ({ text: s, value: s })),
       onFilter: (v, r) => r.status === v,
@@ -92,8 +94,8 @@ const InvoiceList = () => {
   return (
     <div style={{ padding: 24 }}>
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}><Card size="small"><Statistic title="Total Invoiced" value={totalAmount.toFixed(2)} prefix="R" /></Card></Col>
-        <Col span={8}><Card size="small"><Statistic title="Unpaid" value={unpaidAmount.toFixed(2)} prefix="R" valueStyle={{ color: unpaidAmount > 0 ? '#faad14' : '#52c41a' }} /></Card></Col>
+        <Col span={8}><Card size="small"><Statistic title="Total Invoiced" value={totalAmount.toFixed(2)} prefix={cSym} /></Card></Col>
+        <Col span={8}><Card size="small"><Statistic title="Unpaid" value={unpaidAmount.toFixed(2)} prefix={cSym} valueStyle={{ color: unpaidAmount > 0 ? '#faad14' : '#52c41a' }} /></Card></Col>
         <Col span={8}><Card size="small"><Statistic title="Paid" value={paidCount} suffix={`/ ${invoices.length}`} valueStyle={{ color: '#52c41a' }} /></Card></Col>
       </Row>
 

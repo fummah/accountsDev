@@ -6,6 +6,7 @@ import TransactionsCenter from "./TransactionsCenter";
 import ReconcileAndJournal from "./ReconcileAndJournal";
 import GeneralLedger from "./GeneralLedger";
 import ManageFixedAssets from "./ManageFixedAssets";
+import FixedAssetsRegister from "../../../../../../components/accountant/FixedAssets";
 
 const { Option } = Select;
 
@@ -28,13 +29,13 @@ export const ChartOfAccountsModal = ({ visible, onClose }) => {
 export const FixedAssetsModal = ({ visible, onClose }) => {
   return (
     <Modal
-      title="Fixed Assets List"
+      title="Fixed Assets Register"
       open={visible}
       onCancel={onClose}
       footer={null}
-      width={800}
+      width={1100}
     >
-      <ManageFixedAssets />
+      <FixedAssetsRegister />
     </Modal>
   );
 };
@@ -88,13 +89,13 @@ export const LedgerModal = ({ visible, onClose }) => {
 export const AssetManagementModal = ({ visible, onClose }) => {
   return (
     <Modal
-      title="Manage Fixed Assets"
+      title="Fixed Assets Register"
       open={visible}
       onCancel={onClose}
       footer={null}
-      width={700}
+      width={1100}
     >
-      <ManageFixedAssets/>
+      <FixedAssetsRegister />
     </Modal>
   );
 };

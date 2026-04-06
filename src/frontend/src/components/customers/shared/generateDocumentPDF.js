@@ -27,6 +27,7 @@ export function generateDocumentPDF({
   message: docMessage = '',
   statementMemo = '',
   company = {},
+  currencySymbol = 'R',
 }) {
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageW = doc.internal.pageSize.getWidth();
@@ -40,7 +41,7 @@ export function generateDocumentPDF({
   const lightBg = [245, 247, 250];
 
   // ── Helper ──
-  const fmt = (n) => `R ${Number(n || 0).toFixed(2)}`;
+  const fmt = (n) => `${currencySymbol} ${Number(n || 0).toFixed(2)}`;
 
   // ═══════════════════  HEADER BAR  ═══════════════════
   doc.setFillColor(...primary);
