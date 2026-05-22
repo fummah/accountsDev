@@ -176,7 +176,7 @@ const Employees = () => {
             <div style={{ marginTop: '20px' }}>
             <h2>Payroll Summary</h2>
             <p><strong>Total Employees:</strong> {employees.length}</p>
-            <p><strong>Total Salary Expense:</strong> ${totalSalary.toLocaleString()}</p>
+            <p><strong>Total Salary Expense:</strong> ${totalSalary.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
        
               </Col>

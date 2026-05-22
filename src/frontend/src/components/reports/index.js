@@ -13,6 +13,9 @@ import BudgetVsActual from './BudgetVsActual';
 import AuditTrail from './AuditTrail';
 import VATReturn from './VATReturn';
 import TaxSummary from './TaxSummary';
+import TaxForms from './TaxForms';
+import TaxFilingCenter from './TaxFilingCenter';
+import ConsolidatedReports from './ConsolidatedReports';
 
 const ReportRoutes = ({ match }) => {
   return (
@@ -30,6 +33,9 @@ const ReportRoutes = ({ match }) => {
       <Route path={`${match.path}/audit-trail`} component={AuditTrail} />
       <Route path={`${match.path}/vat-return`} component={VATReturn} />
       <Route path={`${match.path}/tax-summary`} component={TaxSummary} />
+      <Route path={`${match.path}/tax-forms`} component={TaxForms} />
+      <Route path={`${match.path}/tax-filing`} component={TaxFilingCenter} />
+      <Route path={`${match.path}/consolidated`} component={ConsolidatedReports} />
     </Switch>
   );
 };

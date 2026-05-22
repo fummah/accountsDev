@@ -333,7 +333,7 @@ const JournalEntries = () => {
             value={searchText} onChange={e => setSearchText(e.target.value)}
             style={{ width: 260, borderRadius: 6 }} allowClear />
           <DatePicker.RangePicker size="middle" value={dateFilter} onChange={setDateFilter}
-            format="DD/MM/YYYY" allowClear style={{ borderRadius: 6 }} placeholder={['From date', 'To date']} />
+            format="MM/DD/YYYY" allowClear style={{ borderRadius: 6 }} placeholder={['From date', 'To date']} />
           <Select value={statusFilter} onChange={setStatusFilter} style={{ width: 140, borderRadius: 6 }}>
             <Option value="all">All Status</Option>
             <Option value="balanced">Balanced Only</Option>
@@ -413,7 +413,7 @@ const JournalEntries = () => {
           <Row gutter={12}>
             <Col span={8}>
               <Form.Item name="date" label="Date" rules={[{ required: true, message: 'Date required' }]}>
-                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
             <Col span={8}>

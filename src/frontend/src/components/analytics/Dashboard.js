@@ -154,7 +154,7 @@ const AnalyticsDashboard = () => {
           <DatePicker.RangePicker
             value={dateRange}
             onChange={(range) => setDateRange(range || [moment().startOf('year'), moment()])}
-            format="DD/MM/YYYY"
+            format="MM/DD/YYYY"
             allowClear={false}
             style={{ minWidth: 240 }}
           />

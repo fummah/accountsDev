@@ -118,7 +118,7 @@ const JobCosting = () => {
 
   const columns = [
     { title: 'Date', dataIndex: 'date', key: 'date', sorter: (a, b) => (a.date || '').localeCompare(b.date || ''),
-      render: text => text ? moment(text).format('DD/MM/YYYY') : '-' },
+      render: text => text ? moment(text).format('MM/DD/YYYY') : '-' },
     { title: 'Job / Project', dataIndex: 'jobName', key: 'jobName', sorter: (a, b) => (a.jobName || '').localeCompare(b.jobName || ''),
       render: v => <strong>{v || '-'}</strong> },
     { title: 'Type', dataIndex: 'type', key: 'type', render: v => <Tag color={v === 'Project' ? 'blue' : 'default'}>{v}</Tag> },
@@ -141,7 +141,7 @@ const JobCosting = () => {
   const handlePrint = () => {
     try {
       const rows = filteredData.map(r => `<tr>
-        <td>${r.date ? moment(r.date).format('DD/MM/YYYY') : ''}</td>
+        <td>${r.date ? moment(r.date).format('MM/DD/YYYY') : ''}</td>
         <td>${r.jobName || ''}</td><td>${r.type || ''}</td><td>${r.description || ''}</td>
         <td style="text-align:right">${fmtR(r.laborCost)}</td>
         <td style="text-align:right">${fmtR(r.materialCost)}</td>
@@ -149,7 +149,7 @@ const JobCosting = () => {
       const html = `<!doctype html><html><head><title>Job Costing Report</title>
       <style>body{font-family:Arial;padding:16px}h2{margin:0 0 8px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:6px}th{text-align:left;background:#f5f5f5}</style></head><body>
       <h2>Job Costing Report</h2>
-      <p>Period: ${dateRange[0].format('DD/MM/YYYY')} to ${dateRange[1].format('DD/MM/YYYY')} | Job: ${selectedJob}</p>
+      <p>Period: ${dateRange[0].format('MM/DD/YYYY')} to ${dateRange[1].format('MM/DD/YYYY')} | Job: ${selectedJob}</p>
       <table><thead><tr><th>Date</th><th>Job/Project</th><th>Type</th><th>Description</th><th>Labor</th><th>Material</th><th>Total</th></tr></thead><tbody>${rows}
       <tr style="font-weight:bold;background:#fafafa"><td colspan="4">TOTALS</td><td style="text-align:right">${fmtR(totals.labor)}</td><td style="text-align:right">${fmtR(totals.material)}</td><td style="text-align:right">${fmtR(totals.total)}</td></tr>
       </tbody></table></body></html>`;
@@ -185,7 +185,7 @@ const JobCosting = () => {
         </Row>
 
         <Space style={{ marginBottom: 16 }} wrap>
-          <RangePicker value={dateRange} onChange={d => setDateRange(d || [moment().startOf('month'), moment()])} format="DD/MM/YYYY" />
+          <RangePicker value={dateRange} onChange={d => setDateRange(d || [moment().startOf('month'), moment()])} format="MM/DD/YYYY" />
           <Select value={selectedJob} onChange={v => setSelectedJob(v)} style={{ width: 220 }} showSearch optionFilterProp="children">
             <Option value="all">All Jobs / Projects</Option>
             {jobOptions.map(j => <Option key={j} value={j}>{j}</Option>)}

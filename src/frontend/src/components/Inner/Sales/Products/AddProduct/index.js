@@ -9,6 +9,24 @@ const { TextArea } = Input;
 const AddProduct = forwardRef(({ onSaveUser, onUserClose, showDrawer, open, setShowError,setMessage, product }, ref) => {
  
   const [form] = Form.useForm();
+  const [incomeAccounts, setIncomeAccounts] = useState([]);
+
+  useEffect(() => {
+    const fetchIncomeAccounts = async () => {
+      try {
+        const accs = await window.electronAPI.getChartOfAccounts();
+        const list = Array.isArray(accs) ? accs : (accs?.data || []);
+        const incomeOnly = list.filter(a => {
+          const t = (a.accountType || a.type || '').toLowerCase();
+          return t.includes('income') || t.includes('revenue');
+        });
+        setIncomeAccounts(incomeOnly);
+      } catch (e) {
+        console.error('Failed to load income accounts:', e);
+      }
+    };
+    if (open) fetchIncomeAccounts();
+  }, [open]);
 
   const handleSave = () => {
     form.validateFields().then(values => {
@@ -37,17 +55,6 @@ useEffect(() => {
   }
 }, [product, form]);
 
-  const [incomeAccount, setIncomeAccount] = useState([
-    { label: 'Accrued liabilities', value: 'Accrued liabilities' },
-    { label: 'Cash and cash equivalents', value: 'Cash and cash equivalents' },
-    { label: 'Allowance for bad debt', value: 'Allowance for bad debt' },
-    { label: 'Available for sale assets (short-term)', value: 'Available for sale assets (short-term)' },
-    { label: 'Prepaid expenses', value: 'Prepaid expenses' },
-    { label: 'Stock', value: 'Stock' },
-    { label: 'Stock Asset', value: 'Stock Asset' },
-    { label: 'Uncategorised Asset', value: 'Uncategorised Asset' },
-    { label: 'Undeposited Funds', value: 'Undeposited Funds' },
-  ]);
 
   const layout = {
     labelCol: { span: 24 },
@@ -124,7 +131,7 @@ useEffect(() => {
               </Form.Item>
               </Col>
               <Col span={12}>
-              <Form.Item name="sku" label="SKU" rules={[{ required: true, message: 'Enter SKU', },]}>
+              <Form.Item name="sku" label="SKU">
                    <Input placeholder="Enter SKU"/> 
               </Form.Item>
               </Col>
@@ -150,10 +157,10 @@ useEffect(() => {
               </Col>
               <Col span={12}>
               <Form.Item name="income_account" label="Income Account" rules={[{ required: true, message: 'Select Income Account', },]}>
-              <Select placeholder="Select Income account">       
-      {incomeAccount.map((income) => (
-        <Option key={income.value} value={income.value}>
-          {income.label}
+              <Select placeholder="Select Income account" showSearch optionFilterProp="children">       
+      {incomeAccounts.map((acc) => (
+        <Option key={acc.id} value={acc.accountName || acc.name}>
+          {acc.accountName || acc.name}{acc.accountNumber ? ` (${acc.accountNumber})` : ''}
         </Option>
       ))}
     </Select>

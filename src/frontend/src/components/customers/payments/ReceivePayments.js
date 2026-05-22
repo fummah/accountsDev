@@ -99,7 +99,8 @@ const ReceivePayments = () => {
         invoiceId: selectedInvoice.id,
         amount: values.amount,
         paymentMethod: values.paymentMethod,
-        date: new Date().toISOString()
+        reference: values.reference || '',
+        date: values.paymentDate ? values.paymentDate.format('YYYY-MM-DD') : new Date().toISOString().slice(0,10)
       });
       message.success('Payment recorded successfully');
       setPaymentModal(false);
@@ -245,7 +246,12 @@ const ReceivePayments = () => {
               <Option value="cash">Cash</Option>
               <Option value="check">Check</Option>
               <Option value="card">Credit Card</Option>
+              <Option value="eft">EFT</Option>
             </Select>
+          </Form.Item>
+
+          <Form.Item name="reference" label="Reference Number">
+            <Input placeholder="Check #, reference #, or transaction ID" />
           </Form.Item>
 
           {selectedInvoice && (

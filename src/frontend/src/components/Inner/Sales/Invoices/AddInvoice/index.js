@@ -297,7 +297,7 @@ const handleVatChange = (value) => {
               </Row>   
               <Row gutter={16}> 
               <Col span={4}>
-              <Form.Item name="vat" label="Vat">
+              <Form.Item name="vat" label="Tax">
               <Select defaultValue={0} onChange={handleVatChange}>
       {vat.map((va) => (
         <Option key={va.id} value={va.vat_percentage}>

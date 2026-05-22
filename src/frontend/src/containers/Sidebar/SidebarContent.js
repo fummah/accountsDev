@@ -273,6 +273,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                 <Menu.Item key="main/employees/roles">
                   <Link to="/main/employees/roles"><i className="icon icon-auth-screen"/><span>Roles</span></Link>
                 </Menu.Item>
+                <Menu.Item key="main/employees/time-attendance">
+                  <Link to="/main/employees/time-attendance"><i className="icon icon-tasks"/><span>Time & Attendance</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/employees/direct-deposit">
+                  <Link to="/main/employees/direct-deposit"><i className="icon icon-card"/><span>Direct Deposit</span></Link>
+                </Menu.Item>
               </SubMenu>
               <SubMenu key="reports" popupClassName={getNavStyleSubMenuClass(navStyle)}
                        title={
@@ -338,6 +344,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                 </Menu.Item>
                 <Menu.Item key="main/inventory/adjustments">
                   <Link to="/main/inventory/adjustments"><i className="icon icon-edit"/><span>Adjustments</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/inventory/pricing-rules">
+                  <Link to="/main/inventory/pricing-rules"><i className="icon icon-tag"/><span>Pricing Rules</span></Link>
+                </Menu.Item>
+                <Menu.Item key="main/inventory/pick-pack-ship">
+                  <Link to="/main/inventory/pick-pack-ship"><i className="icon icon-orders"/><span>Pick, Pack & Ship</span></Link>
                 </Menu.Item>
               </SubMenu>
 
@@ -417,6 +429,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
 
               <Menu.Item key="main/analytics">
                 <Link to="/main/analytics"><i className="icon icon-chart-area-new"/>{!sidebarCollapsed && <span>Analytics</span>}</Link>
+              </Menu.Item>
+              <Menu.Item key="main/reports/consolidated">
+                <Link to="/main/reports/consolidated"><i className="icon icon-chart"/>{!sidebarCollapsed && <span>Consolidated Reports</span>}</Link>
+              </Menu.Item>
+              <Menu.Item key="main/reports/tax-forms">
+                <Link to="/main/reports/tax-forms"><i className="icon icon-files"/>{!sidebarCollapsed && <span>Tax Forms</span>}</Link>
               </Menu.Item>
               <Menu.Item key="inner/profile">
                 <Link to="/inner/profile"><i

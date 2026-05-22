@@ -46,7 +46,7 @@ const CreateStatement = () => {
         success: true,
         statementId: res?.statementId || res?.id || 'N/A',
         customer: displayName,
-        period: `${values.dateRange[0].format('DD/MM/YYYY')} – ${values.dateRange[1].format('DD/MM/YYYY')}`,
+        period: `${values.dateRange[0].format('MM/DD/YYYY')} – ${values.dateRange[1].format('MM/DD/YYYY')}`,
       });
       message.success('Statement generated successfully');
     } catch (error) {
@@ -93,7 +93,7 @@ const CreateStatement = () => {
             </Form.Item>
 
             <Form.Item name="dateRange" label="Statement Period" rules={[{ required: true, message: 'Please select a date range' }]}>
-              <DatePicker.RangePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+              <DatePicker.RangePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
             </Form.Item>
 
             <Form.Item name="notes" label="Notes">

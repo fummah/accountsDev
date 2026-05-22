@@ -51,7 +51,7 @@ const TaxReportTab = () => {
   // Define columns for the Ant Design table
   const columns = [
     {
-      title: 'Vat(%)',
+      title: 'Tax(%)',
       dataIndex: 'vat',
       key: 'vat',
       render: (text, record) => {
@@ -67,7 +67,7 @@ const TaxReportTab = () => {
       },
     },
     {
-      title: 'Income Ex Vat',
+      title: 'Income Ex Tax',
       dataIndex: 'pure_amount',
       key: 'pure_amount',
       render: (text, record) => {
@@ -75,7 +75,7 @@ const TaxReportTab = () => {
       },
     },
     {
-      title: 'Vat Total',
+      title: 'Tax Total',
       dataIndex: 'total_vat_sum',
       key: 'total_vat_sum',
       render: (text, record) => {

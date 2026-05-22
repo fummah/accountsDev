@@ -130,7 +130,7 @@ const Vat = () => {
     <Widget
    title={
      <h2 className="h2 gx-text-capitalize gx-mb-0">
-       Vat List</h2>
+       Tax Rates</h2>
    } 
    
    extra={

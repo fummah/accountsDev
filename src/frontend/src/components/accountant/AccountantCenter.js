@@ -332,7 +332,7 @@ const AccountantCenter = () => {
               onClick={() => handlePeriod(p)} style={{ borderRadius: 4 }}>{p.label}</Button>
           ))}
           <DatePicker.RangePicker size="small" value={dateRange} onChange={handleCustomRange}
-            format="DD/MM/YYYY" allowClear={false} style={{ borderRadius: 4 }} />
+            format="MM/DD/YYYY" allowClear={false} style={{ borderRadius: 4 }} />
         </Space>
       </div>
 

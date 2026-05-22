@@ -36,7 +36,7 @@ const VATReturn = () => {
           totalOutput += output;
           totalInput += input;
           return {
-            key: idx, vat_name: `VAT ${vatRate}%`, vat_percentage: vatRate,
+            key: idx, vat_name: `Tax ${vatRate}%`, vat_percentage: vatRate,
             pure_amount: pureAmount, output_vat: output, input_vat: input,
             net: output - input, revenue_total: Number(r.revenue_total_amount || 0)
           };
@@ -48,7 +48,7 @@ const VATReturn = () => {
         setData({ rows: [], summary: { totalOutput: 0, totalInput: 0, netVat: 0 } });
       }
     } catch (e) {
-      message.error(e?.message || 'Failed to load VAT report');
+      message.error(e?.message || 'Failed to load Tax report');
     } finally { setLoading(false); }
   };
 
@@ -56,7 +56,7 @@ const VATReturn = () => {
 
   const handleExport = () => {
     try {
-      const headers = ['VAT Name', 'Rate %', 'Output VAT', 'Input VAT', 'Net VAT'];
+      const headers = ['Tax Name', 'Rate %', 'Output Tax', 'Input Tax', 'Net Tax'];
       const csvRows = [headers.join(',')];
       for (const r of data.rows) {
         csvRows.push([
@@ -81,11 +81,11 @@ const VATReturn = () => {
   };
 
   const columns = [
-    { title: 'VAT Name', dataIndex: 'vat_name', key: 'name', render: (v, r) => v || r.name || '-' },
+    { title: 'Tax Name', dataIndex: 'vat_name', key: 'name', render: (v, r) => v || r.name || '-' },
     { title: 'Rate %', dataIndex: 'vat_percentage', key: 'rate', width: 90, render: (v, r) => `${v || r.rate || 0}%` },
-    { title: 'Output VAT (Collected)', dataIndex: 'output_vat', key: 'output', width: 160, render: v => `${cSym} ${(Number(v) || 0).toFixed(2)}` },
-    { title: 'Input VAT (Paid)', dataIndex: 'input_vat', key: 'input', width: 140, render: v => `${cSym} ${(Number(v) || 0).toFixed(2)}` },
-    { title: 'Net VAT', dataIndex: 'net', key: 'net', width: 120, render: v => {
+    { title: 'Output Tax (Collected)', dataIndex: 'output_vat', key: 'output', width: 160, render: v => `${cSym} ${(Number(v) || 0).toFixed(2)}` },
+    { title: 'Input Tax (Paid)', dataIndex: 'input_vat', key: 'input', width: 140, render: v => `${cSym} ${(Number(v) || 0).toFixed(2)}` },
+    { title: 'Net Tax', dataIndex: 'net', key: 'net', width: 120, render: v => {
       const n = Number(v) || 0;
       return <span style={{ color: n >= 0 ? '#cf1322' : '#3f8600', fontWeight: 'bold' }}>{cSym} {n.toFixed(2)}</span>;
     }},
@@ -94,7 +94,7 @@ const VATReturn = () => {
   return (
     <div className="gx-p-4">
       <Card
-        title={<span><FileTextOutlined /> VAT Return Report</span>}
+        title={<span><FileTextOutlined /> Tax Return Report</span>}
         extra={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <RangePicker value={dateRange} onChange={setDateRange} picker="quarter" allowClear={false} />
@@ -106,14 +106,14 @@ const VATReturn = () => {
       >
         <Row gutter={24} style={{ marginBottom: 24 }}>
           <Col span={8}>
-            <Statistic title="Output VAT (Collected)" value={data.summary.totalOutput} precision={2} prefix={cSym} />
+            <Statistic title="Output Tax (Collected)" value={data.summary.totalOutput} precision={2} prefix={cSym} />
           </Col>
           <Col span={8}>
-            <Statistic title="Input VAT (Paid)" value={data.summary.totalInput} precision={2} prefix={cSym} />
+            <Statistic title="Input Tax (Paid)" value={data.summary.totalInput} precision={2} prefix={cSym} />
           </Col>
           <Col span={8}>
             <Statistic
-              title="Net VAT Payable"
+              title="Net Tax Payable"
               value={data.summary.netVat}
               precision={2}
               prefix={cSym}
@@ -122,7 +122,7 @@ const VATReturn = () => {
           </Col>
         </Row>
 
-        <Divider orientation="left">VAT Breakdown</Divider>
+        <Divider orientation="left">Tax Breakdown</Divider>
 
         <Table
           dataSource={data.rows}
@@ -146,7 +146,7 @@ const VATReturn = () => {
         />
 
         <div style={{ marginTop: 16, padding: 12, background: '#f6f8fa', borderRadius: 4, fontSize: 12, color: '#666' }}>
-          <strong>Note:</strong> Positive Net VAT = amount owed to tax authority. Negative = refund due.
+          <strong>Note:</strong> Positive Net Tax = amount owed to tax authority. Negative = refund due.
           Period: {dateRange[0]?.format('MMM D, YYYY')} – {dateRange[1]?.format('MMM D, YYYY')}
         </div>
       </Card>

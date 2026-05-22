@@ -13,7 +13,7 @@ const QBImport = () => {
 
   const templates = {
     company: {
-      headers: ['Company Name','Registration Number','Industry','Business Type','Address','Email','Phone','Logo','Currency','Financial Year Start','VAT Rate','Default Invoice Terms','Bank Name','Account Number','Branch Code','Payment Methods'],
+      headers: ['Company Name','Registration Number','Industry','Business Type','Address','Email','Phone','Logo','Currency','Financial Year Start','Tax Rate','Default Invoice Terms','Bank Name','Account Number','Branch Code','Payment Methods'],
       rows: [
         ['Acme Holdings Pty Ltd','2023/123456/07','IT Services','Pty Ltd','1 Main St, Metropolis, NY','info@acme.com','555-0100','','USD','January','15','30','First National Bank','0123456789','250655','EFT,Cash,Card']
       ]
@@ -63,7 +63,7 @@ const QBImport = () => {
     tax: {
       headers: ['Tax Name','Rate'],
       rows: [
-        ['Standard VAT','15']
+        ['Standard Tax','15']
       ]
     },
   };
@@ -146,7 +146,7 @@ const QBImport = () => {
             <Button type={section==='payments'?'primary':'default'} onClick={()=>setSection('payments')}>Payments</Button>
             <Button type={section==='bills'?'primary':'default'} onClick={()=>setSection('bills')}>Unpaid Bills</Button>
             <Button type={section==='balances'?'primary':'default'} onClick={()=>setSection('balances')}>Customer Balances</Button>
-            <Button type={section==='tax'?'primary':'default'} onClick={()=>setSection('tax')}>Tax Settings (VAT)</Button>
+            <Button type={section==='tax'?'primary':'default'} onClick={()=>setSection('tax')}>Tax Settings</Button>
             <Button onClick={()=>{ setSection('coa'); message.info('Use COA Import/Export page for advanced options.'); }}>Chart of Accounts →</Button>
           </Space>
         </div>

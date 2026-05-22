@@ -86,7 +86,7 @@ const ExpenseTracking = () => {
   const paidCount = useMemo(() => filtered.filter(e => (e.approval_status || '').toLowerCase() === 'paid').length, [filtered]);
 
   const columns = [
-    { title: 'Date', dataIndex: 'payment_date', key: 'payment_date', sorter: (a, b) => (a.payment_date || '').localeCompare(b.payment_date || ''), render: (d) => d ? moment(d).format('DD/MM/YYYY') : '-' },
+    { title: 'Date', dataIndex: 'payment_date', key: 'payment_date', sorter: (a, b) => (a.payment_date || '').localeCompare(b.payment_date || ''), render: (d) => d ? moment(d).format('MM/DD/YYYY') : '-' },
     { title: 'Supplier / Vendor', dataIndex: 'payee_name', key: 'payee_name', sorter: (a, b) => (a.payee_name || '').localeCompare(b.payee_name || '') },
     { title: 'Category', dataIndex: 'category', key: 'category', render: v => <Tag>{v || '-'}</Tag> },
     { title: 'Method', dataIndex: 'payment_method', key: 'payment_method' },
@@ -229,7 +229,7 @@ const ExpenseTracking = () => {
         </Row>
 
         <Space style={{ marginBottom: 16 }} wrap>
-          <DatePicker.RangePicker onChange={(range) => setFilters(f => ({ ...f, dateRange: range || [] }))} format="DD/MM/YYYY" />
+          <DatePicker.RangePicker onChange={(range) => setFilters(f => ({ ...f, dateRange: range || [] }))} format="MM/DD/YYYY" />
           <Input.Search allowClear placeholder="Search description, category, payee" prefix={<SearchOutlined />}
             onSearch={(val) => setFilters(f => ({ ...f, q: val }))} style={{ width: 280 }} />
           <Button type="primary" icon={<PlusOutlined />} onClick={showDrawer}>Add Expense</Button>
@@ -257,7 +257,7 @@ const ExpenseTracking = () => {
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={12}>
               <Form.Item name="payment_date" label="Date" rules={[{ required: true }]}>
-                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -353,7 +353,7 @@ const ExpenseTracking = () => {
       <Modal title="Expense Details" visible={viewModalVisible} onCancel={() => setViewModalVisible(false)} footer={<Button onClick={() => setViewModalVisible(false)}>Close</Button>} width={500}>
         {viewExpense && (
           <Row gutter={[12, 12]}>
-            <Col span={12}><strong>Date:</strong><br />{viewExpense.payment_date ? moment(viewExpense.payment_date).format('DD/MM/YYYY') : '-'}</Col>
+            <Col span={12}><strong>Date:</strong><br />{viewExpense.payment_date ? moment(viewExpense.payment_date).format('MM/DD/YYYY') : '-'}</Col>
             <Col span={12}><strong>Supplier/Vendor:</strong><br />{viewExpense.payee_name || '-'}</Col>
             <Col span={12}><strong>Category:</strong><br /><Tag>{viewExpense.category || '-'}</Tag></Col>
             <Col span={12}><strong>Payment Method:</strong><br />{viewExpense.payment_method || '-'}</Col>

@@ -32,7 +32,7 @@ const menus = () => (<Menu onClick={(e) => {
 const PrintableContent = React.forwardRef(({ vat, companyName = "Your Company" }, ref) => {
   const printColumns = [
     {
-      title: 'VAT Name',
+      title: 'Tax Name',
       dataIndex: 'vat_name',
     },
     {
@@ -46,7 +46,7 @@ const PrintableContent = React.forwardRef(({ vat, companyName = "Your Company" }
     <div ref={ref} className="printable-content" style={{ padding: '30px' }}>
       <div style={{ textAlign: 'center', marginBottom: '30px' }}>
         <Title level={2} style={{ marginBottom: '10px' }}>{companyName}</Title>
-      <Title level={2} style={{ textAlign: 'center', marginBottom: 20 }}>VAT Rates List</Title>
+      <Title level={2} style={{ textAlign: 'center', marginBottom: 20 }}>Tax Rates List</Title>
         <div style={{ fontSize: '14px', marginBottom: '20px' }}>
           Generated on: {new Date().toLocaleString()}
         </div>
@@ -73,7 +73,7 @@ const VatList = ({vat, onSelectVat, setAddUserState, handleSearch, onDelete}) =>
 
   const handlePrint = useReactToPrint({
     content: () => componentRef.current,
-    documentTitle: 'VAT_Rates_List',
+    documentTitle: 'Tax_Rates_List',
     onBeforeGetContent: () => {
       setIsPrinting(true);
       console.log('Preparing print content...');
@@ -88,7 +88,7 @@ const VatList = ({vat, onSelectVat, setAddUserState, handleSearch, onDelete}) =>
 
   const columns = [
     {
-      title: 'Vat Name',
+      title: 'Tax Name',
       dataIndex: 'vat_name',
       sorter: (a, b) => a.first_name - b.first_name,
       render: (text, record) => {
@@ -154,7 +154,7 @@ const VatList = ({vat, onSelectVat, setAddUserState, handleSearch, onDelete}) =>
               if (!isPrinting && vat && vat.length > 0) {
                 handlePrint();
               } else if (!vat || vat.length === 0) {
-                message.warning('No VAT data to print');
+                message.warning('No Tax data to print');
               }
             }}
           >

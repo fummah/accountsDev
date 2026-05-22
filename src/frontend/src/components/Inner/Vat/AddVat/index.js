@@ -42,7 +42,7 @@ useEffect(() => {
   };
   const items = [
     {
-      label: `Import Vat`,
+      label: `Import Tax Rate`,
       key: '1',
     },
   ];
@@ -57,12 +57,12 @@ useEffect(() => {
         }}
         onClick={() => {}}
       >
-        New Vat
+        New Tax Rate
       </Dropdown.Button>
        </p>
      
       <Drawer
-        title={`${vat ? 'Edit' : 'Add'} Vat`}
+        title={`${vat ? 'Edit' : 'Add'} Tax Rate`}
         size='medium'
         placement="top"
         height={400}
@@ -99,12 +99,12 @@ useEffect(() => {
   <Widget>
           <Row gutter={2}> 
               <Col span={8}>
-              <Form.Item name="vat_name" label="Vat Name" rules={[{ required: true, message: 'Enter Vat Name', },]}>
+              <Form.Item name="vat_name" label="Tax Name" rules={[{ required: true, message: 'Enter Tax Name', },]}>
                    <Input/> 
               </Form.Item>
               </Col>             
               <Col span={8}>
-              <Form.Item name="vat_percentage" label="Vat Percentage" rules={[{ required: true, message: 'Enter Vat Percentage', },]}>
+              <Form.Item name="vat_percentage" label="Tax Percentage" rules={[{ required: true, message: 'Enter Tax Percentage', },]}>
                    <Input/> 
               </Form.Item>
               </Col>            

@@ -3,6 +3,7 @@ const Invoices = require('../models/invoices');
 const AuditLog = require('../models/auditLog');
 const { authorize } = require('../security/authz');
 const { validateInvoice } = require('../validation/validators');
+const JournalEntries = require('../models/journalEntries');
 
 const registerInvoiceHandlers = () => {
   // Get all Invoices
@@ -87,14 +88,26 @@ const registerInvoiceHandlers = () => {
       if (res?.success) {
         try {
           AuditLog.log({
-            userId: ctx.userId,
-            action: 'create',
-            entityType: 'invoice',
-            entityId: res?.invoice_id || res?.id,
-            details: { customer, number, status }
+            userId: ctx.userId, action: 'create', entityType: 'invoice',
+            entityId: res?.invoice_id || res?.id, details: { customer, number, status }
           });
-        } catch (auditErr) {
-          console.warn('Audit log failed (non-fatal):', auditErr.message);
+        } catch (auditErr) { console.warn('Audit log failed (non-fatal):', auditErr.message); }
+
+        // ── Auto-post to COA: DR Accounts Receivable / CR Revenue ─────────
+        if (status && status !== 'Draft') {
+          try {
+            const invoiceId = res.invoice_id || res.id;
+            const inv = await Invoices.getSingleInvoice(invoiceId);
+            if (inv) {
+              JournalEntries.postInvoice({
+                id: invoiceId,
+                date: start_date,
+                number,
+                total: inv.total || inv.amount,
+                customerName: inv.customerName || '',
+              });
+            }
+          } catch (jErr) { console.warn('Journal auto-post (invoice) failed:', jErr.message); }
         }
       }
       return res;

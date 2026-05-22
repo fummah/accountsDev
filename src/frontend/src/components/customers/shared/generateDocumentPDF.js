@@ -181,7 +181,7 @@ export function generateDocumentPDF({
 
   drawTotalLine('Subtotal', fmt(subtotal), false);
   if (vatPercent > 0) {
-    drawTotalLine(`VAT (${vatPercent}%)`, fmt(vatAmount), false);
+    drawTotalLine(`Tax (${vatPercent}%)`, fmt(vatAmount), false);
   }
   // Divider line above total
   doc.setDrawColor(...primary);

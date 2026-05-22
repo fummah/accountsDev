@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 //Expenses
   getAllExpenses: () => ipcRenderer.invoke('get-expenses'),
   getExpensesPaginated: (page, pageSize, search) => ipcRenderer.invoke('get-expenses-paginated', page, pageSize, search),
+  getSingleExpense: (id) => ipcRenderer.invoke('get-single-expense', id),
   updateExpense: (expenseData) => ipcRenderer.invoke('updateexpense',expenseData),
   insertExpense: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => ipcRenderer.invoke('insert-expense', payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines),
   createExpenseWithApproval: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => 
@@ -81,9 +82,26 @@ insertVat: (vat_name,vat_percentage,entered_by) => ipcRenderer.invoke('insert-va
 deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   // Chart of accounts and fixed assets
   getChartOfAccounts: () => ipcRenderer.invoke('get-chart-of-accounts'),
-  insertChartAccount: (name,type,number,entered_by) => ipcRenderer.invoke('insert-chart-account', name,type,number,entered_by),
+  insertChartAccount: (payload, type, number, entered_by, openingBalance, status, parentId, description) =>
+    ipcRenderer.invoke('insert-chart-account', payload, type, number, entered_by, openingBalance, status, parentId, description),
   updateChartAccount: (accountData) => ipcRenderer.invoke('update-chart-account', accountData),
   deleteChartAccount: (id) => ipcRenderer.invoke('delete-chart-account', id),
+
+  // COA extended
+  coaSeedSystemAccounts: ()          => ipcRenderer.invoke('coa-seed-system-accounts'),
+  coaBulkCreate:  (accounts)         => ipcRenderer.invoke('coa-bulk-create', accounts),
+  coaGetSubtypes: ()                 => ipcRenderer.invoke('coa-get-subtypes'),
+  getAccountActivity: (id, opts)     => ipcRenderer.invoke('get-account-activity', id, opts),
+
+  // Journal entries
+  journalPost:        (entry)              => ipcRenderer.invoke('journal-post', entry),
+  journalList:        (filters)            => ipcRenderer.invoke('journal-list', filters),
+  journalByAccount:   (accountId, opts)    => ipcRenderer.invoke('journal-by-account', accountId, opts),
+  journalVoid:        (id)                 => ipcRenderer.invoke('journal-void', id),
+  journalReverse:     (journalId, date)    => ipcRenderer.invoke('journal-reverse', journalId, date),
+  journalPostInvoice: (invoice)            => ipcRenderer.invoke('journal-post-invoice', invoice),
+  journalPostPayment: (payment)            => ipcRenderer.invoke('journal-post-payment', payment),
+  journalPostExpense: (expense)            => ipcRenderer.invoke('journal-post-expense', expense),
   getFixedAssets: () => ipcRenderer.invoke('get-fixed-assets'),
   insertFixedAsset: (asset) => ipcRenderer.invoke('insert-fixed-asset', asset),
   updateFixedAsset: (asset) => ipcRenderer.invoke('update-fixed-asset', asset),
@@ -189,6 +207,14 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   recordPayment: (data) => ipcRenderer.invoke('record-payment', data),
   getPayments: (limit) => ipcRenderer.invoke('get-payments', limit),
   getPaymentsPaginated: (params) => ipcRenderer.invoke('get-payments-paginated', params),
+
+  // Customer Payment History
+  customerPaymentsList:    (customerId) => ipcRenderer.invoke('customer-payments-list', customerId),
+  customerPaymentsBalance: (customerId) => ipcRenderer.invoke('customer-payments-balance', customerId),
+  customerPaymentsAll:     (filters)    => ipcRenderer.invoke('customer-payments-all', filters),
+  customerPaymentUpdate:   (id, data)   => ipcRenderer.invoke('customer-payment-update', id, data),
+  customerPaymentDelete:   (id)         => ipcRenderer.invoke('customer-payment-delete', id),
+  invoicePaymentsList:     (invoiceId)  => ipcRenderer.invoke('invoice-payments-list', invoiceId),
 
   // Income Tracking
   getIncomeTransactions: (params) => ipcRenderer.invoke('get-income-transactions', params),
@@ -459,6 +485,122 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   crmGetLeadWithRelated: (leadId) => ipcRenderer.invoke('crm-get-lead-with-related', leadId),
   crmPipelineStats: () => ipcRenderer.invoke('crm-pipeline-stats'),
   crmReports: () => ipcRenderer.invoke('crm-reports'),
+
+  // === Gap Feature Register APIs ===
+
+  // #1 Setup Wizard
+  setupWizardStatus: () => ipcRenderer.invoke('setup-wizard-status'),
+  setupWizardComplete: (stepData) => ipcRenderer.invoke('setup-wizard-complete', stepData),
+  setupWizardGetData: () => ipcRenderer.invoke('setup-wizard-get-data'),
+
+  // #2 Statutory Tax Forms
+  taxFormGenerate: (params) => ipcRenderer.invoke('tax-form-generate', params),
+  taxFormList: (filters) => ipcRenderer.invoke('tax-form-list', filters),
+  taxFormGet: (id) => ipcRenderer.invoke('tax-form-get', id),
+  taxFormUpdateStatus: (id, status) => ipcRenderer.invoke('tax-form-update-status', id, status),
+  taxFormDelete: (id) => ipcRenderer.invoke('tax-form-delete', id),
+  taxFormHtml: (id) => ipcRenderer.invoke('tax-form-html', id),
+
+  // #3 Electronic Tax Filing
+  taxFilingGenerate: (params) => ipcRenderer.invoke('tax-filing-generate', params),
+  taxFilingList: (filters) => ipcRenderer.invoke('tax-filing-list', filters),
+  taxFilingGet: (id) => ipcRenderer.invoke('tax-filing-get', id),
+  taxFilingSubmit: (id, confirmationNumber) => ipcRenderer.invoke('tax-filing-submit', id, confirmationNumber),
+  taxFilingDelete: (id) => ipcRenderer.invoke('tax-filing-delete', id),
+
+  // #5 Time & Attendance
+  attendanceClockIn: (employeeId, workType, notes) => ipcRenderer.invoke('attendance-clock-in', employeeId, workType, notes),
+  attendanceClockOut: (id) => ipcRenderer.invoke('attendance-clock-out', id),
+  attendanceActive: (employeeId) => ipcRenderer.invoke('attendance-active', employeeId),
+  attendanceList: (employeeId, startDate, endDate) => ipcRenderer.invoke('attendance-list', employeeId, startDate, endDate),
+  attendanceApprove: (id, approvedBy) => ipcRenderer.invoke('attendance-approve', id, approvedBy),
+  attendanceCalculate: (employeeId, startDate, endDate) => ipcRenderer.invoke('attendance-calculate', employeeId, startDate, endDate),
+  attendanceLinkPayroll: (employeeId, payrollRunId, startDate, endDate) => ipcRenderer.invoke('attendance-link-payroll', employeeId, payrollRunId, startDate, endDate),
+  attendancePolicyGet: () => ipcRenderer.invoke('attendance-policy-get'),
+  attendancePolicySave: (policy) => ipcRenderer.invoke('attendance-policy-save', policy),
+  attendanceDelete: (id) => ipcRenderer.invoke('attendance-delete', id),
+
+  // #7 Direct Deposit
+  directDepositSaveBank: (data) => ipcRenderer.invoke('direct-deposit-save-bank', data),
+  directDepositGetBank: (employeeId) => ipcRenderer.invoke('direct-deposit-get-bank', employeeId),
+  directDepositGenerateACH: (payrollRunId, companyInfo) => ipcRenderer.invoke('direct-deposit-generate-ach', payrollRunId, companyInfo),
+  directDepositGenerateBACS: (payrollRunId, companyInfo) => ipcRenderer.invoke('direct-deposit-generate-bacs', payrollRunId, companyInfo),
+  directDepositGenerateEFT: (payrollRunId, companyInfo) => ipcRenderer.invoke('direct-deposit-generate-eft', payrollRunId, companyInfo),
+  directDepositList: (limit) => ipcRenderer.invoke('direct-deposit-list', limit),
+  directDepositGet: (id) => ipcRenderer.invoke('direct-deposit-get', id),
+  directDepositSubmit: (id) => ipcRenderer.invoke('direct-deposit-submit', id),
+
+  // #8 Jurisdiction Tax Engine
+  jurisdictionTaxList: (jurisdiction) => ipcRenderer.invoke('jurisdiction-tax-list', jurisdiction),
+  jurisdictionTaxJurisdictions: () => ipcRenderer.invoke('jurisdiction-tax-jurisdictions'),
+  jurisdictionTaxSave: (rule) => ipcRenderer.invoke('jurisdiction-tax-save', rule),
+  jurisdictionTaxDelete: (id) => ipcRenderer.invoke('jurisdiction-tax-delete', id),
+  jurisdictionTaxCalculate: (jurisdiction, taxType, amount, options) => ipcRenderer.invoke('jurisdiction-tax-calculate', jurisdiction, taxType, amount, options),
+
+  // #10 Consolidated Reports
+  consolidationMappings: (entityId) => ipcRenderer.invoke('consolidation-mappings', entityId),
+  consolidationMappingSave: (mapping) => ipcRenderer.invoke('consolidation-mapping-save', mapping),
+  consolidationMappingDelete: (id) => ipcRenderer.invoke('consolidation-mapping-delete', id),
+  consolidationAutoMap: (entityId) => ipcRenderer.invoke('consolidation-auto-map', entityId),
+  consolidationGenerate: (startDate, endDate, entityIds) => ipcRenderer.invoke('consolidation-generate', startDate, endDate, entityIds),
+  consolidationRuns: (limit) => ipcRenderer.invoke('consolidation-runs', limit),
+  consolidationRunGet: (id) => ipcRenderer.invoke('consolidation-run-get', id),
+  consolidationRunDelete: (id) => ipcRenderer.invoke('consolidation-run-delete', id),
+
+  // #13 Pricing Rules
+  pricingTiersList: () => ipcRenderer.invoke('pricing-tiers-list'),
+  pricingTierSave: (tier) => ipcRenderer.invoke('pricing-tier-save', tier),
+  pricingTierDelete: (id) => ipcRenderer.invoke('pricing-tier-delete', id),
+  pricingCustomerTierAssign: (customerId, tierId) => ipcRenderer.invoke('pricing-customer-tier-assign', customerId, tierId),
+  pricingCustomerTierGet: (customerId) => ipcRenderer.invoke('pricing-customer-tier-get', customerId),
+  pricingRulesList: () => ipcRenderer.invoke('pricing-rules-list'),
+  pricingRuleSave: (rule) => ipcRenderer.invoke('pricing-rule-save', rule),
+  pricingRuleDelete: (id) => ipcRenderer.invoke('pricing-rule-delete', id),
+  pricingCalculate: (itemId, quantity, customerId, date) => ipcRenderer.invoke('pricing-calculate', itemId, quantity, customerId, date),
+
+  // #14 Pick Pack Ship
+  ppsOrderCreate: (data, lines) => ipcRenderer.invoke('pps-order-create', data, lines),
+  ppsOrderGet: (id) => ipcRenderer.invoke('pps-order-get', id),
+  ppsOrderList: (status) => ipcRenderer.invoke('pps-order-list', status),
+  ppsOrderStatus: (id, status) => ipcRenderer.invoke('pps-order-status', id, status),
+  ppsOrderDelete: (id) => ipcRenderer.invoke('pps-order-delete', id),
+  ppsPickCreate: (orderId, assignedTo) => ipcRenderer.invoke('pps-pick-create', orderId, assignedTo),
+  ppsPickGet: (id) => ipcRenderer.invoke('pps-pick-get', id),
+  ppsPickConfirm: (pickListId, pickedItems) => ipcRenderer.invoke('pps-pick-confirm', pickListId, pickedItems),
+  ppsPackCreate: (orderId, pickListId, packedBy, boxCount, weight, notes) => ipcRenderer.invoke('pps-pack-create', orderId, pickListId, packedBy, boxCount, weight, notes),
+  ppsPackGet: (id) => ipcRenderer.invoke('pps-pack-get', id),
+  ppsShipCreate: (data) => ipcRenderer.invoke('pps-ship-create', data),
+  ppsShipList: (orderId) => ipcRenderer.invoke('pps-ship-list', orderId),
+  ppsShipDeliver: (shipmentId, deliveryDate) => ipcRenderer.invoke('pps-ship-deliver', shipmentId, deliveryDate),
+
+  // #6 i18n
+  i18nLocales: () => ipcRenderer.invoke('i18n-locales'),
+  i18nLocalesActive: () => ipcRenderer.invoke('i18n-locales-active'),
+  i18nLocaleToggle: (code, active) => ipcRenderer.invoke('i18n-locale-toggle', code, active),
+  i18nTranslations: (locale, namespace) => ipcRenderer.invoke('i18n-translations', locale, namespace),
+  i18nTranslationsAll: (locale) => ipcRenderer.invoke('i18n-translations-all', locale),
+  i18nTranslationSet: (locale, namespace, key, value) => ipcRenderer.invoke('i18n-translation-set', locale, namespace, key, value),
+  i18nTranslationsBulk: (locale, namespace, translations) => ipcRenderer.invoke('i18n-translations-bulk', locale, namespace, translations),
+  i18nExport: (locale) => ipcRenderer.invoke('i18n-export', locale),
+  i18nImport: (locale, entries) => ipcRenderer.invoke('i18n-import', locale, entries),
+  i18nCoverage: (locale) => ipcRenderer.invoke('i18n-coverage', locale),
+
+  // #15 Industry Report Templates
+  industryTemplatesSeed: (industry) => ipcRenderer.invoke('industry-templates-seed', industry),
+  industryTemplatesList: () => ipcRenderer.invoke('industry-templates-list'),
+
+  // #18 Help System
+  helpSearch: (query) => ipcRenderer.invoke('help-search', query),
+  helpArticle: (id) => ipcRenderer.invoke('help-article', id),
+  helpContext: (contextKey) => ipcRenderer.invoke('help-context', contextKey),
+  helpArticleSave: (article) => ipcRenderer.invoke('help-article-save', article),
+
+  // #19 Training Module
+  trainingModules: () => ipcRenderer.invoke('training-modules'),
+  trainingSteps: (module) => ipcRenderer.invoke('training-steps', module),
+  trainingProgress: (userId, module) => ipcRenderer.invoke('training-progress', userId, module),
+  trainingProgressUpdate: (userId, module, step) => ipcRenderer.invoke('training-progress-update', userId, module, step),
+  trainingProgressAll: (userId) => ipcRenderer.invoke('training-progress-all', userId),
 });
 
 // Navigation event from main to renderer (production routing)

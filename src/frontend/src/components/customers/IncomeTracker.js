@@ -121,7 +121,7 @@ const IncomeTracker = () => {
         </Row>
 
         <Space style={{ marginBottom: 16 }} wrap>
-          <RangePicker onChange={(dates) => setDateRange(dates || [])} format="DD/MM/YYYY" />
+          <RangePicker onChange={(dates) => setDateRange(dates || [])} format="MM/DD/YYYY" />
           <Select style={{ width: 140 }} value={period} onChange={(value) => setPeriod(value)}>
             <Option value="daily">Daily</Option>
             <Option value="weekly">Weekly</Option>

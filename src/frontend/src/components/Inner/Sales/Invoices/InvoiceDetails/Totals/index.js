@@ -34,7 +34,7 @@ const Totals = ({detail}) => {
 
       <div style={{ marginBottom: "16px" }}>
         <Text type="secondary" style={{ fontSize: "14px" }}>
-          Inc Vat
+          Inc Tax
         </Text>
         <Title level={4} style={{ margin: "0", color: "#000" }}>
          {detail?.vat}%

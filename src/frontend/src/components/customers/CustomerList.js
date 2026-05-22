@@ -71,9 +71,9 @@ const CustomerList = () => {
         <Link to={`/main/customers/details/${record.id}`} style={{ fontWeight: 500 }}>{text || '-'}</Link>
       ),
     },
-    { title: 'Company', dataIndex: 'company', key: 'company', responsive: ['md'] },
-    { title: 'Email', dataIndex: 'email', key: 'email', ellipsis: true },
-    { title: 'Phone', dataIndex: 'phone_number', key: 'phone', responsive: ['lg'] },
+    { title: 'Company', dataIndex: 'company_name', key: 'company', responsive: ['md'], render: v => v || '' },
+    { title: 'Email', dataIndex: 'email', key: 'email', ellipsis: true, render: v => v || '' },
+    { title: 'Phone', dataIndex: 'phone_number', key: 'phone', responsive: ['lg'], render: v => v || '' },
     {
       title: 'Balance',
       dataIndex: 'opening_balance',

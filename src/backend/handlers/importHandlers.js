@@ -501,8 +501,10 @@ async function register() {
 				const as_of = val(idx.asOf) || null;
 				const notes = val(idx.notes) || '';
 
-				// Upsert by display_name or email
-				const existing = db.prepare(`SELECT id FROM suppliers WHERE display_name=? OR email=?`).get(display, email);
+				// Upsert by display_name or email (only match on email if non-empty to avoid false matches)
+				const existing = email
+					? db.prepare(`SELECT id FROM suppliers WHERE display_name=? OR email=?`).get(display, email)
+					: db.prepare(`SELECT id FROM suppliers WHERE display_name=?`).get(display);
 				if (existing && existing.id) {
 					try {
 						await Suppliers.updateSupplier({

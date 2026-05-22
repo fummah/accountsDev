@@ -8,6 +8,8 @@ import Barcodes from './pages/Barcodes';
 import Adjustments from './pages/Adjustments';
 import Alerts from './pages/Alerts';
 import UnifiedItemList from '../shared/UnifiedItemList';
+import PricingRules from './PricingRules';
+import PickPackShip from './PickPackShip';
 
 const InventoryRoutes = ({ match }) => {
   return (
@@ -20,6 +22,8 @@ const InventoryRoutes = ({ match }) => {
       <Route path={`${match.path}/barcodes`} component={Barcodes} />
       <Route path={`${match.path}/adjustments`} component={Adjustments} />
       <Route path={`${match.path}/alerts`} component={Alerts} />
+      <Route path={`${match.path}/pricing-rules`} component={PricingRules} />
+      <Route path={`${match.path}/pick-pack-ship`} component={PickPackShip} />
     </Switch>
   );
 };

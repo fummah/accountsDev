@@ -117,14 +117,14 @@ const CompanySnapshot = ({ summary: summaryProp }) => {
           <Col xs={24} md={8}>
             <Card>
               <Text type="secondary">Total Revenue</Text>
-              <Title level={2}>R{Number(totals.totalRevenue || 0).toLocaleString()}</Title>
+              <Title level={2}>R{Number(totals.totalRevenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Title>
             </Card>
           </Col>
 
           <Col xs={24} md={8}>
             <Card>
               <Text type="secondary">Total Expenses</Text>
-              <Title level={2}>R{Number(totals.totalExpenses || 0).toLocaleString()}</Title>
+              <Title level={2}>R{Number(totals.totalExpenses || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Title>
             </Card>
           </Col>
 
@@ -132,7 +132,7 @@ const CompanySnapshot = ({ summary: summaryProp }) => {
             <Card>
               <Text type="secondary">Net Profit</Text>
               <Title level={2} type={totals.netProfit >= 0 ? "success" : "danger"}>
-                R{Number(totals.netProfit || 0).toLocaleString()}
+                R{Number(totals.netProfit || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Title>
             </Card>
           </Col>

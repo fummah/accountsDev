@@ -128,7 +128,7 @@ const RunPayroll = () => {
           <Form layout="vertical">
             <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
               <Col span={8}>
-                <Form.Item label="Pay Date"><DatePicker value={payrollDate} onChange={setPayrollDate} style={{ width: '100%' }} format="DD/MM/YYYY" /></Form.Item>
+                <Form.Item label="Pay Date"><DatePicker value={payrollDate} onChange={setPayrollDate} style={{ width: '100%' }} format="MM/DD/YYYY" /></Form.Item>
               </Col>
               <Col span={8}>
                 <Form.Item label="Pay Period">
@@ -178,7 +178,7 @@ const RunPayroll = () => {
         <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
           <Col span={8}>
             <Card title="Pay Period Summary" size="small">
-              <p><strong>Pay Date:</strong> {payrollDate.format('DD/MM/YYYY')}</p>
+              <p><strong>Pay Date:</strong> {payrollDate.format('MM/DD/YYYY')}</p>
               <p><strong>Period:</strong> {payPeriod}</p>
               <p><strong>Method:</strong> {paymentMethod.replace('_', ' ')}</p>
               <p><strong>Employees:</strong> {payrollRows.length}</p>
@@ -208,7 +208,7 @@ const RunPayroll = () => {
     { title: 'Pay Period', key: 'payPeriod',
       render: (_, r) => `${r.payPeriodStart || r.pay_period_start || '-'} — ${r.payPeriodEnd || r.pay_period_end || '-'}` },
     { title: 'Processed', dataIndex: 'processedDate', key: 'processedDate',
-      render: (d, r) => { const v = d || r.processed_date || r.created_at || ''; return v ? moment(v).format('DD/MM/YYYY') : '-'; } },
+      render: (d, r) => { const v = d || r.processed_date || r.created_at || ''; return v ? moment(v).format('MM/DD/YYYY') : '-'; } },
     { title: 'Net Paid', dataIndex: 'totalNetPay', key: 'totalNetPay', align: 'right',
       render: (amount, r) => <strong>{fmtR(amount ?? r.total_net_pay ?? 0)}</strong> },
     { title: 'Employees', dataIndex: 'paymentsCount', key: 'paymentsCount', width: 90,

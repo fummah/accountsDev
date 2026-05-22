@@ -19,6 +19,7 @@ import CheckPrinting from './CheckPrinting';
 import QBImport from './QBImport';
 import RecurringTransactions from './RecurringTransactions';
 import AccountantCenter from './AccountantCenter';
+import AccountantPortal from './AccountantPortal';
 
 const AccountantRoutes = ({ match }) => {
   return (
@@ -42,6 +43,7 @@ const AccountantRoutes = ({ match }) => {
       <Route path={`${match.path}/manage-assets`} component={FixedAssets} />
       <Route path={`${match.path}/check-printing`} component={CheckPrinting} />
       <Route path={`${match.path}/recurring`} component={RecurringTransactions} />
+      <Route path={`${match.path}/portal`} component={AccountantPortal} />
     </Switch>
   );
 };

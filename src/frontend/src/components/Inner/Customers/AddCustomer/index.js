@@ -417,8 +417,8 @@ useEffect(() => {
 { type === "customer"?
 <Row gutter={16}>           
             <Col span={24}>
-              <Form.Item name="tax_number" label="Vat Registration Number">
-                   <Input placeholder="Enter Vat Registration Number"/> 
+              <Form.Item name="tax_number" label="Tax Registration Number">
+                   <Input placeholder="Enter Tax Registration Number"/> 
               </Form.Item>
               </Col>
               </Row>

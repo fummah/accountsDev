@@ -74,12 +74,12 @@ const CreateQuote = () => {
     try {
       const vals = await vatForm.validateFields();
       await window.electronAPI.insertVat?.(vals.vat_name || '', Number(vals.vat_percentage) || 0, null);
-      message.success('VAT rate added');
+      message.success('Tax rate added');
       setVatModalOpen(false);
       vatForm.resetFields();
       const v = await window.electronAPI.getAllVat?.();
       setVatRates(Array.isArray(v) ? v : []);
-    } catch (e) { if (!e?.errorFields) message.error('Failed to add VAT rate'); }
+    } catch (e) { if (!e?.errorFields) message.error('Failed to add Tax rate'); }
   };
 
   const loadDeps = async () => {
@@ -262,8 +262,8 @@ const CreateQuote = () => {
       header: {
         number: vals.number || '',
         status: vals.status || 'Open',
-        date: vals.start_date ? vals.start_date.format('DD/MM/YYYY') : '',
-        dueDate: vals.last_date ? vals.last_date.format('DD/MM/YYYY') : '',
+        date: vals.start_date ? vals.start_date.format('MM/DD/YYYY') : '',
+        dueDate: vals.last_date ? vals.last_date.format('MM/DD/YYYY') : '',
         customerName: cust ? (cust.display_name || cust.name || `${cust.first_name || ''} ${cust.last_name || ''}`.trim()) : '',
         email: vals.customer_email || '',
         billingAddress: vals.billing_address || '',
@@ -347,12 +347,12 @@ const CreateQuote = () => {
           <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={8}>
               <Form.Item name="start_date" label="Quote Date" initialValue={moment()}>
-                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="last_date" label="Expiry Date">
-                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -361,10 +361,10 @@ const CreateQuote = () => {
           </Row>
           <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={8}>
-              <Form.Item name="vat" label="VAT/Tax Rate (%)" initialValue={0}>
-                <Select allowClear placeholder="Select VAT rate"
+              <Form.Item name="vat" label="Tax Rate (%)" initialValue={0}>
+                <Select allowClear placeholder="Select Tax rate"
                   onChange={(v) => setVatPercent(Number(v) || 0)}
-                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setVatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New VAT Rate</Button></>)}>
+                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setVatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Tax Rate</Button></>)}>
                   <Select.Option value={0}>No Tax (0%)</Select.Option>
                   {vatRates.map(v => <Select.Option key={v.id} value={v.vat_percentage}>{v.vat_name} ({v.vat_percentage}%)</Select.Option>)}
                 </Select>
@@ -394,7 +394,7 @@ const CreateQuote = () => {
               <Button type="dashed" icon={<PlusOutlined />} onClick={addLine}>Add Line</Button>
               <div style={{ textAlign: 'right' }}>
                 <div>Subtotal: {cSym} {subtotal.toFixed(2)}</div>
-                {vatPercent > 0 && <div>VAT ({vatPercent}%): {cSym} {vatAmount.toFixed(2)}</div>}
+                {vatPercent > 0 && <div>Tax ({vatPercent}%): {cSym} {vatAmount.toFixed(2)}</div>}
                 <div style={{ fontSize: 16, fontWeight: 600 }}>Total: {cSym} {grandTotal.toFixed(2)}</div>
               </div>
             </div>
@@ -440,9 +440,9 @@ const CreateQuote = () => {
         </Form>
       </Modal>
 
-      <Modal title="Add New VAT Rate" visible={vatModalOpen} onOk={handleAddVat} onCancel={() => setVatModalOpen(false)} okText="Add" destroyOnClose>
+      <Modal title="Add New Tax Rate" visible={vatModalOpen} onOk={handleAddVat} onCancel={() => setVatModalOpen(false)} okText="Add" destroyOnClose>
         <Form form={vatForm} layout="vertical" preserve={false}>
-          <Form.Item name="vat_name" label="VAT Name" rules={[{ required: true }]}><Input placeholder="e.g. Standard Rate" /></Form.Item>
+          <Form.Item name="vat_name" label="Tax Name" rules={[{ required: true }]}><Input placeholder="e.g. Standard Rate" /></Form.Item>
           <Form.Item name="vat_percentage" label="Percentage (%)" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} max={100} step={0.5} /></Form.Item>
         </Form>
       </Modal>

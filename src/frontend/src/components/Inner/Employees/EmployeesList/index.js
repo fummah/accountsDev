@@ -107,7 +107,7 @@ const EmployeesList = ({
       dataIndex: 'date_hired',
       key: 'date_hired',
       sorter: (a, b) => (a.date_hired || '').localeCompare(b.date_hired || ''),
-      render: v => v ? moment(v).format('DD/MM/YYYY') : '-',
+      render: v => v ? moment(v).format('MM/DD/YYYY') : '-',
       responsive: ['md'],
     },
     {
@@ -267,7 +267,7 @@ const EmployeesList = ({
             {/* Employment Details */}
             <Card size="small" title={<span style={{ fontSize: 13 }}><SafetyCertificateOutlined style={{ marginRight: 6 }} />Employment Details</span>} style={{ marginBottom: 16 }}>
               <Descriptions column={2} size="small" labelStyle={{ color: '#8c8c8c', fontSize: 12 }} contentStyle={{ fontWeight: 500 }}>
-                <Descriptions.Item label="Hire Date">{viewEmployee.date_hired ? moment(viewEmployee.date_hired).format('DD/MM/YYYY') : '-'}</Descriptions.Item>
+                <Descriptions.Item label="Hire Date">{viewEmployee.date_hired ? moment(viewEmployee.date_hired).format('MM/DD/YYYY') : '-'}</Descriptions.Item>
                 <Descriptions.Item label="Department">{viewEmployee.department || '-'}</Descriptions.Item>
                 <Descriptions.Item label="Position">{viewEmployee.position || viewEmployee.role || 'Staff'}</Descriptions.Item>
                 <Descriptions.Item label="Status">{getStatusTag(viewEmployee.status)}</Descriptions.Item>

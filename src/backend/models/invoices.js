@@ -127,6 +127,53 @@ const Invoices = {
       const lineSum = linesArr.reduce((s, l) => s + (Number(l.amount) || 0) * (Number(l.quantity) || 1), 0);
       const balance = lineSum * (1 + (Number(vat) || 0) / 100);
       db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(balance, invoiceId);
+
+      // --- GL Posting: post each line to its income account in Chart of Accounts ---
+      try {
+        const txStmt = db.prepare(`INSERT INTO transactions (date, type, amount, description, status, accountId, customerId, reference, debit, credit, entered_by) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?, ?)`);
+
+        // Find or create Accounts Receivable account
+        let arAccount = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) LIKE '%accounts receivable%' OR LOWER(type) LIKE '%receivable%' LIMIT 1").get();
+        if (!arAccount) {
+          const arRes = db.prepare("INSERT INTO chart_of_accounts (name, type, number, entered_by) VALUES ('Accounts Receivable', 'Accounts Receivable', '1200', 'system')").run();
+          arAccount = { id: arRes.lastInsertRowid };
+        }
+
+        // Debit Accounts Receivable for full invoice amount
+        txStmt.run(String(start_date || ''), 'Invoice', balance, `Invoice #${number || invoiceId} - Accounts Receivable`, arAccount.id, Number(customer) || null, String(number || invoiceId), balance, null, entered_by || null);
+
+        // Credit each income account per product line
+        for (const line of linesArr) {
+          const lineTotal = (Number(line.amount) || 0) * (Number(line.quantity) || 1);
+          const lineWithVat = lineTotal * (1 + (Number(vat) || 0) / 100);
+          const productId = line.product_id || line.product || null;
+          let incomeAccountId = null;
+
+          if (productId) {
+            const prod = db.prepare('SELECT income_account FROM products WHERE id = ?').get(productId);
+            if (prod && prod.income_account) {
+              const coaRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ?").get(prod.income_account, prod.income_account);
+              if (coaRow) incomeAccountId = coaRow.id;
+            }
+          }
+
+          // Fallback: find a generic Sales/Income account
+          if (!incomeAccountId) {
+            const fallback = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%income%' OR LOWER(type) LIKE '%revenue%' OR LOWER(name) LIKE '%sales%' LIMIT 1").get();
+            if (fallback) incomeAccountId = fallback.id;
+          }
+
+          if (incomeAccountId) {
+            txStmt.run(String(start_date || ''), 'Invoice', lineWithVat, `Invoice #${number || invoiceId} - ${String(line.description || 'Revenue')}`, incomeAccountId, Number(customer) || null, String(number || invoiceId), null, lineWithVat, entered_by || null);
+          }
+        }
+
+        // Update COA balances
+        db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(balance, arAccount.id);
+      } catch (glErr) {
+        console.error('[invoices] GL posting failed (non-fatal):', glErr);
+      }
+
       return { success: true, invoiceId: Number(invoiceId) }; 
     } 
       else {

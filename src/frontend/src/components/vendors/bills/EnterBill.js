@@ -13,10 +13,33 @@ const EnterBill = ({ history, location, match }) => {
   const [form] = Form.useForm();
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [supplierForm] = Form.useForm();
+  const editId = match?.params?.id;
+  const isEdit = !!editId;
 
   useEffect(() => {
     loadVendors();
-  }, []);
+    if (editId) loadBill(editId);
+  }, [editId]);
+
+  const loadBill = async (id) => {
+    try {
+      const data = await window.electronAPI.getSingleExpense?.(id);
+      if (data) {
+        form.setFieldsValue({
+          vendorId: data.payee,
+          payment_account: data.payment_account || 'Accounts Payable',
+          billNumber: data.ref_no,
+          billDate: data.payment_date ? moment(data.payment_date) : null,
+          amount: data.amount || (data.lines && data.lines.length > 0 ? data.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) : 0),
+          description: data.lines && data.lines.length > 0 ? data.lines[0].description : '',
+          payment_method: data.payment_method || 'check',
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load bill for editing:', e);
+      message.error('Failed to load bill details');
+    }
+  };
 
   const loadVendors = async () => {
     try {
@@ -58,10 +81,15 @@ const EnterBill = ({ history, location, match }) => {
         { category: 'Bills', description: values.description || '', amount: Number(values.amount) || 0 }
       ];
 
-      const res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status, expenseLines);
+      let res;
+      if (isEdit) {
+        res = await window.electronAPI.updateExpense({ id: Number(editId), payee, payment_account, ref_no, category, payment_method, entered_by, payment_date, approval_status, lines: expenseLines });
+      } else {
+        res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status, expenseLines);
+      }
       if (res && res.success) {
-        message.success('Bill created');
-        form.resetFields();
+        message.success(isEdit ? 'Bill updated' : 'Bill created');
+        if (!isEdit) form.resetFields();
         if (history && history.push) history.push('/main/vendors/bills/tracker');
       } else {
         message.error('Failed to create bill');
@@ -75,7 +103,7 @@ const EnterBill = ({ history, location, match }) => {
   };
 
   return (
-    <Card title="Enter Bill" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => (history?.length ? history.goBack() : history.push('/main/vendors/center'))}>Back</Button>}>
+    <Card title={isEdit ? 'Edit Bill' : 'Enter Bill'} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => (history?.length ? history.goBack() : history.push('/main/vendors/center'))}>Back</Button>}>
       <Form form={form} layout="vertical" onFinish={handleSubmit}>
         <Form.Item name="vendorId" label="Vendor" rules={[{ required: true }]}> 
           <Select showSearch placeholder="Select a vendor"
@@ -99,7 +127,7 @@ const EnterBill = ({ history, location, match }) => {
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
 
         <Form.Item>
-          <Button type="primary" htmlType="submit" loading={loading}>Create Bill</Button>
+          <Button type="primary" htmlType="submit" loading={loading}>{isEdit ? 'Update Bill' : 'Create Bill'}</Button>
         </Form.Item>
       </Form>
       <Modal title="Add New Supplier" visible={supplierModalOpen} onOk={handleAddSupplier} onCancel={() => setSupplierModalOpen(false)} okText="Add" destroyOnClose>

@@ -1,6 +1,8 @@
 const { ipcMain } = require('electron');
 const db = require('../models/dbmgr');
 const { Customers } = require('../models');
+const Payments = require('../models/payments');
+const JournalEntries = require('../models/journalEntries');
 
 function registerCustomerHandlers() {
     // Statements
@@ -124,6 +126,25 @@ function registerCustomerHandlers() {
                 `UPDATE invoices SET balance = ?, status = ? WHERE id = ?`,
                 [Math.max(0, remaining), newStatus, invoiceId]
             );
+
+            // ── Auto-post to COA via journal entry ───────────────────────
+            try {
+                const lastPayment = db.prepare(
+                    'SELECT id FROM payments WHERE invoiceId = ? ORDER BY id DESC LIMIT 1'
+                ).get(invoiceId);
+                if (lastPayment) {
+                    // Fetch customer name for description
+                    const inv = db.prepare('SELECT customer, number FROM invoices WHERE id = ?').get(invoiceId);
+                    const cust = inv?.customer ? db.prepare('SELECT display_name FROM customers WHERE id = ? LIMIT 1').get(inv.customer) : null;
+                    JournalEntries.postPayment({
+                        id: lastPayment.id,
+                        amount: payAmount,
+                        date: paymentData.date || paymentData.paymentDate || new Date().toISOString().slice(0, 10),
+                        reference: paymentData.reference || (inv?.number ? `Pmt-${inv.number}` : null),
+                        customerName: cust?.display_name || '',
+                    });
+                }
+            } catch (jErr) { console.warn('Journal auto-post (payment) failed:', jErr.message); }
 
             return { success: true, newStatus, remaining: Math.max(0, remaining) };
         } catch (error) {
@@ -433,6 +454,63 @@ function registerCustomerHandlers() {
         } catch (error) {
             console.error('Error deleting item:', error);
             throw error;
+        }
+    });
+
+    // ── Customer Payment History ────────────────────────────────────────────
+    ipcMain.handle('customer-payments-list', async (_e, customerId) => {
+        try {
+            return Payments.getByCustomer(Number(customerId));
+        } catch (e) {
+            console.error('customer-payments-list:', e);
+            return [];
+        }
+    });
+
+    ipcMain.handle('customer-payments-balance', async (_e, customerId) => {
+        try {
+            return Payments.getCustomerBalance(Number(customerId));
+        } catch (e) {
+            console.error('customer-payments-balance:', e);
+            return { invoicedTotal: 0, paidTotal: 0, remainingBalance: 0, unappliedCredits: 0 };
+        }
+    });
+
+    ipcMain.handle('customer-payments-all', async (_e, filters) => {
+        try {
+            return Payments.getAllPayments(filters || {});
+        } catch (e) {
+            console.error('customer-payments-all:', e);
+            return [];
+        }
+    });
+
+    ipcMain.handle('customer-payment-update', async (_e, id, data) => {
+        try {
+            const res = Payments.update(Number(id), data);
+            return { success: res.changes > 0 };
+        } catch (e) {
+            console.error('customer-payment-update:', e);
+            return { success: false, error: e.message };
+        }
+    });
+
+    ipcMain.handle('customer-payment-delete', async (_e, id) => {
+        try {
+            const res = Payments.delete(Number(id));
+            return { success: res.changes > 0 };
+        } catch (e) {
+            console.error('customer-payment-delete:', e);
+            return { success: false, error: e.message };
+        }
+    });
+
+    ipcMain.handle('invoice-payments-list', async (_e, invoiceId) => {
+        try {
+            return Payments.getByInvoice(Number(invoiceId));
+        } catch (e) {
+            console.error('invoice-payments-list:', e);
+            return [];
         }
     });
 }

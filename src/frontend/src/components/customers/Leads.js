@@ -344,7 +344,7 @@ const Leads = () => {
         strokeColor={s >= 70 ? '#52c41a' : s >= 40 ? '#fa8c16' : '#f5222d'} /> },
     { title: 'Source',    dataIndex: 'source',              key: 'source',    render: v => v || '—' },
     { title: 'Close Date',dataIndex: 'expected_close_date', key: 'close',
-      render: d => d ? moment(d).format('DD/MM/YYYY') : '—' },
+      render: d => d ? moment(d).format('MM/DD/YYYY') : '—' },
     { title: '', key: 'actions', width: 160, render: (_, r) => (
       <Space size={2}>
         <Button size="small" type="link" icon={<EditOutlined />}    onClick={() => openEditLead(r)} />
@@ -498,7 +498,7 @@ const Leads = () => {
                       <Timeline.Item key={a.id} color="red" dot={<span>{ACT_ICONS[a.type]}</span>}>
                         <div style={{ fontWeight:600 }}>{a.subject}</div>
                         <div style={{ fontSize:12, color:'#595959' }}>{a.lead_name}{a.lead_company ? ` · ${a.lead_company}` : ''}</div>
-                        <div style={{ fontSize:11, color:'#f5222d' }}>Due: {moment(a.dueDate).format('DD/MM/YYYY HH:mm')}</div>
+                        <div style={{ fontSize:11, color:'#f5222d' }}>Due: {moment(a.dueDate).format('MM/DD/YYYY HH:mm')}</div>
                       </Timeline.Item>
                     ))}</Timeline>}
               </Card>
@@ -511,7 +511,7 @@ const Leads = () => {
                       <Timeline.Item key={a.id} color="blue" dot={<span>{ACT_ICONS[a.type]}</span>}>
                         <div style={{ fontWeight:600 }}>{a.subject}</div>
                         <div style={{ fontSize:12, color:'#595959' }}>{a.lead_name}{a.lead_company ? ` · ${a.lead_company}` : ''}</div>
-                        <div style={{ fontSize:11, color:'#1890ff' }}>Due: {moment(a.dueDate).format('DD/MM/YYYY HH:mm')}</div>
+                        <div style={{ fontSize:11, color:'#1890ff' }}>Due: {moment(a.dueDate).format('MM/DD/YYYY HH:mm')}</div>
                       </Timeline.Item>
                     ))}</Timeline>}
               </Card>
@@ -644,7 +644,7 @@ const Leads = () => {
                 </Col>
                 <Col span={12}><div style={{ fontSize:11, color:'#8c8c8c' }}>Source</div><div>{drawerLead.source || '—'}</div></Col>
                 <Col span={12}><div style={{ fontSize:11, color:'#8c8c8c' }}>Expected Close</div>
-                  <div>{drawerLead.expected_close_date ? moment(drawerLead.expected_close_date).format('DD/MM/YYYY') : '—'}</div></Col>
+                  <div>{drawerLead.expected_close_date ? moment(drawerLead.expected_close_date).format('MM/DD/YYYY') : '—'}</div></Col>
                 <Col span={12}><div style={{ fontSize:11, color:'#8c8c8c' }}><MailOutlined /> Email</div><div>{drawerLead.email || '—'}</div></Col>
                 <Col span={12}><div style={{ fontSize:11, color:'#8c8c8c' }}><PhoneOutlined /> Phone</div><div>{drawerLead.phone || '—'}</div></Col>
                 <Col span={12}><div style={{ fontSize:11, color:'#8c8c8c' }}>Company</div><div>{drawerLead.company || '—'}</div></Col>
@@ -659,7 +659,7 @@ const Leads = () => {
                     <div style={{ fontSize:11, color:'#8c8c8c' }}>Linked Customer</div>
                     <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                       <Tag color="green"><CheckCircleOutlined /> {drawerLead.customer_name || `Customer #${drawerLead.converted_customer_id}`}</Tag>
-                      <span style={{ fontSize:11, color:'#8c8c8c' }}>Converted {drawerLead.converted_at ? moment(drawerLead.converted_at).format('DD/MM/YYYY') : ''}</span>
+                      <span style={{ fontSize:11, color:'#8c8c8c' }}>Converted {drawerLead.converted_at ? moment(drawerLead.converted_at).format('MM/DD/YYYY') : ''}</span>
                     </div>
                   </Col>
                 )}
@@ -671,7 +671,7 @@ const Leads = () => {
                     <div style={{ whiteSpace:'pre-line', background:'#fffbe6', padding:8, borderRadius:4 }}>{drawerLead.notes}</div>
                   </Col>
                 )}
-                <Col span={24}><div style={{ fontSize:11, color:'#8c8c8c', marginTop:4 }}>Created {moment(drawerLead.createdAt).format('DD/MM/YYYY HH:mm')}</div></Col>
+                <Col span={24}><div style={{ fontSize:11, color:'#8c8c8c', marginTop:4 }}>Created {moment(drawerLead.createdAt).format('MM/DD/YYYY HH:mm')}</div></Col>
               </Row>
               <Divider />
               <Space direction="vertical" style={{ width:'100%' }}>
@@ -699,11 +699,11 @@ const Leads = () => {
                           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                             <div>
                               <div style={{ fontWeight:600 }}>{q.number}</div>
-                              <div style={{ fontSize:11, color:'#8c8c8c' }}>{q.start_date && moment(q.start_date).format('DD/MM/YYYY')}{q.last_date ? ` → ${moment(q.last_date).format('DD/MM/YYYY')}` : ''}</div>
+                              <div style={{ fontSize:11, color:'#8c8c8c' }}>{q.start_date && moment(q.start_date).format('MM/DD/YYYY')}{q.last_date ? ` → ${moment(q.last_date).format('MM/DD/YYYY')}` : ''}</div>
                             </div>
                             <div style={{ textAlign:'right' }}>
                               <div style={{ color:'#1890ff', fontWeight:600 }}>{fmtMoney(total)}</div>
-                              {q.vat > 0 && <div style={{ fontSize:11, color:'#8c8c8c' }}>incl. {q.vat}% VAT</div>}
+                              {q.vat > 0 && <div style={{ fontSize:11, color:'#8c8c8c' }}>incl. {q.vat}% Tax</div>}
                             </div>
                           </div>
                         </Card>
@@ -728,7 +728,7 @@ const Leads = () => {
                             {a.details  && <div style={{ fontSize:12, color:'#595959', marginTop:2 }}>{a.details}</div>}
                             {a.outcome  && <div style={{ fontSize:12, color:'#52c41a', marginTop:2 }}>Outcome: {a.outcome}</div>}
                             <div style={{ fontSize:11, color:'#8c8c8c', marginTop:2 }}>
-                              {a.dueDate && <>{moment(a.dueDate).format('DD/MM/YYYY HH:mm')} · </>}
+                              {a.dueDate && <>{moment(a.dueDate).format('MM/DD/YYYY HH:mm')} · </>}
                               {a.status === 'done'
                                 ? <span style={{ color:'#52c41a' }}>✓ Done</span>
                                 : <span style={{ color:'#fa8c16' }}>Open</span>}
@@ -796,7 +796,7 @@ const Leads = () => {
             </Col>
             <Col span={12}>
               <Form.Item name="expected_close_date" label="Expected Close Date">
-                <DatePicker style={{ width:'100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width:'100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
             <Col span={24}>
@@ -836,7 +836,7 @@ const Leads = () => {
             <Col span={12}><Form.Item name="subject" label="Subject" rules={[{ required:true }]}><Input /></Form.Item></Col>
             <Col span={12}>
               <Form.Item name="dueDate" label="Due Date / Time">
-                <DatePicker showTime style={{ width:'100%' }} format="DD/MM/YYYY HH:mm" />
+                <DatePicker showTime style={{ width:'100%' }} format="MM/DD/YYYY HH:mm" />
               </Form.Item>
             </Col>
             <Col span={12}><Form.Item name="details" label="Notes / Details"><TextArea rows={3} /></Form.Item></Col>
@@ -879,12 +879,12 @@ const Leads = () => {
             </Col>
             <Col span={8}>
               <Form.Item name="q_start" label="Quote Date" rules={[{ required:true }]}>
-                <DatePicker style={{ width:'100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width:'100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="q_end" label="Expiry Date">
-                <DatePicker style={{ width:'100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width:'100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -893,7 +893,7 @@ const Leads = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="q_vat" label="VAT %" initialValue={0}>
+              <Form.Item name="q_vat" label="Tax %" initialValue={0}>
                 <InputNumber min={0} max={100} style={{ width:'100%' }} addonAfter="%" />
               </Form.Item>
             </Col>
@@ -972,7 +972,7 @@ const Leads = () => {
             return (
               <div style={{ marginTop:12, padding:'10px 16px', background:'#fafafa', borderRadius:6, textAlign:'right' }}>
                 <div style={{ marginBottom:4 }}>Subtotal: <strong>{fmtMoney(subtotal)}</strong></div>
-                {vatRate > 0 && <div style={{ marginBottom:4, color:'#8c8c8c' }}>VAT ({vatRate}%): <strong>{fmtMoney(vatAmt)}</strong></div>}
+                {vatRate > 0 && <div style={{ marginBottom:4, color:'#8c8c8c' }}>Tax ({vatRate}%): <strong>{fmtMoney(vatAmt)}</strong></div>}
                 <div style={{ fontSize:16, color:'#1890ff' }}>Total: <strong>{fmtMoney(total)}</strong></div>
               </div>
             );

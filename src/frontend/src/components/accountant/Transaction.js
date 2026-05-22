@@ -94,7 +94,7 @@ const Transaction = () => {
       title: 'Date',
       dataIndex: 'date',
       key: 'date',
-      render: (date) => moment(date).format('DD/MM/YYYY'),
+      render: (date) => moment(date).format('MM/DD/YYYY'),
     },
     {
       title: 'Description',

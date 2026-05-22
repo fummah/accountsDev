@@ -197,7 +197,9 @@ function createWindow() {
         { label: 'Manage Fixed Assets', click: () => { navigateTo('/main/accountant/manage-assets'); } }
         ,
         { type: 'separator' },
-        { label: 'Recurring Transactions', click: () => { navigateTo('/main/accountant/recurring'); } }
+        { label: 'Recurring Transactions', click: () => { navigateTo('/main/accountant/recurring'); } },
+        { type: 'separator' },
+        { label: 'Partner Portal (Multi-Client)', click: () => { navigateTo('/main/accountant/portal'); } }
       ]
     },
     // 🟩 Custom System Menu
@@ -272,6 +274,9 @@ function createWindow() {
             { label: 'Credit Notes / Refunds', click: () => {
               navigateTo('/main/customers/credit-notes');
             } },
+            { label: 'Payment History', click: () => {
+              navigateTo('/main/customers/payment-history');
+            } },
             { label: 'Item List', click: () => {
               navigateTo('/main/customers/items');
             } },
@@ -297,7 +302,10 @@ function createWindow() {
             { label: 'Employee List', click: () => { navigateTo('/main/employees/list'); }},
             { label: 'Run Payroll', click: () => { navigateTo('/main/employees/payroll'); }},
             { label: 'Tax Filing', click: () => { navigateTo('/main/employees/tax-filing'); }},
-            { label: 'Payslips', click: () => { navigateTo('/main/employees/payslips'); }}
+            { label: 'Payslips', click: () => { navigateTo('/main/employees/payslips'); }},
+            { type: 'separator' },
+            { label: 'Time & Attendance', click: () => { navigateTo('/main/employees/time-attendance'); }},
+            { label: 'Direct Deposit Files', click: () => { navigateTo('/main/employees/direct-deposit'); }}
           ]
         },
         {
@@ -309,7 +317,9 @@ function createWindow() {
             { label: 'Reconcile', click: () => { navigateTo('/main/banking/reconcile'); } },
         { label: 'Run Payroll', click: () => { navigateTo('/main/employees/payroll'); } },
         { type: 'separator' },
-        { label: 'Bank Feeds (Live/Offline)', click: () => { navigateTo('/main/banking/feeds'); } }
+        { label: 'Bank Feeds (Live/Offline)', click: () => { navigateTo('/main/banking/feeds'); } },
+        { type: 'separator' },
+        { label: 'Auto Bank Rules', click: () => { navigateTo('/main/banking/rules'); } }
           ]
         },
 
@@ -344,8 +354,12 @@ function createWindow() {
         { label: 'Budget vs Actual', click: () => { navigateTo('/main/reports/budget-vs-actual'); } },
         { label: 'Audit Trail', click: () => { navigateTo('/main/reports/audit-trail'); } },
         { type: 'separator' },
-        { label: 'VAT Return', click: () => { navigateTo('/main/reports/vat-return'); } },
+        { label: 'Tax Return', click: () => { navigateTo('/main/reports/vat-return'); } },
         { label: 'Tax Summary', click: () => { navigateTo('/main/reports/tax-summary'); } },
+        { label: 'Tax Forms (W-2, 1099, etc.)', click: () => { navigateTo('/main/reports/tax-forms'); } },
+        { label: 'Electronic Tax Filing', click: () => { navigateTo('/main/reports/tax-filing'); } },
+        { type: 'separator' },
+        { label: 'Consolidated Reports', click: () => { navigateTo('/main/reports/consolidated'); } },
         { type: 'separator' },
         { label: 'Analytics Dashboard', click: () => { navigateTo('/main/analytics'); } },
         { label: 'AI Assistant', click: () => { navigateTo('/main/assistant'); } }
@@ -382,7 +396,11 @@ function createWindow() {
         ,
         { label: 'Multi-Currency', click: () => { navigateTo('/main/settings/currencies'); } }
         ,
-        { label: 'Accessibility', click: () => { navigateTo('/main/settings/accessibility'); } }
+        { label: 'Accessibility', click: () => { navigateTo('/main/settings/accessibility'); } },
+        { type: 'separator' },
+        { label: 'Setup Wizard', click: () => { navigateTo('/main/settings/setup-wizard'); } },
+        { label: 'Jurisdiction Tax Rules', click: () => { navigateTo('/main/settings/jurisdiction-tax'); } },
+        { label: 'Localisation / i18n', click: () => { navigateTo('/main/settings/localisation'); } }
       ]
     },
   
@@ -394,6 +412,10 @@ function createWindow() {
         { label: 'Contact Support' },
         { type: 'separator' },
         { label: 'AI Assistant', click: () => { navigateTo('/main/assistant'); } },
+        { type: 'separator' },
+        { label: 'Pricing Rules', click: () => { navigateTo('/main/inventory/pricing-rules'); } },
+        { label: 'Pick, Pack & Ship', click: () => { navigateTo('/main/inventory/pick-pack-ship'); } },
+        { type: 'separator' },
         { label: 'About', role: 'about' }
       ]
     },
@@ -459,6 +481,7 @@ const registerAllHandlers = async () => {
     { name: 'CreditNotes', register: require('./handlers/creditNoteHandlers') },
     { name: 'Webhooks', register: require('./handlers/webhookHandlers') },
     { name: 'ExpenseCategories', register: require('./handlers/expenseCategoryHandlers') },
+    { name: 'GapFeatures', register: require('./handlers/gapHandlers') },
     { name: 'IPC', register: registerIpcHandlers }              // Keep IPC handlers last
   ];
 

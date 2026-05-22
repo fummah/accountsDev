@@ -76,11 +76,11 @@ const QuoteList = () => {
       sorter: (a, b) => (a.customer_name || '').localeCompare(b.customer_name || ''),
       render: (t, r) => t || r.customer || '-' },
     { title: 'Date', dataIndex: 'start_date', key: 'date', width: 100,
-      render: d => d ? moment(d).format('DD/MM/YYYY') : '-' },
+      render: d => d ? moment(d).format('MM/DD/YYYY') : '-' },
     { title: 'Expiry', dataIndex: 'last_date', key: 'expiry', width: 100,
       render: (d, r) => {
         const expired = r.status === 'Open' && d && moment(d).isBefore(moment());
-        return <span style={{ color: expired ? '#f5222d' : undefined }}>{d ? moment(d).format('DD/MM/YYYY') : '-'}</span>;
+        return <span style={{ color: expired ? '#f5222d' : undefined }}>{d ? moment(d).format('MM/DD/YYYY') : '-'}</span>;
       }},
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 110,
       sorter: (a, b) => (Number(a.amount) || 0) - (Number(b.amount) || 0),

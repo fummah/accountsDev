@@ -29,6 +29,8 @@ import {updateWindowWidth} from "../../appRedux/actions";
 import AppSidebar from "./AppSidebar";
 import CommandPalette from "../../components/CommandPalette";
 import { loadBaseCurrency } from "../../utils/currency";
+import KeyboardShortcuts from "../../components/shared/KeyboardShortcuts";
+import HelpCenter from "../../components/shared/HelpCenter";
 
 const {Content, Footer} = Layout;
 
@@ -153,6 +155,8 @@ const MainApp = () => {
       </Layout>
       <Customizer/>
       <CommandPalette/>
+      <KeyboardShortcuts />
+      <HelpCenter />
 
       <Modal
         title="Welcome! Let's set up your company"

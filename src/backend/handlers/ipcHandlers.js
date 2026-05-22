@@ -24,6 +24,7 @@ const {
 
 const Tax = require('../models/tax');
 const Approvals = require('../models/approvals');
+const JournalEntries = require('../models/journalEntries');
 
 const registerIpcHandlers = () => {
   console.log('[ipcHandlers] registerIpcHandlers called');
@@ -321,6 +322,15 @@ safeHandle('get-expenses-paginated', async (event, page, pageSize, search) => {
   }
 });
 
+safeHandle('get-single-expense', async (event, id) => {
+  try {
+    return Expenses.getSingleExpense(id);
+  } catch (error) {
+    console.error('Error fetching single expense:', error);
+    return { error: error.message };
+  }
+});
+
 // Handler to insert an expense (auto-applies approval policy when configured)
 safeHandle('insert-expense', async (event, payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => {
   try {
@@ -339,6 +349,19 @@ safeHandle('insert-expense', async (event, payee,payment_account,payment_date, p
           requiredLevels: policy.requiredLevels || 1
         });
       } catch {}
+    }
+    // ── Auto-post to COA: DR Expense / CR Accounts Payable ────────────────
+    if (res && res.success && statusToUse !== 'Pending') {
+      try {
+        JournalEntries.postExpense({
+          id: res.expenseId,
+          amount: totalAmount,
+          date: payment_date,
+          description: category || ref_no || '',
+          category,
+          reference: ref_no,
+        });
+      } catch (jErr) { console.warn('Journal auto-post (expense) failed:', jErr.message); }
     }
     return res;
   } catch (error) {
@@ -598,7 +621,7 @@ safeHandle('deletingrecord', async (event,id,table) => {
         return await Quotes.deleteQuote(id);
       case 'expenses':
         // delete expense lines first then expense
-        return await Expenses.deleteExpense ? await Expenses.deleteExpense(id) : await Vat.deleteRecord(id,table);
+        return Expenses.deleteExpense(id);
       case 'vat':
         return await Vat.deleteRecord(id,table);
       default:

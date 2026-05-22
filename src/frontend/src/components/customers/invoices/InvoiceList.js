@@ -65,12 +65,12 @@ const InvoiceList = () => {
       render: (t, r) => t || r.customer || '-' },
     { title: 'Date', dataIndex: 'start_date', key: 'date', width: 100,
       sorter: (a, b) => (a.start_date || '').localeCompare(b.start_date || ''),
-      render: d => d ? moment(d).format('DD/MM/YYYY') : '-' },
+      render: d => d ? moment(d).format('MM/DD/YYYY') : '-' },
     { title: 'Due Date', dataIndex: 'last_date', key: 'due', width: 100,
       render: (d, r) => {
         const isOverdue = (r.status === 'Unpaid' || r.status === 'Sent') && d && moment(d).isBefore(moment());
         return <span style={{ color: isOverdue ? '#f5222d' : undefined, fontWeight: isOverdue ? 600 : undefined }}>
-          {d ? moment(d).format('DD/MM/YYYY') : '-'}
+          {d ? moment(d).format('MM/DD/YYYY') : '-'}
         </span>;
       }},
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 110,

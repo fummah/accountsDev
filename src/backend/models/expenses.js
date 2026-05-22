@@ -61,17 +61,53 @@ const Expenses = {
       for (const line of expenseLines) {
         await expenseLineStmt.run(expenseId, line.category, line.description, line.amount);
       }
-      // Also create a transaction record for the expense so it appears in transactions lists
+      // --- GL Posting: double-entry for each expense line to its COA account ---
       try {
         const totalAmount = expenseLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-        // Insert a transaction: debit the expense (amount), credit will be null (or handled by ledger later)
         const txStmt = db.prepare(`INSERT INTO transactions (date, type, amount, description, status, accountId, reference, debit, credit, entered_by) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?)`);
-        // accountId is null (payment_account is text); leave as NULL
-        await txStmt.run(payment_date, 'Expense', totalAmount, category || 'Expense', null, ref_no || '', totalAmount, null, entered_by || null);
+
+        // Find the payment (credit) account in COA
+        let payAccountId = null;
+        if (payment_account) {
+          const payAccRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(payment_account, payment_account);
+          if (payAccRow) payAccountId = payAccRow.id;
+        }
+        if (!payAccountId) {
+          const fallbackPay = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%bank%' OR LOWER(type) LIKE '%cash%' OR LOWER(name) LIKE '%cash%' LIMIT 1").get();
+          if (fallbackPay) payAccountId = fallbackPay.id;
+        }
+
+        // Credit the payment account (money leaving)
+        txStmt.run(payment_date, 'Expense', totalAmount, `Expense - ${category || 'Payment'}`, payAccountId, ref_no || '', null, totalAmount, entered_by || null);
+
+        // Debit each expense category account
+        for (const line of expenseLines) {
+          const lineAmt = Number(line.amount) || 0;
+          if (lineAmt === 0) continue;
+          let expAccountId = null;
+          const cat = line.category || category || '';
+          if (cat) {
+            const expAccRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(cat, cat);
+            if (expAccRow) expAccountId = expAccRow.id;
+          }
+          if (!expAccountId) {
+            const fallbackExp = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%expense%' LIMIT 1").get();
+            if (fallbackExp) expAccountId = fallbackExp.id;
+          }
+          if (expAccountId) {
+            txStmt.run(payment_date, 'Expense', lineAmt, `Expense - ${line.description || cat}`, expAccountId, ref_no || '', lineAmt, null, entered_by || null);
+            // Update COA balance
+            db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(lineAmt, expAccountId);
+          }
+        }
+
+        // Update payment account balance (decrease)
+        if (payAccountId) {
+          db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) - ? WHERE id = ?').run(totalAmount, payAccountId);
+        }
       } catch (txErr) {
-        console.error('Failed to create transaction for expense:', txErr);
-        // proceed — expense was created; return success but include warning
-        return { success: true, expenseId, warning: 'expense_created_but_transaction_failed' };
+        console.error('Failed to create GL entries for expense:', txErr);
+        return { success: true, expenseId, warning: 'expense_created_but_gl_posting_failed' };
       }
 
       return { success: true, expenseId,result };
@@ -85,6 +121,20 @@ const Expenses = {
     }
   },
   
+
+  // Retrieve a single expense with its lines
+  getSingleExpense: (id) => {
+    try {
+      const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id);
+      if (!expense) return null;
+      const lines = db.prepare('SELECT * FROM expense_lines WHERE expense_id = ?').all(id);
+      const totalAmount = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+      return { ...expense, lines, amount: totalAmount };
+    } catch (error) {
+      console.error('Error fetching single expense:', error);
+      return null;
+    }
+  },
 
   // Retrieve all Expenses
   getAllExpenses: () => {
@@ -146,6 +196,26 @@ const Expenses = {
     }
   }
   ,
+
+  // Delete an expense and its related records
+  deleteExpense: (id) => {
+    try {
+      // Delete expense lines first
+      db.prepare('DELETE FROM expense_lines WHERE expense_id = ?').run(id);
+      // Delete associated transaction record
+      try {
+        db.prepare("DELETE FROM transactions WHERE type = 'Expense' AND id IN (SELECT id FROM transactions WHERE type = 'Expense' AND description LIKE '%' || (SELECT category FROM expenses WHERE id = ?) || '%' AND date = (SELECT payment_date FROM expenses WHERE id = ?))").run(id, id);
+      } catch (txErr) {
+        console.warn('[expenses] Could not clean up transaction for expense:', txErr.message);
+      }
+      // Delete the expense itself
+      const res = db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+      return { success: res.changes > 0, message: res.changes > 0 ? 'Expense deleted successfully' : 'Expense not found' };
+    } catch (error) {
+      console.error('Error deleting expense:', error);
+      return { success: false, error: error.message };
+    }
+  },
 
   // Accounts Payable Aging (approximate from expenses marked Pending)
   getAPAging: function(referenceDate) {

@@ -15,6 +15,9 @@ import SyncVPN from './SyncVPN';
 import DatabaseShare from './DatabaseShare';
 import CurrencySettings from './CurrencySettings';
 import Accessibility from './Accessibility';
+import SetupWizard from './SetupWizard';
+import JurisdictionTax from './JurisdictionTax';
+import LocalisationSettings from './LocalisationSettings';
 
 const SettingsRoutes = ({ match }) => {
   return (
@@ -34,6 +37,9 @@ const SettingsRoutes = ({ match }) => {
       <Route path={`${match.path}/database`} component={DatabaseShare} />
       <Route path={`${match.path}/currencies`} component={CurrencySettings} />
       <Route path={`${match.path}/accessibility`} component={Accessibility} />
+      <Route path={`${match.path}/setup-wizard`} component={SetupWizard} />
+      <Route path={`${match.path}/jurisdiction-tax`} component={JurisdictionTax} />
+      <Route path={`${match.path}/localisation`} component={LocalisationSettings} />
     </Switch>
   );
 };

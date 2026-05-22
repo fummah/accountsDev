@@ -23,7 +23,7 @@ const ProfitAndLossSection = ({data}) => {
       title: "Amount",
       dataIndex: "amount",
       key: "amount",
-      render: (value) => `$${value.toLocaleString()}`, // Format as currency
+      render: (value) => `$${Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     },
   ];
   return (

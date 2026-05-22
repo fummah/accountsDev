@@ -229,7 +229,7 @@ const BillTracker = () => {
 
       <Modal
         title="Add New Bill"
-        open={isModalVisible}
+        visible={isModalVisible}
         onOk={() => form.submit()}
         onCancel={() => {
           setIsModalVisible(false);

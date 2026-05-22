@@ -5,7 +5,7 @@ import Widget from "components/Widget/index";
 
 
 const formarty = (value) =>{
-  return `$${value.toLocaleString()}`;
+  return `$${Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const BalanceSheetSection = ({data}) => {

@@ -1,135 +1,414 @@
-import React, {useState, useEffect} from "react";
-import { useLocation, useHistory } from "react-router-dom";
-import {Col, Row,Tabs} from "antd";
+import React, { useState, useEffect } from "react";
+import { useHistory } from "react-router-dom";
+import { Row, Col, Card, Spin, Button, Steps, Modal, Form, Input, Select, message, Divider } from "antd";
+import {
+  BankOutlined, DollarOutlined, CreditCardOutlined, WalletOutlined,
+  FundOutlined, RiseOutlined, FallOutlined, PieChartOutlined,
+  FileTextOutlined, CheckSquareOutlined, FormOutlined,
+  ReconciliationOutlined, SwapOutlined,
+  BarChartOutlined, AppstoreOutlined, CalendarOutlined,
+  ProfileOutlined, RocketOutlined, CheckCircleOutlined
+} from "@ant-design/icons";
 import Auxiliary from "util/Auxiliary";
 import Xarrow from "react-xarrows";
 
-const Flow = () => {
-  const location = useLocation();
-  const history = useHistory();
-  // Default tab key
-  const [activeKey, setActiveKey] = useState("1");
+const { Step } = Steps;
+const { Option } = Select;
 
-  // Update tab key from location state
-  useEffect(() => {
-    if (location.state && location.state.tabKey) {
-      setActiveKey(location.state.tabKey);
-    }
-  }, [location.state]);
+/* ──── helpers ──── */
+const fmt = (v) => {
+  const n = Number(v || 0);
+  const abs = Math.abs(n);
+  return (n < 0 ? '-' : '') + '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const BALANCE_CATEGORIES = [
+  { key: 'bank',       label: 'Bank Accounts',        types: ['Bank'],                     icon: <BankOutlined />,       color: '#1890ff' },
+  { key: 'ar',         label: 'Accounts Receivable',   types: ['Accounts Receivable'],       icon: <RiseOutlined />,      color: '#52c41a' },
+  { key: 'ap',         label: 'Accounts Payable',      types: ['Accounts Payable'],          icon: <FallOutlined />,      color: '#fa541c' },
+  { key: 'cc',         label: 'Credit Cards',          types: ['Credit Card'],               icon: <CreditCardOutlined />,color: '#722ed1' },
+  { key: 'loans',      label: 'Loans',                 types: ['Other Current Liability','Long Term Liability','Loan'], icon: <WalletOutlined />,    color: '#eb2f96' },
+  { key: 'revenue',    label: 'Revenue',               types: ['Income','Other Income'],     icon: <FundOutlined />,      color: '#13c2c2' },
+  { key: 'expenses',   label: 'Expenses',              types: ['Expense','Other Expense','Cost of Goods Sold'], icon: <PieChartOutlined />,  color: '#faad14' },
+  { key: 'equity',     label: 'Equity',                types: ['Equity'],                    icon: <DollarOutlined />,    color: '#2f54eb' },
+];
+
+/* ──── Main Component ──── */
+const Flow = () => {
+  const history = useHistory();
+  const [loading, setLoading] = useState(true);
+  const [balances, setBalances] = useState({});
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardStep, setOnboardStep] = useState(0);
+  const [onboardForm] = Form.useForm();
 
   const P = (p) => (process.env.PUBLIC_URL + p);
-  const items = [
-    { id: "products", icon: P("/assets/icons/products.svg"), label: "Products", x: 0, y: 0 },
-    { id: "expenses", icon: P("/assets/icons/invoice.svg"), label: "Expenses", x: 1, y: 0 },
-    { id: "bills", icon: P("/assets/icons/pay.svg"), label: "Pay Bills", x: 2, y: 0 },
-    { id: "analysis", icon: P("/assets/icons/analysis.svg"), label: "Analysis", x: 3, y: 0 },
-  
-    { id: "sales", icon: P("/assets/icons/track.svg"), label: "Create Sales", x: 1, y: 1 },
-    { id: "cash", icon: P("/assets/icons/expenses.svg"), label: "Cash Receipts", x: 2, y: 1 },
-    { id: "reports", icon: P("/assets/icons/statement.svg"), label: "Reports", x: 3, y: 1 },
-  
-    { id: "quotes", icon: P("/assets/icons/quotes.svg"), label: "Quotes", x: 0, y: 2 },
-    { id: "invoice", icon: P("/assets/icons/invoices.svg"), label: "Create Invoice", x: 1, y: 2 },
-    { id: "payments", icon: P("/assets/icons/payments.svg"), label: "Payments", x: 2, y: 2 },
-    { id: "deposits", icon: P("/assets/icons/bills.svg"), label: "Deposits", x: 3, y: 2 },
 
-    { id: "employee", icon: P("/assets/icons/employee.svg"), label: "Create Employee", x: 1, y: 3 },
-    { id: "payroll", icon: P("/assets/icons/payroll.svg"), label: "Payroll", x: 2, y: 3 },
-    { id: "reconcile", icon: P("/assets/icons/refund.svg"), label: "Reconcile", x: 3, y: 3 },
-  ];
-  
-  const arrows = [
-    ["products", "expenses"],
-    ["products", "quotes"],
-    ["expenses", "bills"],
-    ["bills", "analysis"],
-    
-    ["quotes", "invoice"],
-    ["invoice", "payments"],
-    ["sales", "invoice"],
-    ["sales", "cash"],
-    ["cash", "reports"],
-    ["reports", "analysis"],
+  useEffect(() => {
+    loadData();
+  }, []);
 
-    ["cash", "payments"],
-    ["payments", "deposits"],
-    ["deposits", "reports"],
-    ["deposits", "reconcile"],
-    ["reconcile", "deposits"],
-    ["employee", "payroll"],
-    ["payments", "payroll"],
-    ["payroll", "reconcile"],
-  ];
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const accounts = await window.electronAPI?.getChartOfAccounts?.() || [];
+      const acctList = Array.isArray(accounts) ? accounts : [];
+      // Aggregate balances by category
+      const bals = {};
+      BALANCE_CATEGORIES.forEach(cat => {
+        const matching = acctList.filter(a =>
+          cat.types.some(t => (a.accountType || a.type || '').toLowerCase() === t.toLowerCase())
+        );
+        bals[cat.key] = matching.reduce((sum, a) => sum + Number(a.balance || 0), 0);
+      });
+      setBalances(bals);
 
-  const routeMap = {
-    // direct mappings — include query params to open specific tabs where applicable
-    products: "/inner/sales?tab=10",
-    bills: "/inner/expenses",
-    payment: "/inner/expenses",
-    analysis: "/inner/reports?tab=1",
-    sales: "/inner/sales?tab=1",
-    cash: "/inner/sales?tab=6", // Cash Receipts -> Income Tracker
-    reports: "/inner/reports?tab=1",
-    quotes: "/inner/sales?tab=3",
-    invoice: "/inner/sales?tab=2",
-    payments: "/inner/sales?tab=5",
-    deposits: "/main/banking/deposits",
-    payroll: "/main/employees/payroll",
-    employee: "/main/employees/center",
-    reconcile: "/inner/transactions",
-    expenses: "/inner/expenses",
+      // Check if onboarding needed
+      const comp = await window.electronAPI?.getCompany?.();
+      const wizStatus = await window.electronAPI?.setupWizardStatus?.();
+      if ((!comp?.name) || (wizStatus && !wizStatus.completed)) {
+        setShowOnboarding(true);
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
   };
-  const WorkflowNode = ({ id, icon, label, x, y,onClick }) => (
+
+  const handleOnboardFinish = async () => {
+    try {
+      const vals = onboardForm.getFieldsValue(true);
+      if (vals.companyName) {
+        await window.electronAPI?.saveCompany?.({ name: vals.companyName, industry: vals.industry });
+      }
+      if (vals.baseCurrency) {
+        await window.electronAPI?.currencySetBase?.(vals.baseCurrency);
+      }
+      setShowOnboarding(false);
+      message.success('Setup complete! Welcome aboard.');
+      loadData();
+    } catch (e) { message.error(e.message); }
+  };
+
+  /* ──── Layout constants ──── */
+  const CELL_W = 165;
+  const CELL_H = 130;
+
+  /* ──── QB-style workflow nodes ──── */
+  const nodes = [
+    // VENDORS
+    { id: "n-enterbills",      icon: P("/assets/icons/invoice.svg"),   label: "Enter Bills",            col: 1, row: 0, route: "/inner/expenses" },
+    { id: "n-paybills",        icon: P("/assets/icons/pay.svg"),        label: "Pay Bills",              col: 3, row: 0, route: "/inner/expenses" },
+    // CUSTOMERS — upper
+    { id: "n-salesorders",     icon: P("/assets/icons/track.svg"),      label: "Sales\nOrders",          col: 0, row: 1, route: "/inner/sales?tab=1" },
+    { id: "n-acceptcc",        icon: P("/assets/icons/bills.svg"),      label: "Accept\nCredit Cards",   col: 2, row: 1, route: "/inner/sales?tab=6" },
+    { id: "n-salesreceipts",   icon: P("/assets/icons/expenses.svg"),   label: "Create Sales\nReceipts", col: 3, row: 1, route: "/inner/sales?tab=6" },
+    // CUSTOMERS — main
+    { id: "n-estimates",       icon: P("/assets/icons/quotes.svg"),     label: "Estimates",              col: 0, row: 2, route: "/inner/sales?tab=3" },
+    { id: "n-createinvoice",   icon: P("/assets/icons/invoices.svg"),   label: "Create\nInvoices",       col: 1, row: 2, route: "/inner/sales?tab=2" },
+    { id: "n-receivepayments", icon: P("/assets/icons/payments.svg"),   label: "Receive\nPayments",      col: 2, row: 2, route: "/inner/sales?tab=5" },
+    { id: "n-refunds",         icon: P("/assets/icons/refund.svg"),     label: "Refunds &\nCredits",     col: 3, row: 2, route: "/inner/sales?tab=7" },
+    // CUSTOMERS — lower
+    { id: "n-stmtcharges",     icon: P("/assets/icons/statement.svg"),  label: "Statement\nCharges",     col: 1, row: 3, route: "/inner/sales?tab=4" },
+    { id: "n-statements",      icon: P("/assets/icons/analysis.svg"),   label: "Statements",             col: 2, row: 3, route: "/inner/sales?tab=4" },
+    // EMPLOYEES
+    { id: "n-entertime",       icon: P("/assets/icons/employee.svg"),   label: "Enter\nTime",            col: 0, row: 4, route: "/main/employees/center" },
+    { id: "n-turnonpayroll",   icon: P("/assets/icons/payroll.svg"),    label: "Turn On\nPayroll",       col: 2, row: 4, route: "/main/employees/payroll" },
+  ];
+
+  const arrows = [
+    ["n-enterbills",      "n-paybills"],            // VENDORS: Enter Bills → Pay Bills
+    ["n-enterbills",      "n-createinvoice"],        // Enter Bills ↓ Create Invoices
+    ["n-salesorders",     "n-createinvoice"],        // Sales Orders → Create Invoices
+    ["n-estimates",       "n-createinvoice"],        // Estimates → Create Invoices
+    ["n-acceptcc",        "n-receivepayments"],      // Accept CC → Receive Payments
+    ["n-salesreceipts",   "n-receivepayments"],      // Sales Receipts → Receive Payments
+    ["n-createinvoice",   "n-receivepayments"],      // Create Invoices → Receive Payments
+    ["n-createinvoice",   "n-stmtcharges"],          // Create Invoices ↓ Statement Charges
+    ["n-stmtcharges",     "n-statements"],           // Statement Charges → Statements
+  ];
+
+  const GridNode = ({ id, icon, label, col, row, route }) => (
     <div
       id={id}
-      onClick={onClick}
-      className="workflow-node"
+      onClick={() => history.push(route)}
       style={{
-        top: `${y * 140}px`,
-        left: `${x * 200}px`,
         position: "absolute",
-        width: "80px",
-        height: "70px",
-        padding: "10px",
-        background: "white",
-        borderRadius: "12px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
+        left: col * CELL_W + 30,
+        top:  row * CELL_H + 28,
+        width: 80,
+        display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", cursor: "pointer",
+        transition: "transform 0.15s", zIndex: 2,
       }}
+      onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.1)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
     >
-      <img src={icon} alt={label} className="w-10 h-10 mb-2" />
-      <span className="text-center text-sm">{label}</span>
+      <div style={{ width: 52, height: 52, borderRadius: 10, background: "transparent",
+        display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 5 }}>
+        <img src={icon} alt={label} style={{ width: 42, height: 42, objectFit: "contain" }} />
+      </div>
+      <span style={{ fontSize: 11, textAlign: "center", color: "#333", lineHeight: "14px",
+        fontWeight: 500, whiteSpace: "pre-line" }}>{label}</span>
     </div>
   );
-  
+
+  /* ──── Section config ──── */
+  //  row 0 = VENDORS (y: 0–129)
+  //  rows 1-3 = CUSTOMERS (y: 130–519, with label strip at top)
+  //  row 4 = EMPLOYEES (y: 520–649, with label strip at top)
+  const VEND_H   = CELL_H;                     // 130
+  const CUST_TOP = CELL_H;                     // 130
+  const CUST_H   = CELL_H * 3;                 // 390
+  const EMP_TOP  = CELL_H * 4;                 // 520
+  const EMP_H    = CELL_H;                     // 130
+  const totalH   = CELL_H * 5 + 20;
+  const totalW   = CELL_W * 4 + 80;
+
+  /* ──── Quick action lists (QB right panel) ──── */
+  const quickTop = [
+    { icon: <AppstoreOutlined />,    label: "Chart of\nAccounts",  route: "/main/accountant/chart-of-accounts", color: "#1890ff" },
+    { icon: <ProfileOutlined />,     label: "Items &\nServices",   route: "/inner/sales?tab=10",                color: "#fa8c16" },
+    { icon: <CheckSquareOutlined />, label: "Order\nChecks",       route: "/main/accountant/check-printing",    color: "#2f54eb" },
+    { icon: <CalendarOutlined />,    label: "Calendar",            route: "/main/employees/payroll",            color: "#13c2c2" },
+  ];
+
+  const quickBanking = [
+    { id: "qa-record-deposits", icon: <ReconciliationOutlined />, label: "Record\nDeposits",            route: "/main/banking/deposits",          color: "#1890ff" },
+    { id: "qa-reconcile",       icon: <SwapOutlined />,           label: "Reconcile",                   route: "/main/banking/reconcile",         color: "#13c2c2" },
+    { id: "qa-write-checks",    icon: <FormOutlined />,           label: "Write\nChecks",               route: "/main/accountant/check-printing", color: "#2f54eb" },
+    { id: "qa-check-register",  icon: <FileTextOutlined />,       label: "Check\nRegister",             route: "/main/accountant/general-ledger", color: "#722ed1" },
+    { id: "qa-print-checks",    icon: <BarChartOutlined />,       label: "Print\nChecks",               route: "/main/accountant/check-printing", color: "#fa541c" },
+    { id: "qa-cc-charges",      icon: <CreditCardOutlined />,     label: "Enter Credit\nCard Charges",  route: "/main/expenses/credit-cards",     color: "#eb2f96" },
+  ];
+
+  if (loading) {
+    return <Auxiliary><div style={{ textAlign: "center", padding: 80 }}><Spin size="large" tip="Loading..." /></div></Auxiliary>;
+  }
 
   return (
     <Auxiliary>
-     <Row justify="center" align="middle" style={{ minHeight: "9vh" }}>
-  <Col>
-    <div
-      className="relative bg-gray-100 p-10 overflow-auto"
-      style={{
-        width: "860px",
-        height: "450px",
-        position: "relative"
-      }}
-    >
-      {items.map((item) => (
-        <WorkflowNode key={item.id} {...item} onClick={() => history.push(routeMap[item.id])}/>
-      ))}
-      {arrows.map(([start, end], idx) => (
-        <Xarrow key={idx} start={start} end={end} strokeWidth={2} headSize={6} />
-      ))}
-    </div>
-  </Col>
-</Row>
+      {/* ──── Account Balances ──── */}
+      <div style={{ marginBottom: 20 }}>
+        <Row gutter={[12, 12]}>
+          {BALANCE_CATEGORIES.map(cat => (
+            <Col xl={3} lg={6} md={6} sm={12} xs={12} key={cat.key}>
+              <Card
+                size="small"
+                hoverable
+                style={{ borderTop: `3px solid ${cat.color}`, borderRadius: 6 }}
+                bodyStyle={{ padding: "12px 14px" }}
+                onClick={() => history.push("/main/accountant/chart-of-accounts")}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 18, color: cat.color }}>{cat.icon}</span>
+                  <span style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{cat.label}</span>
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: (balances[cat.key] || 0) < 0 ? '#f5222d' : '#262626' }}>
+                  {fmt(balances[cat.key])}
+                </div>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      </div>
 
+      {/* ──── Workflow Diagram + Quick Actions ──── */}
+      <Row gutter={16}>
+        {/* Left: QB-style workflow diagram */}
+        <Col xl={17} lg={16} md={24} sm={24} xs={24}>
+          <Card bodyStyle={{ padding: 16, overflowX: "auto" }} style={{ borderRadius: 8 }}>
+            <div style={{ position: "relative", width: totalW, height: totalH, minHeight: 680 }}>
 
+              {/* ── Section background bands ── */}
+              {/* VENDORS band */}
+              <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: VEND_H,
+                background: "#fafafa", borderRadius: 6, border: "1px solid #e8e8e8", zIndex: 0 }} />
+              {/* CUSTOMERS band */}
+              <div style={{ position: "absolute", left: 0, right: 0, top: CUST_TOP, height: CUST_H,
+                background: "#f0f7ff", borderRadius: 6, border: "1px solid #bae0ff", zIndex: 0 }} />
+              {/* EMPLOYEES band */}
+              <div style={{ position: "absolute", left: 0, right: 0, top: EMP_TOP, height: EMP_H,
+                background: "#f6ffed", borderRadius: 6, border: "1px solid #b7eb8f", zIndex: 0 }} />
+
+              {/* ── Section labels ── */}
+              <div style={{ position: "absolute", top: CUST_TOP + 6, left: "50%",
+                transform: "translateX(-50%)", zIndex: 3 }}>
+                <span style={{ display: "inline-block", padding: "1px 14px", borderRadius: 3,
+                  border: "1px solid #1890ff", color: "#1890ff",
+                  fontSize: 10, fontWeight: 700, letterSpacing: 1.2, background: "#e6f7ff" }}>
+                  CUSTOMERS
+                </span>
+              </div>
+              <div style={{ position: "absolute", top: EMP_TOP + 6, left: "50%",
+                transform: "translateX(-50%)", zIndex: 3 }}>
+                <span style={{ display: "inline-block", padding: "1px 14px", borderRadius: 3,
+                  border: "1px solid #52c41a", color: "#52c41a",
+                  fontSize: 10, fontWeight: 700, letterSpacing: 1.2, background: "#f6ffed" }}>
+                  EMPLOYEES
+                </span>
+              </div>
+
+              {/* ── Workflow nodes ── */}
+              {nodes.map(n => <GridNode key={n.id} {...n} />)}
+
+              {/* ── Workflow arrows ── */}
+              {arrows.map(([s, e], i) => (
+                <Xarrow key={i} start={s} end={e}
+                  strokeWidth={1.8} headSize={6}
+                  color="#adb5bd" curveness={0.15}
+                />
+              ))}
+
+              {/* ── Cross-panel arrow: Receive Payments → Record Deposits (BANKING) ── */}
+              <Xarrow
+                start="n-receivepayments"
+                end="qa-record-deposits"
+                strokeWidth={2} headSize={7}
+                color="#1890ff" curveness={0.25}
+                dashness={{ animation: 1.2, strokeLen: 10, nonStrokeLen: 5 }}
+              />
+            </div>
+          </Card>
+        </Col>
+
+        {/* Right: QB-style quick access panel */}
+        <Col xl={7} lg={8} md={24} sm={24} xs={24}>
+          {/* Top section — no title (matches QB) */}
+          <Card size="small" bodyStyle={{ padding: 8 }}
+            style={{ borderRadius: 8, marginBottom: 12, border: "1px solid #e8e8e8" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 2 }}>
+              {quickTop.map((qa, i) => (
+                <div key={i} onClick={() => history.push(qa.route)}
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                    justifyContent: "center", padding: "16px 4px", cursor: "pointer",
+                    borderRadius: 6, transition: "background 0.15s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f7ff"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  <span style={{ fontSize: 26, color: qa.color, marginBottom: 5 }}>{qa.icon}</span>
+                  <span style={{ fontSize: 11, textAlign: "center", whiteSpace: "pre-line",
+                    color: "#333", lineHeight: "14px", fontWeight: 500 }}>{qa.label}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* BANKING section */}
+          <Card size="small"
+            title={
+              <div style={{ textAlign: "center" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#1890ff",
+                  letterSpacing: 1.5, borderBottom: "2px solid #1890ff", paddingBottom: 2 }}>
+                  BANKING
+                </span>
+              </div>
+            }
+            bodyStyle={{ padding: 8 }}
+            style={{ borderRadius: 8, border: "1px solid #bae0ff" }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 2 }}>
+              {quickBanking.map((qa, i) => (
+                <div key={i} id={qa.id} onClick={() => history.push(qa.route)}
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                    justifyContent: "center", padding: "12px 4px", cursor: "pointer",
+                    borderRadius: 6, transition: "background 0.15s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#e6f7ff"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  <span style={{ fontSize: 24, color: qa.color, marginBottom: 4 }}>{qa.icon}</span>
+                  <span style={{ fontSize: 11, textAlign: "center", whiteSpace: "pre-line",
+                    color: "#333", lineHeight: "14px", fontWeight: 500 }}>{qa.label}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* ──── Guided Onboarding Modal ──── */}
+      <Modal
+        title={<span><RocketOutlined style={{ color: '#1890ff', marginRight: 8 }} />Welcome — Let's Get You Started</span>}
+        visible={showOnboarding}
+        closable={true}
+        maskClosable={false}
+        width={560}
+        footer={null}
+        onCancel={() => setShowOnboarding(false)}
+      >
+        <Steps current={onboardStep} size="small" style={{ marginBottom: 24 }}>
+          <Step title="Company" />
+          <Step title="Settings" />
+          <Step title="Done" />
+        </Steps>
+
+        {onboardStep === 0 && (
+          <Form form={onboardForm} layout="vertical">
+            <Form.Item name="companyName" label="Company Name" rules={[{ required: true, message: 'Required' }]}>
+              <Input placeholder="e.g. My Business Pty Ltd" size="large" />
+            </Form.Item>
+            <Form.Item name="industry" label="Industry">
+              <Select placeholder="Select your industry">
+                <Option value="general">General / Other</Option>
+                <Option value="retail">Retail</Option>
+                <Option value="professional-services">Professional Services</Option>
+                <Option value="construction">Construction</Option>
+                <Option value="manufacturing">Manufacturing</Option>
+                <Option value="non-profit">Non-Profit</Option>
+                <Option value="hospitality">Hospitality</Option>
+                <Option value="healthcare">Healthcare</Option>
+                <Option value="technology">Technology / SaaS</Option>
+              </Select>
+            </Form.Item>
+            <div style={{ textAlign: "right" }}>
+              <Button type="primary" onClick={() => setOnboardStep(1)}>Next</Button>
+            </div>
+          </Form>
+        )}
+
+        {onboardStep === 1 && (
+          <Form form={onboardForm} layout="vertical">
+            <Form.Item name="baseCurrency" label="Base Currency" initialValue="USD">
+              <Select showSearch>
+                <Option value="USD">USD — US Dollar</Option>
+                <Option value="EUR">EUR — Euro</Option>
+                <Option value="GBP">GBP — British Pound</Option>
+                <Option value="ZAR">ZAR — South African Rand</Option>
+                <Option value="CAD">CAD — Canadian Dollar</Option>
+                <Option value="AUD">AUD — Australian Dollar</Option>
+                <Option value="INR">INR — Indian Rupee</Option>
+              </Select>
+            </Form.Item>
+            <Form.Item name="fiscalYear" label="Fiscal Year Start" initialValue="January">
+              <Select>
+                {['January','February','March','April','May','June','July','August','September','October','November','December'].map(m =>
+                  <Option key={m} value={m}>{m}</Option>
+                )}
+              </Select>
+            </Form.Item>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <Button onClick={() => setOnboardStep(0)}>Back</Button>
+              <Button type="primary" onClick={() => setOnboardStep(2)}>Next</Button>
+            </div>
+          </Form>
+        )}
+
+        {onboardStep === 2 && (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <CheckCircleOutlined style={{ fontSize: 48, color: "#52c41a", marginBottom: 16 }} />
+            <h3>You're All Set!</h3>
+            <p style={{ color: "#666", marginBottom: 24 }}>
+              Your company is ready. You can always adjust settings later from the Settings menu.
+            </p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 20 }}>
+              <Button onClick={() => history.push("/main/accountant/chart-of-accounts")}>Set Up Accounts</Button>
+              <Button onClick={() => history.push("/inner/sales?tab=2")}>Create First Invoice</Button>
+              <Button onClick={() => history.push("/main/customers/center")}>Add Customers</Button>
+            </div>
+            <Button type="primary" size="large" onClick={handleOnboardFinish}>
+              Go to Dashboard
+            </Button>
+          </div>
+        )}
+      </Modal>
     </Auxiliary>
   );
 };

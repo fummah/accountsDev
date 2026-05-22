@@ -69,7 +69,7 @@ const Language = () => {
         <div style={{ marginBottom: '8px' }}>
           <strong>Date Format:</strong>
           <span style={{ marginLeft: '8px' }}>
-            {selectedLanguage === 'en' ? 'MM/DD/YYYY' : 'DD/MM/YYYY'}
+            {selectedLanguage === 'en' ? 'MM/DD/YYYY' : 'MM/DD/YYYY'}
           </span>
         </div>
 

@@ -57,7 +57,7 @@ const CashFlowTrend = ({ summary: summaryProp }) => {
       <ResponsiveContainer width="100%" height={150}>
         <BarChart data={trendData}
                   margin={{top: 0, right: 0, left: 0, bottom: 0}}>
-          <Tooltip formatter={(value) => `${cSym}${value.toLocaleString()}`}/>
+          <Tooltip formatter={(value) => `${cSym}${Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}/>
           <XAxis dataKey="name"/>
           <Bar dataKey="moneyin" stackId="a" fill="#038FDE" barSize={10}/>
           <Bar dataKey="moneyout" stackId="ab" fill="#FE9E15" barSize={10}/>

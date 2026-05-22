@@ -7,7 +7,7 @@ const Suppliers = {
     const stmt = `
       CREATE TABLE IF NOT EXISTS suppliers (
     id	INTEGER,
-    title	TEXT NOT NULL,
+    title	TEXT DEFAULT '',
 	first_name	TEXT NOT NULL,
     middle_name	TEXT,
 	last_name	TEXT,
@@ -16,7 +16,7 @@ const Suppliers = {
     display_name	TEXT,
 	company_name	TEXT,
     phone_number	TEXT,
-    mobile_number	TEXT NOT NULL,
+    mobile_number	TEXT DEFAULT '',
     fax	TEXT,
     other	TEXT,
     website	TEXT,

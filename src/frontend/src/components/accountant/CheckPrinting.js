@@ -92,12 +92,12 @@ const CheckPrinting = () => {
     }
   };
 
-  const amount = Form.useWatch('amount', form) || 0;
-  const watchDate = Form.useWatch('date', form);
-  const watchPayeeName = Form.useWatch('payeeName', form);
-  const watchCheckNumber = Form.useWatch('checkNumber', form);
-  const watchMemo = Form.useWatch('memo', form);
-  const watchAccountId = Form.useWatch('accountId', form);
+  const [amount, setAmount] = useState(0);
+  const [watchDate, setWatchDate] = useState(null);
+  const [watchPayeeName, setWatchPayeeName] = useState('');
+  const [watchCheckNumber, setWatchCheckNumber] = useState('');
+  const [watchMemo, setWatchMemo] = useState('');
+  const [watchAccountId, setWatchAccountId] = useState(null);
 
   const amountWords = useMemo(() => {
     const n = Number(amount || 0);
@@ -179,7 +179,14 @@ const CheckPrinting = () => {
         <div class="memo">Memo: <strong>${vals.memo || ''}</strong></div>
         <div class="signature"><div class="sig-line">Authorized Signature</div></div>
       </div>
-      <div class="micr-line">⑆${vals.routingNumber || '000000000'}⑆ ⑈${vals.accountNumber || '0000000000'}⑈ ${String(vals.checkNumber || '').padStart(6, '0')}</div>
+      <div class="stub-section" style="margin-top:20px;padding-top:12px;border-top:2px dashed #cbd5e1;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#334155;margin-bottom:6px;">
+          <span><strong>Date:</strong> ${dateStr || '_______________'}</span>
+          <span><strong>Payee:</strong> ${vals.payeeName || '________________________________'}</span>
+          <span><strong>Amount:</strong> $${amt.toFixed(2)}</span>
+        </div>
+        <div style="font-size:11px;color:#64748b;">${vals.memo ? '<strong>Memo:</strong> ' + vals.memo : ''}</div>
+      </div>
     </div></div></body></html>`;
   };
 
@@ -340,12 +347,12 @@ const CheckPrinting = () => {
               <Row gutter={12}>
                 <Col xs={24} sm={8}>
                   <Form.Item name="date" label="Date" rules={[{ required: true }]}>
-                    <DatePicker style={{ width: '100%' }} />
+                    <DatePicker style={{ width: '100%' }} onChange={(d) => setWatchDate(d)} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={8}>
                   <Form.Item name="accountId" label="Bank Account" rules={[{ required: true, message: 'Select bank account' }]}>
-                    <Select showSearch optionFilterProp="children" placeholder="Select bank account">
+                    <Select showSearch optionFilterProp="children" placeholder="Select bank account" onChange={(v) => setWatchAccountId(v)}>
                       {bankAccounts.map(a => (
                         <Option key={a.id} value={a.id}>
                           {a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}
@@ -356,7 +363,7 @@ const CheckPrinting = () => {
                 </Col>
                 <Col xs={24} sm={8}>
                   <Form.Item name="checkNumber" label="Check #" rules={[{ required: true, message: 'Required' }]} validateStatus={isDuplicate ? 'warning' : undefined} help={isDuplicate ? 'Duplicate number' : undefined}>
-                    <Input placeholder={suggestedCheckNum} />
+                    <Input placeholder={suggestedCheckNum} onChange={(e) => setWatchCheckNumber(e.target.value)} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -364,7 +371,7 @@ const CheckPrinting = () => {
               <Row gutter={12}>
                 <Col xs={24} sm={12}>
                   <Form.Item name="payee" label="Pay To">
-                    <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear onChange={(val, opt) => form.setFieldsValue({ payeeName: opt?.children })}>
+                    <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear onChange={(val, opt) => { const name = opt?.children || ''; form.setFieldsValue({ payeeName: name }); setWatchPayeeName(name); }}>
                       {payees.map(p => (
                         <Option key={p.id} value={p.id}>{p.name}</Option>
                       ))}
@@ -373,7 +380,7 @@ const CheckPrinting = () => {
                 </Col>
                 <Col xs={24} sm={12}>
                   <Form.Item name="payeeName" label="Payee Name">
-                    <Input placeholder="Or type payee name directly" />
+                    <Input placeholder="Or type payee name directly" onChange={(e) => setWatchPayeeName(e.target.value)} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -381,7 +388,7 @@ const CheckPrinting = () => {
               <Row gutter={12}>
                 <Col xs={24} sm={8}>
                   <Form.Item name="amount" label="Amount ($)" rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
-                    <InputNumber min={0} step={0.01} style={{ width: '100%' }} formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} />
+                    <InputNumber min={0} step={0.01} style={{ width: '100%' }} formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} onChange={(v) => setAmount(v || 0)} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={16}>
@@ -405,7 +412,7 @@ const CheckPrinting = () => {
               </Row>
 
               <Form.Item name="memo" label="Memo">
-                <TextArea rows={2} placeholder="What is this check for?" maxLength={200} showCount />
+                <TextArea rows={2} placeholder="What is this check for?" maxLength={200} showCount onChange={(e) => setWatchMemo(e.target.value)} />
               </Form.Item>
 
               <Space wrap>

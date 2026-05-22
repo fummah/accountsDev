@@ -28,6 +28,33 @@ const CreateInvoice = () => {
   const [prodForm] = Form.useForm();
   const [vatForm] = Form.useForm();
 
+  const calcDueDate = (invoiceDate, terms) => {
+    if (!invoiceDate || !terms) return;
+    const match = (terms || '').match(/Net\s*(\d+)/i);
+    if (match) {
+      const days = parseInt(match[1], 10);
+      const due = moment(invoiceDate).add(days, 'days');
+      form.setFieldsValue({ last_date: due });
+    } else if ((terms || '').toLowerCase().includes('receipt')) {
+      form.setFieldsValue({ last_date: moment(invoiceDate) });
+    }
+  };
+
+  const handleCustomerChange = (custId) => {
+    const cust = customers.find(c => c.id === custId);
+    if (cust) {
+      const updates = {};
+      if (cust.email && cust.email !== 'null') updates.customer_email = cust.email;
+      if (cust.address1 && cust.address1 !== 'null') updates.billing_address = cust.address1;
+      if (cust.terms && cust.terms !== 'null') updates.terms = cust.terms;
+      form.setFieldsValue(updates);
+      if (updates.terms) {
+        const startDate = form.getFieldValue('start_date');
+        calcDueDate(startDate, updates.terms);
+      }
+    }
+  };
+
   useEffect(() => {
     setLoading(true);
     loadDeps().then(() => {
@@ -74,12 +101,12 @@ const CreateInvoice = () => {
     try {
       const vals = await vatForm.validateFields();
       await window.electronAPI.insertVat?.(vals.vat_name || '', Number(vals.vat_percentage) || 0, null);
-      message.success('VAT rate added');
+      message.success('Tax rate added');
       setVatModalOpen(false);
       vatForm.resetFields();
       const v = await window.electronAPI.getAllVat?.();
       setVatRates(Array.isArray(v) ? v : []);
-    } catch (e) { if (!e?.errorFields) message.error('Failed to add VAT rate'); }
+    } catch (e) { if (!e?.errorFields) message.error('Failed to add Tax rate'); }
   };
 
   const loadDeps = async () => {
@@ -248,8 +275,8 @@ const CreateInvoice = () => {
       header: {
         number: vals.number || '',
         status: vals.status || 'Draft',
-        date: vals.start_date ? vals.start_date.format('DD/MM/YYYY') : '',
-        dueDate: vals.last_date ? vals.last_date.format('DD/MM/YYYY') : '',
+        date: vals.start_date ? vals.start_date.format('MM/DD/YYYY') : '',
+        dueDate: vals.last_date ? vals.last_date.format('MM/DD/YYYY') : '',
         terms: vals.terms || '',
         customerName: cust ? (cust.display_name || cust.name || `${cust.first_name || ''} ${cust.last_name || ''}`.trim()) : '',
         email: vals.customer_email || '',
@@ -318,6 +345,7 @@ const CreateInvoice = () => {
               <Form.Item name="customer" label="Customer" rules={[{ required: true, message: 'Select customer' }]}>
                 <Select showSearch placeholder="Select customer"
                   filterOption={(input, opt) => (opt?.children || '').toString().toLowerCase().includes(input.toLowerCase())}
+                  onChange={handleCustomerChange}
                   dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCustModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Customer</Button></>)}>
                   {customers.map(c => <Select.Option key={c.id} value={c.id}>{c.display_name || c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</Select.Option>)}
                 </Select>
@@ -328,7 +356,8 @@ const CreateInvoice = () => {
             </Col>
             <Col span={8}>
               <Form.Item name="terms" label="Payment Terms">
-                <Select placeholder="Select terms" allowClear>
+                <Select placeholder="Select terms" allowClear onChange={(v) => { const startDate = form.getFieldValue('start_date'); calcDueDate(startDate, v); }}>
+                  <Select.Option value="Net 7">Net 7</Select.Option>
                   <Select.Option value="Net 15">Net 15</Select.Option>
                   <Select.Option value="Net 30">Net 30</Select.Option>
                   <Select.Option value="Net 45">Net 45</Select.Option>
@@ -341,12 +370,12 @@ const CreateInvoice = () => {
           <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={8}>
               <Form.Item name="start_date" label="Invoice Date" initialValue={moment()}>
-                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" onChange={(d) => { const terms = form.getFieldValue('terms'); calcDueDate(d, terms); }} />
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="last_date" label="Due Date">
-                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -358,10 +387,10 @@ const CreateInvoice = () => {
               <Form.Item name="billing_address" label="Billing Address"><Input.TextArea rows={2} /></Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="vat" label="VAT/Tax Rate (%)" initialValue={0}>
-                <Select allowClear placeholder="Select VAT rate"
+              <Form.Item name="vat" label="Tax Rate (%)" initialValue={0}>
+                <Select allowClear placeholder="Select Tax rate"
                   onChange={(v) => setVatPercent(Number(v) || 0)}
-                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setVatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New VAT Rate</Button></>)}>
+                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setVatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Tax Rate</Button></>)}>
                   <Select.Option value={0}>No Tax (0%)</Select.Option>
                   {vatRates.map(v => <Select.Option key={v.id} value={v.vat_percentage}>{v.vat_name} ({v.vat_percentage}%)</Select.Option>)}
                 </Select>
@@ -391,7 +420,7 @@ const CreateInvoice = () => {
               <Button type="dashed" icon={<PlusOutlined />} onClick={addLine}>Add Line</Button>
               <div style={{ textAlign: 'right' }}>
                 <div>Subtotal: {cSym} {subtotal.toFixed(2)}</div>
-                {vatPercent > 0 && <div>VAT ({vatPercent}%): {cSym} {vatAmount.toFixed(2)}</div>}
+                {vatPercent > 0 && <div>Tax ({vatPercent}%): {cSym} {vatAmount.toFixed(2)}</div>}
                 <div style={{ fontSize: 16, fontWeight: 600 }}>Total: {cSym} {grandTotal.toFixed(2)}</div>
               </div>
             </div>
@@ -440,9 +469,9 @@ const CreateInvoice = () => {
         </Form>
       </Modal>
 
-      <Modal title="Add New VAT Rate" visible={vatModalOpen} onOk={handleAddVat} onCancel={() => setVatModalOpen(false)} okText="Add" destroyOnClose>
+      <Modal title="Add New Tax Rate" visible={vatModalOpen} onOk={handleAddVat} onCancel={() => setVatModalOpen(false)} okText="Add" destroyOnClose>
         <Form form={vatForm} layout="vertical" preserve={false}>
-          <Form.Item name="vat_name" label="VAT Name" rules={[{ required: true }]}><Input placeholder="e.g. Standard Rate" /></Form.Item>
+          <Form.Item name="vat_name" label="Tax Name" rules={[{ required: true }]}><Input placeholder="e.g. Standard Rate" /></Form.Item>
           <Form.Item name="vat_percentage" label="Percentage (%)" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} max={100} step={0.5} /></Form.Item>
         </Form>
       </Modal>

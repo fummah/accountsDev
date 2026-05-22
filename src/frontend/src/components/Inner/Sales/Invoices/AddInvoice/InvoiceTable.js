@@ -246,7 +246,7 @@ const InvoiceTable = ({item, setLines,products, onSubtotalChange, initialLines=[
         <Text>${subtotal}</Text>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Text>Vat</Text>
+        <Text>Tax</Text>
         <Text>${vatTotal}</Text>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>

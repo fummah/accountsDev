@@ -1,0 +1,5 @@
+please change the check printing to resemble the one attached, change the fomat to include the dollar amount, payee and date, curently its pinting check number outing number and account.
+
+Also if i try to import the vendors from quickbooks its only importing one vendor instead of importing all, customers importation is working fine, please correct the vendorsimporrtation.
+
+One very hugee issue i m seeing is that nothing is getting recorrded or tied to the chart of account, the blueprint is there but it is not working like it should

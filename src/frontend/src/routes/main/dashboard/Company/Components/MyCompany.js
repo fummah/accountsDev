@@ -191,7 +191,7 @@ const MyCompany = () => {
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="VAT Rate (%)" name="vat">
+                <Form.Item label="Tax Rate (%)" name="vat">
                   <Input placeholder="e.g. 15" type="number" />
                 </Form.Item>
               </Col>

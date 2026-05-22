@@ -1,5 +1,6 @@
 const { ipcMain } = require('electron');
 const ChartOfAccounts = require('../models/chartOfAccounts');
+const JournalEntries  = require('../models/journalEntries');
 const FixedAssets = require('../models/fixedAssets');
 const Transactions = require('../models/transactions');
 const {Budgets, Customers,
@@ -103,10 +104,19 @@ safeHandle('budget-periods', async () => {
   }
 });
 
-  safeHandle('insert-chart-account', async (event, name, type, number, entered_by) => {
+  // ── COA Full-feature handlers ──────────────────────────────────────────
+  safeHandle('insert-chart-account', async (event, payloadOrName, type, number, entered_by, openingBalance, status, parentId, description) => {
     try {
       const ctx = authorize(event, { permissions: 'write:chart-accounts' });
-      return await ChartOfAccounts.insertAccount(name, type, number, entered_by);
+      // Accept both full-object and legacy positional args
+      const payload = (payloadOrName && typeof payloadOrName === 'object')
+        ? payloadOrName
+        : { name: payloadOrName, type, number, entered_by, openingBalance, status, parentId, description };
+      const res = ChartOfAccounts.insertAccount(payload);
+      if (res?.success) {
+        AuditLog.log({ userId: ctx.userId, action: 'create', entityType: 'chart_account', entityId: res.id, details: payload });
+      }
+      return res;
     } catch (error) {
       console.error('Error creating account:', error);
       return { error: error.message, success: false };
@@ -116,15 +126,9 @@ safeHandle('budget-periods', async () => {
   safeHandle('update-chart-account', async (event, accountData) => {
     try {
       const ctx = authorize(event, { permissions: 'write:chart-accounts' });
-      const res = await ChartOfAccounts.updateAccount(accountData);
+      const res = ChartOfAccounts.updateAccount(accountData);
       if (res?.success) {
-        AuditLog.log({
-          userId: ctx.userId,
-          action: 'update',
-          entityType: 'chart_account',
-          entityId: accountData.id,
-          details: { accountData }
-        });
+        AuditLog.log({ userId: ctx.userId, action: 'update', entityType: 'chart_account', entityId: accountData.id, details: accountData });
       }
       return res;
     } catch (error) {
@@ -136,20 +140,93 @@ safeHandle('budget-periods', async () => {
   safeHandle('delete-chart-account', async (event, id) => {
     try {
       const ctx = authorize(event, { permissions: 'write:chart-accounts' });
-      const res = await ChartOfAccounts.deleteAccount(id);
+      const res = ChartOfAccounts.deleteAccount(id);
       if (res?.success) {
-        AuditLog.log({
-          userId: ctx.userId,
-          action: 'delete',
-          entityType: 'chart_account',
-          entityId: id
-        });
+        AuditLog.log({ userId: ctx.userId, action: res.softDelete ? 'deactivate' : 'delete', entityType: 'chart_account', entityId: id });
       }
       return res;
     } catch (error) {
       console.error('Error deleting account:', error);
       return { error: error.message, success: false };
     }
+  });
+
+  safeHandle('coa-seed-system-accounts', async (_e) => {
+    try {
+      ChartOfAccounts.seedSystemAccounts();
+      return { success: true };
+    } catch (e) { return { error: e.message }; }
+  });
+
+  safeHandle('coa-bulk-create', async (_e, accounts) => {
+    try {
+      return ChartOfAccounts.bulkInsert(Array.isArray(accounts) ? accounts : []);
+    } catch (e) { return { error: e.message }; }
+  });
+
+  safeHandle('coa-get-subtypes', async () => {
+    try { return ChartOfAccounts.getSubTypes(); }
+    catch (e) { return {}; }
+  });
+
+  safeHandle('get-account-activity', async (_e, accountId, opts) => {
+    try { return ChartOfAccounts.getAccountActivity(accountId, opts || {}); }
+    catch (e) { return []; }
+  });
+
+  // ── Journal Entry handlers ─────────────────────────────────────────────
+  safeHandle('journal-post', async (event, entry) => {
+    try {
+      const ctx = authorize(event, { permissions: 'write:transactions' });
+      const res = JournalEntries.post(entry);
+      if (res?.success) {
+        AuditLog.log({ userId: ctx.userId, action: 'create', entityType: 'journal_entry', entityId: res.id, details: entry });
+      }
+      return res;
+    } catch (e) { return { error: e.message }; }
+  });
+
+  safeHandle('journal-list', async (_e, filters) => {
+    try { return JournalEntries.getAll(filters || {}); }
+    catch (e) { return []; }
+  });
+
+  safeHandle('journal-by-account', async (_e, accountId, opts) => {
+    try { return JournalEntries.getByAccount(accountId, opts || {}); }
+    catch (e) { return []; }
+  });
+
+  safeHandle('journal-void', async (event, id) => {
+    try {
+      const ctx = authorize(event, { permissions: 'write:transactions' });
+      const res = JournalEntries.voidEntry(id);
+      if (res?.success) {
+        AuditLog.log({ userId: ctx.userId, action: 'void', entityType: 'journal_entry', entityId: id });
+      }
+      return res;
+    } catch (e) { return { error: e.message }; }
+  });
+
+  safeHandle('journal-reverse', async (event, journalId, date) => {
+    try {
+      const ctx = authorize(event, { permissions: 'write:transactions' });
+      return JournalEntries.reverse(journalId, date, ctx.userId);
+    } catch (e) { return { error: e.message }; }
+  });
+
+  safeHandle('journal-post-invoice', async (_e, invoice) => {
+    try { return JournalEntries.postInvoice(invoice); }
+    catch (e) { return { error: e.message }; }
+  });
+
+  safeHandle('journal-post-payment', async (_e, payment) => {
+    try { return JournalEntries.postPayment(payment); }
+    catch (e) { return { error: e.message }; }
+  });
+
+  safeHandle('journal-post-expense', async (_e, expense) => {
+    try { return JournalEntries.postExpense(expense); }
+    catch (e) { return { error: e.message }; }
   });
 
   // Cashflow Projections handlers

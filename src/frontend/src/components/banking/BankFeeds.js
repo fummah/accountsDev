@@ -201,7 +201,7 @@ const BankFeeds = () => {
 
           <TabPane tab="Transactions" key="2">
             <Space style={{ marginBottom: 12 }} wrap>
-              <RangePicker value={range} onChange={setRange} format="DD/MM/YYYY" />
+              <RangePicker value={range} onChange={setRange} format="MM/DD/YYYY" />
               <Button type="primary" icon={<SyncOutlined />} onClick={fetchTxs} loading={fetching}>Fetch Transactions</Button>
               <Button icon={<SearchOutlined />} onClick={suggestMatches} disabled={txs.length === 0}>Suggest Matches</Button>
             </Space>

@@ -7,6 +7,8 @@ import TaxFiling from './TaxFiling';
 import Payslips from './Payslips';
 import Departments from './Departments';
 import Roles from './Roles';
+import TimeAttendance from './TimeAttendance';
+import DirectDeposit from './DirectDeposit';
 
 const EmployeeRoutes = ({ match }) => {
   return (
@@ -18,6 +20,8 @@ const EmployeeRoutes = ({ match }) => {
       <Route path={`${match.path}/payslips`} component={Payslips} />
       <Route path={`${match.path}/departments`} component={Departments} />
       <Route path={`${match.path}/roles`} component={Roles} />
+      <Route path={`${match.path}/time-attendance`} component={TimeAttendance} />
+      <Route path={`${match.path}/direct-deposit`} component={DirectDeposit} />
     </Switch>
   );
 };
