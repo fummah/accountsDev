@@ -15,6 +15,7 @@ const UnifiedItemList = () => {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [incomeAccounts, setIncomeAccounts] = useState([]);
   const [form] = Form.useForm();
 
   const fetchItems = useCallback(async () => {
@@ -31,7 +32,21 @@ const UnifiedItemList = () => {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchItems(); }, [fetchItems]);
+  const fetchIncomeAccounts = useCallback(async () => {
+    try {
+      const accs = await window.electronAPI.getChartOfAccounts?.();
+      const list = Array.isArray(accs) ? accs : (accs?.data || []);
+      const incomeOnly = list.filter(a => {
+        const t = (a.accountType || a.type || '').toLowerCase();
+        return t.includes('income') || t.includes('revenue');
+      });
+      setIncomeAccounts(incomeOnly);
+    } catch (e) {
+      console.error('Failed to load income accounts:', e);
+    }
+  }, []);
+
+  useEffect(() => { fetchItems(); fetchIncomeAccounts(); }, [fetchItems, fetchIncomeAccounts]);
 
   const categories = useMemo(() => {
     const cats = new Set();
@@ -205,7 +220,17 @@ const UnifiedItemList = () => {
           </Row>
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={12}><Form.Item name="stock" label="Stock / Quantity"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="income_account" label="Income Account"><Input placeholder="Optional" /></Form.Item></Col>
+            <Col span={12}>
+              <Form.Item name="income_account" label="Income Account" rules={[{ required: true, message: 'Select Income Account' }]}>
+                <Select placeholder="Select Income account" showSearch optionFilterProp="children" allowClear>
+                  {incomeAccounts.map(acc => (
+                    <Option key={acc.id} value={acc.accountName || acc.name}>
+                      {acc.accountName || acc.name}{acc.accountNumber ? ` (${acc.accountNumber})` : ''}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
           </Row>
         </Form>
       </Drawer>

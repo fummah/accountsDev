@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Divider, Alert, Tooltip, Modal, Statistic } from 'antd';
-import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, StopOutlined } from '@ant-design/icons';
+import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, StopOutlined, PlusOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
@@ -98,6 +98,13 @@ const CheckPrinting = () => {
   const [watchCheckNumber, setWatchCheckNumber] = useState('');
   const [watchMemo, setWatchMemo] = useState('');
   const [watchAccountId, setWatchAccountId] = useState(null);
+  const [splitLines, setSplitLines] = useState([{ key: 1, account: '', description: '', amount: 0 }]);
+
+  const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
+
+  const addSplitLine = () => setSplitLines(prev => [...prev, { key: Date.now(), account: '', description: '', amount: 0 }]);
+  const removeSplitLine = (key) => setSplitLines(prev => prev.length > 1 ? prev.filter(l => l.key !== key) : prev);
+  const updateSplitLine = (key, field, value) => setSplitLines(prev => prev.map(l => l.key === key ? { ...l, [field]: value } : l));
 
   const amountWords = useMemo(() => {
     const n = Number(amount || 0);
@@ -185,7 +192,17 @@ const CheckPrinting = () => {
           <span><strong>Payee:</strong> ${vals.payeeName || '________________________________'}</span>
           <span><strong>Amount:</strong> $${amt.toFixed(2)}</span>
         </div>
-        <div style="font-size:11px;color:#64748b;">${vals.memo ? '<strong>Memo:</strong> ' + vals.memo : ''}</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:4px;">${vals.memo ? '<strong>Memo:</strong> ' + vals.memo : ''}</div>
+        ${(vals.splitLines && vals.splitLines.length > 0) ? `
+        <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:6px;">
+          <tr style="border-bottom:1px solid #e2e8f0;">
+            <th style="text-align:left;padding:3px 4px;color:#64748b;">Account</th>
+            <th style="text-align:left;padding:3px 4px;color:#64748b;">Description</th>
+            <th style="text-align:right;padding:3px 4px;color:#64748b;">Amount</th>
+          </tr>
+          ${vals.splitLines.filter(l => l.amount > 0).map(l => `<tr><td style="padding:2px 4px;">${l.account || '-'}</td><td style="padding:2px 4px;">${l.description || '-'}</td><td style="padding:2px 4px;text-align:right;">$${Number(l.amount||0).toFixed(2)}</td></tr>`).join('')}
+          <tr style="border-top:1px solid #334155;font-weight:700;"><td colspan="2" style="padding:3px 4px;">Total</td><td style="padding:3px 4px;text-align:right;">$${amt.toFixed(2)}</td></tr>
+        </table>` : ''}
       </div>
     </div></div></body></html>`;
   };
@@ -193,6 +210,7 @@ const CheckPrinting = () => {
   const handlePreview = () => {
     const vals = form.getFieldsValue(true);
     vals.accountName = selectedAccount?.accountName || selectedAccount?.name || '';
+    vals.splitLines = splitLines.filter(l => l.amount > 0);
     setPreviewHtml(generateCheckHtml(vals, false));
     setPreviewVisible(true);
   };
@@ -222,20 +240,23 @@ const CheckPrinting = () => {
   const recordAndPrint = async (values) => {
     try {
       setLoading(true);
+      const totalAmt = splitLines.length > 1 ? splitTotal : Number(values.amount || 0);
       const payload = {
         date: values.date.format('YYYY-MM-DD'),
         type: 'Check',
-        amount: Number(values.amount || 0),
+        amount: totalAmt,
         description: values.memo || `Check #${values.checkNumber || ''} to ${values.payeeName || ''}`,
         reference: values.checkNumber || undefined,
         accountId: Number(values.accountId),
         entered_by: 'system',
+        splitLines: splitLines.filter(l => Number(l.amount) > 0).map(l => ({ account: l.account, description: l.description, amount: Number(l.amount) })),
       };
       await window.electronAPI.insertTransaction(payload);
       message.success(`Check #${values.checkNumber} recorded successfully`);
-      const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name };
+      const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0) };
       handlePrint(vals);
       form.resetFields();
+      setSplitLines([{ key: 1, account: '', description: '', amount: 0 }]);
       form.setFieldsValue({ date: moment(), checkNumber: String(Number(values.checkNumber || 0) + 1) });
       loadData();
     } catch (e) {
@@ -415,9 +436,35 @@ const CheckPrinting = () => {
                 <TextArea rows={2} placeholder="What is this check for?" maxLength={200} showCount onChange={(e) => setWatchMemo(e.target.value)} />
               </Form.Item>
 
+              <Divider orientation="left" style={{ fontSize: 13 }}>Split Lines (Expense Accounts)</Divider>
+              <div style={{ marginBottom: 12 }}>
+                {splitLines.map((line, idx) => (
+                  <Row gutter={8} key={line.key} style={{ marginBottom: 6 }}>
+                    <Col xs={24} sm={8}>
+                      <Select size="small" placeholder="Account" value={line.account || undefined} onChange={v => updateSplitLine(line.key, 'account', v)} style={{ width: '100%' }} showSearch optionFilterProp="children" allowClear>
+                        {accounts.map(a => <Option key={a.id} value={a.accountName || a.name}>{a.accountName || a.name}</Option>)}
+                      </Select>
+                    </Col>
+                    <Col xs={24} sm={9}>
+                      <Input size="small" placeholder="Description" value={line.description} onChange={e => updateSplitLine(line.key, 'description', e.target.value)} />
+                    </Col>
+                    <Col xs={24} sm={5}>
+                      <InputNumber size="small" min={0} step={0.01} placeholder="Amount" value={line.amount} onChange={v => updateSplitLine(line.key, 'amount', v || 0)} style={{ width: '100%' }} />
+                    </Col>
+                    <Col xs={24} sm={2}>
+                      {splitLines.length > 1 && <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeSplitLine(line.key)} />}
+                    </Col>
+                  </Row>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Button size="small" type="dashed" onClick={addSplitLine} icon={<PlusOutlined />}>Add Line</Button>
+                  {splitLines.length > 1 && <Text type="secondary" style={{ fontSize: 12 }}>Split Total: ${cSym} {splitTotal.toFixed(2)}</Text>}
+                </div>
+              </div>
+
               <Space wrap>
                 <Button icon={<EyeOutlined />} onClick={handlePreview}>Preview</Button>
-                <Button icon={<PrinterOutlined />} onClick={() => { const vals = form.getFieldsValue(true); vals.accountName = selectedAccount?.accountName || selectedAccount?.name || ''; handlePrint(vals); }}>Print Only</Button>
+                <Button icon={<PrinterOutlined />} onClick={() => { const vals = form.getFieldsValue(true); vals.accountName = selectedAccount?.accountName || selectedAccount?.name || ''; vals.splitLines = splitLines; handlePrint(vals); }}>Print Only</Button>
                 <Button type="primary" htmlType="submit" loading={loading} icon={<SaveOutlined />}>Record &amp; Print</Button>
               </Space>
             </Form>
@@ -431,12 +478,13 @@ const CheckPrinting = () => {
               <div dangerouslySetInnerHTML={{ __html: generateCheckHtml({
                 date: watchDate ? { format: (f) => watchDate.format(f) } : null,
                 payeeName: watchPayeeName || '',
-                amount: amount || 0,
+                amount: splitLines.length > 1 ? splitTotal : (amount || 0),
                 checkNumber: watchCheckNumber || '',
                 memo: watchMemo || '',
                 accountName: selectedAccount?.accountName || selectedAccount?.name || '',
                 routingNumber: form.getFieldValue('routingNumber') || '',
                 accountNumber: form.getFieldValue('accountNumber') || '',
+                splitLines: splitLines.filter(l => l.amount > 0),
               }, false) }} />
             </div>
           </Card>

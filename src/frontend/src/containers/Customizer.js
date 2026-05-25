@@ -1,5 +1,5 @@
 import React, {useState} from "react";
-import {Button, Drawer, Form, Radio, Switch} from "antd";
+import {Button, Form, Radio, Switch} from "antd";
 import {useDispatch, useSelector} from "react-redux";
 import CustomScrollbars from "util/CustomScrollbars";
 import {onLayoutTypeChange, setThemeType} from "appRedux/actions/Setting";
@@ -271,15 +271,47 @@ const CustomizerSystem = () => {
 
   return (
     <>
-      <Drawer
-        placement="right"
-        closable={false}
-        onClose={toggleCustomizer}
-        visible={isCustomizerOpened}>
-        {
-          getCustomizerContent()
-        }
-      </Drawer>
+      {isCustomizerOpened && (
+        <>
+          {/* Backdrop — click to close */}
+          <div
+            onClick={toggleCustomizer}
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.45)', zIndex: 1049,
+            }}
+          />
+          {/* Sliding panel */}
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: 380,
+            background: '#fff', zIndex: 1050,
+            boxShadow: '-6px 0 16px -6px rgba(0,0,0,0.2)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '16px 24px', borderBottom: '1px solid #f0f0f0', flexShrink: 0,
+            }}>
+              <span style={{ fontSize: 16, fontWeight: 600 }}>Theme Settings</span>
+              <div
+                onClick={toggleCustomizer}
+                style={{
+                  cursor: 'pointer', fontSize: 18, lineHeight: 1,
+                  color: 'rgba(0,0,0,0.45)', padding: '4px 8px', borderRadius: 4,
+                  userSelect: 'none',
+                }}
+              >
+                ✕
+              </div>
+            </div>
+            {/* Body */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {getCustomizerContent()}
+            </div>
+          </div>
+        </>
+      )}
       <div className="gx-customizer-option">
         <Button type="primary" onClick={toggleCustomizer}>
           <i className="icon icon-setting fxicon-hc-spin gx-d-block"/>

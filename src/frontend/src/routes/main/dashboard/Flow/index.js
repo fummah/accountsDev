@@ -89,41 +89,53 @@ const Flow = () => {
   };
 
   /* ──── Layout constants ──── */
-  const CELL_W = 165;
+  const CELL_W = 175;
   const CELL_H = 130;
 
-  /* ──── QB-style workflow nodes ──── */
+  /* ──── Workflow nodes ──── */
   const nodes = [
-    // VENDORS
-    { id: "n-enterbills",      icon: P("/assets/icons/invoice.svg"),   label: "Enter Bills",            col: 1, row: 0, route: "/inner/expenses" },
-    { id: "n-paybills",        icon: P("/assets/icons/pay.svg"),        label: "Pay Bills",              col: 3, row: 0, route: "/inner/expenses" },
-    // CUSTOMERS — upper
-    { id: "n-salesorders",     icon: P("/assets/icons/track.svg"),      label: "Sales\nOrders",          col: 0, row: 1, route: "/inner/sales?tab=1" },
-    { id: "n-acceptcc",        icon: P("/assets/icons/bills.svg"),      label: "Accept\nCredit Cards",   col: 2, row: 1, route: "/inner/sales?tab=6" },
-    { id: "n-salesreceipts",   icon: P("/assets/icons/expenses.svg"),   label: "Create Sales\nReceipts", col: 3, row: 1, route: "/inner/sales?tab=6" },
-    // CUSTOMERS — main
-    { id: "n-estimates",       icon: P("/assets/icons/quotes.svg"),     label: "Estimates",              col: 0, row: 2, route: "/inner/sales?tab=3" },
-    { id: "n-createinvoice",   icon: P("/assets/icons/invoices.svg"),   label: "Create\nInvoices",       col: 1, row: 2, route: "/inner/sales?tab=2" },
-    { id: "n-receivepayments", icon: P("/assets/icons/payments.svg"),   label: "Receive\nPayments",      col: 2, row: 2, route: "/inner/sales?tab=5" },
-    { id: "n-refunds",         icon: P("/assets/icons/refund.svg"),     label: "Refunds &\nCredits",     col: 3, row: 2, route: "/inner/sales?tab=7" },
-    // CUSTOMERS — lower
-    { id: "n-stmtcharges",     icon: P("/assets/icons/statement.svg"),  label: "Statement\nCharges",     col: 1, row: 3, route: "/inner/sales?tab=4" },
-    { id: "n-statements",      icon: P("/assets/icons/analysis.svg"),   label: "Statements",             col: 2, row: 3, route: "/inner/sales?tab=4" },
-    // EMPLOYEES
-    { id: "n-entertime",       icon: P("/assets/icons/employee.svg"),   label: "Enter\nTime",            col: 0, row: 4, route: "/main/employees/center" },
-    { id: "n-turnonpayroll",   icon: P("/assets/icons/payroll.svg"),    label: "Turn On\nPayroll",       col: 2, row: 4, route: "/main/employees/payroll" },
+    // Row 0
+    { id: "n-products",      icon: P("/assets/icons/products.svg"),  label: "Products",         col: 0, row: 0, route: "/inner/sales?tab=10" },
+    { id: "n-expenses",      icon: P("/assets/icons/expenses.svg"),  label: "Expenses",         col: 1, row: 0, route: "/inner/expenses" },
+    { id: "n-paybills",      icon: P("/assets/icons/pay.svg"),       label: "Pay Bills",        col: 2, row: 0, route: "/inner/expenses" },
+    { id: "n-analysis",      icon: P("/assets/icons/analysis.svg"),  label: "Analysis",         col: 3, row: 0, route: "/main/accountant/reports" },
+    // Row 1
+    { id: "n-createsales",   icon: P("/assets/icons/track.svg"),     label: "Create\nSales",    col: 1, row: 1, route: "/inner/sales?tab=1" },
+    { id: "n-cashreceipts",  icon: P("/assets/icons/cash.svg"),      label: "Cash\nReceipts",   col: 2, row: 1, route: "/inner/sales?tab=6" },
+    { id: "n-reports",       icon: P("/assets/icons/statement.svg"), label: "Reports",          col: 3, row: 1, route: "/main/accountant/reports" },
+    // Row 2
+    { id: "n-quotes",        icon: P("/assets/icons/quotes.svg"),    label: "Quotes",           col: 0, row: 2, route: "/inner/sales?tab=3" },
+    { id: "n-createinvoice", icon: P("/assets/icons/invoices.svg"),  label: "Create\nInvoice",  col: 1, row: 2, route: "/inner/sales?tab=2" },
+    { id: "n-payments",      icon: P("/assets/icons/payments.svg"),  label: "Payments",         col: 2, row: 2, route: "/inner/sales?tab=5" },
+    { id: "n-deposits",      icon: P("/assets/icons/deposit.svg"),   label: "Deposits",         col: 3, row: 2, route: "/main/banking/deposits" },
+    // Row 3
+    { id: "n-createemp",     icon: P("/assets/icons/employee.svg"),  label: "Create\nEmployee", col: 1, row: 3, route: "/main/employees/center" },
+    { id: "n-payroll",       icon: P("/assets/icons/payroll.svg"),   label: "Payroll",          col: 2, row: 3, route: "/main/employees/payroll" },
+    { id: "n-reconcile",     icon: P("/assets/icons/refund.svg"),    label: "Reconcile",        col: 3, row: 3, route: "/main/banking/reconcile" },
   ];
 
   const arrows = [
-    ["n-enterbills",      "n-paybills"],            // VENDORS: Enter Bills → Pay Bills
-    ["n-enterbills",      "n-createinvoice"],        // Enter Bills ↓ Create Invoices
-    ["n-salesorders",     "n-createinvoice"],        // Sales Orders → Create Invoices
-    ["n-estimates",       "n-createinvoice"],        // Estimates → Create Invoices
-    ["n-acceptcc",        "n-receivepayments"],      // Accept CC → Receive Payments
-    ["n-salesreceipts",   "n-receivepayments"],      // Sales Receipts → Receive Payments
-    ["n-createinvoice",   "n-receivepayments"],      // Create Invoices → Receive Payments
-    ["n-createinvoice",   "n-stmtcharges"],          // Create Invoices ↓ Statement Charges
-    ["n-stmtcharges",     "n-statements"],           // Statement Charges → Statements
+    // Horizontal — row 0
+    ["n-products",      "n-expenses",      "h"],
+    ["n-expenses",      "n-paybills",      "h"],
+    ["n-paybills",      "n-analysis",      "h"],
+    // Horizontal — row 1
+    ["n-createsales",   "n-cashreceipts",  "h"],
+    ["n-cashreceipts",  "n-reports",       "h"],
+    // Horizontal — row 2
+    ["n-quotes",        "n-createinvoice", "h"],
+    ["n-createinvoice", "n-payments",      "h"],
+    ["n-payments",      "n-deposits",      "h"],
+    // Horizontal — row 3
+    ["n-createemp",     "n-payroll",       "h"],
+    ["n-payroll",       "n-reconcile",     "h"],
+    // Vertical
+    ["n-products",      "n-quotes",        "v"],
+    ["n-createsales",   "n-createinvoice", "v"],
+    ["n-cashreceipts",  "n-payments",      "v"],
+    ["n-analysis",      "n-reports",       "v"],
+    ["n-reports",       "n-deposits",      "v"],
+    ["n-deposits",      "n-reconcile",     "v"],
   ];
 
   const GridNode = ({ id, icon, label, col, row, route }) => (
@@ -151,17 +163,8 @@ const Flow = () => {
     </div>
   );
 
-  /* ──── Section config ──── */
-  //  row 0 = VENDORS (y: 0–129)
-  //  rows 1-3 = CUSTOMERS (y: 130–519, with label strip at top)
-  //  row 4 = EMPLOYEES (y: 520–649, with label strip at top)
-  const VEND_H   = CELL_H;                     // 130
-  const CUST_TOP = CELL_H;                     // 130
-  const CUST_H   = CELL_H * 3;                 // 390
-  const EMP_TOP  = CELL_H * 4;                 // 520
-  const EMP_H    = CELL_H;                     // 130
-  const totalH   = CELL_H * 5 + 20;
-  const totalW   = CELL_W * 4 + 80;
+  const totalH = CELL_H * 4 + 20;
+  const totalW = CELL_W * 4 + 60;
 
   /* ──── Quick action lists (QB right panel) ──── */
   const quickTop = [
@@ -216,59 +219,35 @@ const Flow = () => {
         {/* Left: QB-style workflow diagram */}
         <Col xl={17} lg={16} md={24} sm={24} xs={24}>
           <Card bodyStyle={{ padding: 16, overflowX: "auto" }} style={{ borderRadius: 8 }}>
-            <div style={{ position: "relative", width: totalW, height: totalH, minHeight: 680 }}>
-
-              {/* ── Section background bands ── */}
-              {/* VENDORS band */}
-              <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: VEND_H,
-                background: "#fafafa", borderRadius: 6, border: "1px solid #e8e8e8", zIndex: 0 }} />
-              {/* CUSTOMERS band */}
-              <div style={{ position: "absolute", left: 0, right: 0, top: CUST_TOP, height: CUST_H,
-                background: "#f0f7ff", borderRadius: 6, border: "1px solid #bae0ff", zIndex: 0 }} />
-              {/* EMPLOYEES band */}
-              <div style={{ position: "absolute", left: 0, right: 0, top: EMP_TOP, height: EMP_H,
-                background: "#f6ffed", borderRadius: 6, border: "1px solid #b7eb8f", zIndex: 0 }} />
-
-              {/* ── Section labels ── */}
-              <div style={{ position: "absolute", top: CUST_TOP + 6, left: "50%",
-                transform: "translateX(-50%)", zIndex: 3 }}>
-                <span style={{ display: "inline-block", padding: "1px 14px", borderRadius: 3,
-                  border: "1px solid #1890ff", color: "#1890ff",
-                  fontSize: 10, fontWeight: 700, letterSpacing: 1.2, background: "#e6f7ff" }}>
-                  CUSTOMERS
-                </span>
-              </div>
-              <div style={{ position: "absolute", top: EMP_TOP + 6, left: "50%",
-                transform: "translateX(-50%)", zIndex: 3 }}>
-                <span style={{ display: "inline-block", padding: "1px 14px", borderRadius: 3,
-                  border: "1px solid #52c41a", color: "#52c41a",
-                  fontSize: 10, fontWeight: 700, letterSpacing: 1.2, background: "#f6ffed" }}>
-                  EMPLOYEES
-                </span>
-              </div>
+            <div style={{ position: "relative", width: totalW, height: totalH, minHeight: 560 }}>
 
               {/* ── Workflow nodes ── */}
               {nodes.map(n => <GridNode key={n.id} {...n} />)}
 
               {/* ── Workflow arrows ── */}
-              {arrows.map(([s, e], i) => (
+              {arrows.map(([s, e, dir], i) => (
                 <Xarrow key={i} start={s} end={e}
+                  path="straight"
+                  startAnchor={dir === "h" ? "right" : "bottom"}
+                  endAnchor={dir === "h" ? "left" : "top"}
                   strokeWidth={1.8} headSize={6}
-                  color="#adb5bd" curveness={0.15}
+                  color="#4096ff"
                 />
               ))}
-
-              {/* ── Cross-panel arrow: Receive Payments → Record Deposits (BANKING) ── */}
-              <Xarrow
-                start="n-receivepayments"
-                end="qa-record-deposits"
-                strokeWidth={2} headSize={7}
-                color="#1890ff" curveness={0.25}
-                dashness={{ animation: 1.2, strokeLen: 10, nonStrokeLen: 5 }}
-              />
             </div>
           </Card>
         </Col>
+
+        {/* ── Cross-panel arrow: Reports → Record Deposits (BANKING) ── */}
+        <Xarrow
+          start="n-reports"
+          end="qa-record-deposits"
+          startAnchor="right"
+          endAnchor="left"
+          strokeWidth={2} headSize={7}
+          color="#1890ff"
+          dashness={{ animation: 1.2, strokeLen: 10, nonStrokeLen: 5 }}
+        />
 
         {/* Right: QB-style quick access panel */}
         <Col xl={7} lg={8} md={24} sm={24} xs={24}>

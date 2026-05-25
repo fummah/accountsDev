@@ -377,6 +377,10 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   settingsGet: (key) => ipcRenderer.invoke('settings-get', key),
   settingsSet: (key, value) => ipcRenderer.invoke('settings-set', key, value),
 
+  // Invoice Template Customization
+  getInvoiceTemplate: () => ipcRenderer.invoke('get-invoice-template'),
+  saveInvoiceTemplate: (templateSettings) => ipcRenderer.invoke('save-invoice-template', templateSettings),
+
   // Imports (QuickBooks CSV)
   importCustomersCsv: (csvText, options) => ipcRenderer.invoke('import-customers-csv', csvText, options || {}),
   importProductsCsv: (csvText, options) => ipcRenderer.invoke('import-products-csv', csvText, options || {}),

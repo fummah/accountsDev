@@ -146,13 +146,36 @@ const ExpenseTracking = () => {
       const entered_by = 'system';
       const approval_status = 'Pending';
       const expenseLines = [{ category: values.line_category || 'Expense', description: values.description || '', amount: Number(values.amount) || 0 }];
-      const res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status, expenseLines);
-      if (res && res.success) {
-        message.success('Expense created');
-        hideDrawer();
-        loadExpenses();
+
+      let res;
+      if (editingExpense && editingExpense.id) {
+        res = await window.electronAPI.updateExpense({
+          id: editingExpense.id,
+          payee,
+          payment_account,
+          payment_date,
+          payment_method,
+          ref_no,
+          category,
+          approval_status,
+          lines: expenseLines,
+        });
+        if (res && res.success) {
+          message.success('Expense updated');
+          hideDrawer();
+          loadExpenses();
+        } else {
+          throw new Error(res?.error || 'Failed to update expense');
+        }
       } else {
-        throw new Error(res?.error || 'Failed to create expense');
+        res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status, expenseLines);
+        if (res && res.success) {
+          message.success('Expense created');
+          hideDrawer();
+          loadExpenses();
+        } else {
+          throw new Error(res?.error || 'Failed to create expense');
+        }
       }
     } catch (e) {
       if (!e?.errorFields) message.error(e.message || 'Failed to add expense');

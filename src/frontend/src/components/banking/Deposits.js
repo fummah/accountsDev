@@ -189,9 +189,29 @@ const Deposits = () => {
     <div style={{ padding: '24px' }}>
       <h2>Make Deposits</h2>
 
-      <Card>
-        <Tabs activeKey={activeTab} onTabClick={(key) => setActiveTab(key)}>
-          <TabPane tab="New Deposit" key="1">
+      <Card bodyStyle={{ padding: 0 }}>
+        {/* ── Custom tab bar ── */}
+        <div style={{ display: 'flex', borderBottom: '1px solid #f0f0f0', padding: '0 24px' }}>
+          {[
+            { key: '1', label: 'New Deposit' },
+            { key: '2', label: <span><HistoryOutlined /> Deposit History{depositHistory.length > 0 ? ` (${depositHistory.length})` : ''}</span> },
+          ].map(t => (
+            <div key={t.key} onClick={() => setActiveTab(t.key)} style={{
+              padding: '12px 16px',
+              cursor: 'pointer',
+              borderBottom: activeTab === t.key ? '2px solid #1890ff' : '2px solid transparent',
+              color: activeTab === t.key ? '#1890ff' : 'rgba(0,0,0,0.65)',
+              fontWeight: activeTab === t.key ? 500 : 400,
+              marginBottom: -1,
+              userSelect: 'none',
+              transition: 'color 0.3s',
+            }}>{t.label}</div>
+          ))}
+        </div>
+
+        {/* ── Tab content ── */}
+        <div style={{ padding: 24 }}>
+          {activeTab === '1' && (
             <Form form={form} layout="vertical" onFinish={handleSubmit} initialValues={{ date: moment() }}>
               <div style={{ display: 'flex', gap: '16px' }}>
                 <Form.Item name="accountId" label="Deposit To" rules={[{ required: true, message: 'Please select account' }]} style={{ flex: 1 }}>
@@ -234,27 +254,29 @@ const Deposits = () => {
                 </Space>
               </div>
             </Form>
-          </TabPane>
+          )}
 
-          <TabPane tab={<span><HistoryOutlined /> Deposit History {depositHistory.length > 0 ? `(${depositHistory.length})` : ''}</span>} key="2">
-            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Input placeholder="Search deposits..." prefix={<SearchOutlined />} value={historySearch}
-                onChange={e => setHistorySearch(e.target.value)} allowClear style={{ width: 250 }} />
-              <Button icon={<ReloadOutlined />} onClick={loadHistory} loading={historyLoading}>Refresh</Button>
+          {activeTab === '2' && (
+            <div>
+              <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Input placeholder="Search deposits..." prefix={<SearchOutlined />} value={historySearch}
+                  onChange={e => setHistorySearch(e.target.value)} allowClear style={{ width: 250 }} />
+                <Button icon={<ReloadOutlined />} onClick={loadHistory} loading={historyLoading}>Refresh</Button>
+              </div>
+              <Table columns={historyColumns} dataSource={filteredHistory} rowKey={(r, i) => r.id || i} size="small"
+                loading={historyLoading} pagination={{ pageSize: 10, showSizeChanger: true, showTotal: t => `${t} deposits` }}
+                locale={{ emptyText: 'No deposits recorded yet' }}
+                summary={() => filteredHistory.length > 0 ? (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={4}><Text strong>Total</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: '#52c41a' }}>$ {fmt(historyTotal)}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={5} />
+                  </Table.Summary.Row>
+                ) : null}
+              />
             </div>
-            <Table columns={historyColumns} dataSource={filteredHistory} rowKey={(r, i) => r.id || i} size="small"
-              loading={historyLoading} pagination={{ pageSize: 10, showSizeChanger: true, showTotal: t => `${t} deposits` }}
-              locale={{ emptyText: 'No deposits recorded yet' }}
-              summary={() => filteredHistory.length > 0 ? (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell index={0} colSpan={4}><Text strong>Total</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: '#52c41a' }}>$ {fmt(historyTotal)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={5} />
-                </Table.Summary.Row>
-              ) : null}
-            />
-          </TabPane>
-        </Tabs>
+          )}
+        </div>
       </Card>
 
       {/* Add Account Modal */}

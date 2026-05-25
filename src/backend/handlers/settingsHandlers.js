@@ -75,6 +75,26 @@ function registerSettingsHandlers() {
       return { error: e.message };
     }
   });
+
+  // Invoice Template Customization
+  ipcMain.handle('get-invoice-template', async () => {
+    try {
+      return Settings.get('invoiceTemplate') || {};
+    } catch (e) {
+      console.error('Error getting invoice template:', e);
+      return { error: e.message };
+    }
+  });
+
+  ipcMain.handle('save-invoice-template', async (_event, templateSettings) => {
+    try {
+      Settings.set('invoiceTemplate', templateSettings || {});
+      return { success: true };
+    } catch (e) {
+      console.error('Error saving invoice template:', e);
+      return { error: e.message };
+    }
+  });
 }
 
 module.exports = registerSettingsHandlers;

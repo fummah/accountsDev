@@ -1,5 +1,6 @@
 import React from 'react';
 import { Route, Switch } from 'react-router-dom';
+import BankAccounts from './BankAccounts';
 import BankReconciliation from './BankReconciliation';
 import BankTransfer from './BankTransfer';
 import Deposits from './Deposits';
@@ -11,11 +12,12 @@ import BankRules from './BankRules';
 const BankingRoutes = ({ match }) => {
   return (
     <Switch>
+      <Route exact path={`${match.path}/accounts`} component={BankAccounts} />
       <Route path={`${match.path}/reconcile`} component={BankReconciliation} />
       <Route path={`${match.path}/transfers`} component={BankTransfer} />
       <Route path={`${match.path}/deposits`} component={Deposits} />
-  <Route path={`${match.path}/payroll`} component={RunPayroll} />
-  <Route path={`${match.path}/payroll-calendar`} component={PayrollCalendar} />
+      <Route path={`${match.path}/payroll`} component={RunPayroll} />
+      <Route path={`${match.path}/payroll-calendar`} component={PayrollCalendar} />
       <Route path={`${match.path}/feeds`} component={BankFeeds} />
       <Route path={`${match.path}/rules`} component={BankRules} />
     </Switch>

@@ -5,7 +5,7 @@ import {
   Badge, Descriptions, Empty, Spin, Typography, DatePicker, Alert
 } from 'antd';
 import {
-  PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined,
+  PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, DownloadOutlined,
   AccountBookOutlined, DollarOutlined, BankOutlined, WalletOutlined,
   ArrowUpOutlined, ArrowDownOutlined, CopyOutlined, EyeOutlined,
   ApartmentOutlined, UnorderedListOutlined, ReloadOutlined, PrinterOutlined,
@@ -84,6 +84,12 @@ const ChartOfAccounts = () => {
   const [editingId, setEditingId] = useState(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedType, setSelectedType] = useState(null);
+  const [customAccountTypes, setCustomAccountTypes] = useState([]);
+  const [customSubTypes, setCustomSubTypes] = useState([]);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [newSubTypeName, setNewSubTypeName] = useState('');
+  const [addTypeModalVisible, setAddTypeModalVisible] = useState(false);
+  const [addSubTypeModalVisible, setAddSubTypeModalVisible] = useState(false);
 
   /* Filters */
   const [searchText, setSearchText] = useState('');
@@ -149,6 +155,7 @@ const ChartOfAccounts = () => {
     }
     if (filterType !== 'all') filtered = filtered.filter(a => a.accountType === filterType);
     if (filterStatus !== 'all') filtered = filtered.filter(a => a.status === filterStatus);
+    filtered.sort((a, b) => (b.id || 0) - (a.id || 0));
     return filtered;
   }, [accounts, searchText, filterType, filterStatus]);
 
@@ -176,10 +183,23 @@ const ChartOfAccounts = () => {
 
   const treeData = useMemo(() => buildTree(filteredAccounts), [filteredAccounts]);
 
+  /* Dynamic account types: DB-derived + hardcoded defaults + user-added */
+  const allAccountTypes = useMemo(() => {
+    const fromDb = accounts.map(a => a.accountType).filter(Boolean);
+    return [...new Set([...Object.keys(ACCOUNT_TYPES), ...fromDb, ...customAccountTypes])];
+  }, [accounts, customAccountTypes]);
+
+  /* Sub-types for selected type: DB-derived + hardcoded + user-added */
+  const subTypesForSelected = useMemo(() => {
+    const fromDb = accounts.filter(a => a.accountType === selectedType).map(a => a.subType).filter(Boolean);
+    const defaults = ACCOUNT_SUBTYPES[selectedType] || [];
+    return [...new Set([...defaults, ...fromDb, ...customSubTypes])];
+  }, [accounts, selectedType, customSubTypes]);
+
   /* ─── Auto-suggest account number ─── */
   const suggestAccountCode = useCallback((type) => {
-    if (!type || !ACCOUNT_TYPES[type]) return '';
-    const base = Number(ACCOUNT_TYPES[type].range) || 1000;
+    if (!type) return '';
+    const base = Number(ACCOUNT_TYPES[type]?.range) || 9000;
     const existing = accounts
       .filter(a => a.accountType === type && a.accountCode)
       .map(a => Number(a.accountCode) || 0)
@@ -729,6 +749,30 @@ const ChartOfAccounts = () => {
         </Tabs>
       </Card>
 
+      {/* ─── Floating Add Account button ─── */}
+      <Tooltip title="Add Account" placement="left">
+        <Button
+          type="primary"
+          shape="circle"
+          icon={<PlusOutlined />}
+          size="large"
+          style={{
+            position: 'fixed',
+            bottom: 88,
+            right: 24,
+            zIndex: 100,
+            width: 48,
+            height: 48,
+            boxShadow: '0 4px 12px rgba(24,144,255,0.4)',
+          }}
+          onClick={() => {
+            setEditingId(null); setSelectedType(null); form.resetFields();
+            form.setFieldsValue({ status: 'Active', openingBalance: 0, normalBalance: 'Debit' });
+            setIsModalVisible(true);
+          }}
+        />
+      </Tooltip>
+
       {/* ─── Add / Edit Modal ─── */}
       <Modal
         title={
@@ -755,83 +799,164 @@ const ChartOfAccounts = () => {
           form={form} layout="vertical" onFinish={handleAddEdit}
           initialValues={{ status: 'Active', openingBalance: 0, normalBalance: 'Debit' }}
         >
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="accountType" label="Account Type" rules={[{ required: true, message: 'Required' }]}>
-                <Select placeholder="Select type" onChange={(v) => {
-                  setSelectedType(v);
-                  if (!editingId) form.setFieldsValue({ accountCode: suggestAccountCode(v) });
-                  form.setFieldsValue({
-                    normalBalance: ACCOUNT_TYPES[v]?.normalBalance || 'Debit',
-                    subType: undefined,
-                  });
-                }}>
-                  {Object.keys(ACCOUNT_TYPES).map(t => (
-                    <Option key={t} value={t}>{ACCOUNT_TYPES[t].icon} {t}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="subType" label="Sub-Type">
-                <Select placeholder="Select sub-type" allowClear showSearch>
-                  {(ACCOUNT_SUBTYPES[selectedType] || []).map(st => (
-                    <Option key={st} value={st}>{st}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="accountCode" label="Account Number" tooltip="Auto-suggested based on type">
-                <Input placeholder="e.g., 1000" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="accountName" label="Account Name" rules={[{ required: true, message: 'Required' }]}>
-            <Input placeholder="e.g., Cash on Hand" />
+          {/* Row 1: Type / Sub-Type / Account# */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 0 }}>
+            <Form.Item
+              name="accountType"
+              label={<span>Account Type <Tooltip title="Add new type"><PlusCircleOutlined onClick={() => setAddTypeModalVisible(true)} style={{ color: '#1890ff', cursor: 'pointer', marginLeft: 4 }} /></Tooltip></span>}
+              rules={[{ required: true, message: 'Required' }]}
+              style={{ flex: 1 }}
+            >
+              <Select placeholder="Select type" showSearch onChange={(v) => {
+                setSelectedType(v);
+                setCustomSubTypes([]);
+                if (!editingId) form.setFieldsValue({ accountCode: suggestAccountCode(v) });
+                form.setFieldsValue({ normalBalance: ACCOUNT_TYPES[v]?.normalBalance || 'Debit', subType: undefined });
+              }}>
+                {allAccountTypes.map(t => (
+                  <Option key={t} value={t}>{ACCOUNT_TYPES[t]?.icon} {t}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item
+              name="subType"
+              label={<span>Sub-Type <Tooltip title="Add new sub-type"><PlusCircleOutlined onClick={() => setAddSubTypeModalVisible(true)} style={{ color: '#1890ff', cursor: 'pointer', marginLeft: 4 }} /></Tooltip></span>}
+              style={{ flex: 1 }}
+            >
+              <Select placeholder="Select sub-type" allowClear showSearch>
+                {subTypesForSelected.map(st => (
+                  <Option key={st} value={st}>{st}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item name="accountCode" label="Account #" tooltip="Auto-suggested based on type" style={{ flex: 0.7 }}>
+              <Input placeholder="e.g., 1000" />
+            </Form.Item>
+          </div>
+
+          {/* Row 2: Name / Status */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="accountName" label="Account Name" rules={[{ required: true, message: 'Required' }]} style={{ flex: 2 }}>
+              <Input placeholder="e.g., Cash on Hand" />
+            </Form.Item>
+            <Form.Item name="status" label="Status" style={{ flex: 1 }}>
+              <Select>
+                <Option value="Active"><Badge status="success" /> Active</Option>
+                <Option value="Inactive"><Badge status="default" /> Inactive</Option>
+              </Select>
+            </Form.Item>
+          </div>
+
+          {/* Row 3: Opening Bal / Normal Bal / Tax Line */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="openingBalance" label="Opening Balance" style={{ flex: 1 }}>
+              <InputNumber style={{ width: '100%' }} placeholder="0.00" precision={2} />
+            </Form.Item>
+            <Form.Item name="normalBalance" label="Normal Balance" style={{ flex: 1 }}>
+              <Select>
+                <Option value="Debit">Debit</Option>
+                <Option value="Credit">Credit</Option>
+              </Select>
+            </Form.Item>
+            <Form.Item name="taxLine" label="Tax Line" style={{ flex: 1 }}>
+              <Input placeholder="e.g., Schedule C Line 10" />
+            </Form.Item>
+          </div>
+
+          {/* Row 4: Parent Account / Description */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="parentId" label="Parent Account" style={{ flex: 1 }}>
+              <Select placeholder="(none — top level)" allowClear showSearch optionFilterProp="children">
+                {accounts.filter(a => a.id !== editingId && a.status === 'Active').map(a => (
+                  <Option key={a.id} value={a.id}>{a.accountCode ? a.accountCode + ' — ' : ''}{a.accountName}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item name="description" label="Description" style={{ flex: 1 }}>
+              <Input placeholder="Brief description (optional)" />
+            </Form.Item>
+          </div>
+        </Form>
+      </Modal>
+
+      {/* ─── Add Account Type Modal ─── */}
+      <Modal
+        title={<Space><PlusCircleOutlined style={{ color: '#1890ff' }} />Add Account Type</Space>}
+        visible={addTypeModalVisible}
+        onOk={() => {
+          if (!newTypeName.trim()) { message.warning('Please enter a type name'); return; }
+          setCustomAccountTypes(p => [...new Set([...p, newTypeName.trim()])]);
+          message.success(`Account type "${newTypeName.trim()}" added`);
+          setNewTypeName('');
+          setAddTypeModalVisible(false);
+        }}
+        onCancel={() => { setAddTypeModalVisible(false); setNewTypeName(''); }}
+        okText="Add Type"
+        width={420}
+        destroyOnClose
+      >
+        <Form layout="vertical" style={{ marginTop: 8 }}>
+          <Form.Item label="Account Type Name" required>
+            <Input
+              placeholder="e.g., Crypto Asset, Investment"
+              value={newTypeName}
+              onChange={e => setNewTypeName(e.target.value)}
+              onPressEnter={() => {
+                if (!newTypeName.trim()) return;
+                setCustomAccountTypes(p => [...new Set([...p, newTypeName.trim()])]);
+                message.success(`Account type "${newTypeName.trim()}" added`);
+                setNewTypeName('');
+                setAddTypeModalVisible(false);
+              }}
+              autoFocus
+              size="large"
+            />
+            <div style={{ marginTop: 8, fontSize: 12, color: '#8c8c8c' }}>
+              The new type will appear immediately in the Account Type dropdown.
+            </div>
           </Form.Item>
-          <Form.Item name="description" label="Description">
-            <Input.TextArea rows={2} placeholder="Brief description (optional)" />
+        </Form>
+      </Modal>
+
+      {/* ─── Add Sub-Type Modal ─── */}
+      <Modal
+        title={<Space><PlusCircleOutlined style={{ color: '#1890ff' }} />Add Sub-Type{selectedType ? ` for ${selectedType}` : ''}</Space>}
+        visible={addSubTypeModalVisible}
+        onOk={() => {
+          if (!newSubTypeName.trim()) { message.warning('Please enter a sub-type name'); return; }
+          setCustomSubTypes(p => [...new Set([...p, newSubTypeName.trim()])]);
+          message.success(`Sub-type "${newSubTypeName.trim()}" added`);
+          setNewSubTypeName('');
+          setAddSubTypeModalVisible(false);
+        }}
+        onCancel={() => { setAddSubTypeModalVisible(false); setNewSubTypeName(''); }}
+        okText="Add Sub-Type"
+        width={420}
+        destroyOnClose
+      >
+        <Form layout="vertical" style={{ marginTop: 8 }}>
+          {!selectedType && (
+            <Alert message="Select an Account Type first so the sub-type is linked correctly." type="info" showIcon style={{ marginBottom: 12 }} />
+          )}
+          <Form.Item label={selectedType ? `Sub-Type Name (for ${selectedType})` : 'Sub-Type Name'} required>
+            <Input
+              placeholder="e.g., Current Account, Petty Cash"
+              value={newSubTypeName}
+              onChange={e => setNewSubTypeName(e.target.value)}
+              onPressEnter={() => {
+                if (!newSubTypeName.trim()) return;
+                setCustomSubTypes(p => [...new Set([...p, newSubTypeName.trim()])]);
+                message.success(`Sub-type "${newSubTypeName.trim()}" added`);
+                setNewSubTypeName('');
+                setAddSubTypeModalVisible(false);
+              }}
+              autoFocus
+              size="large"
+            />
+            <div style={{ marginTop: 8, fontSize: 12, color: '#8c8c8c' }}>
+              The new sub-type will appear immediately in the Sub-Type dropdown.
+            </div>
           </Form.Item>
-          <Row gutter={16}>
-            <Col span={6}>
-              <Form.Item name="openingBalance" label="Opening Balance">
-                <InputNumber style={{ width: '100%' }} placeholder="0.00" precision={2} />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="normalBalance" label="Normal Balance">
-                <Select>
-                  <Option value="Debit">Debit</Option>
-                  <Option value="Credit">Credit</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="taxLine" label="Tax Line Mapping">
-                <Input placeholder="e.g., Schedule C Line 10" />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="status" label="Status">
-                <Select>
-                  <Option value="Active"><Badge status="success" /> Active</Option>
-                  <Option value="Inactive"><Badge status="default" /> Inactive</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="parentId" label="Parent Account (Sub-Account of)">
-                <Select placeholder="(none — top level)" allowClear showSearch optionFilterProp="children">
-                  {accounts.filter(a => a.id !== editingId && a.status === 'Active').map(a => (
-                    <Option key={a.id} value={a.id}>{a.accountCode ? a.accountCode + ' — ' : ''}{a.accountName}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
         </Form>
       </Modal>
 

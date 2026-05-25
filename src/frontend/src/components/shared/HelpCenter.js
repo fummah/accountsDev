@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Drawer, Input, List, Card, Tag, Button, Tabs, Steps, message, Progress, Badge, Tooltip } from 'antd';
-import { QuestionCircleOutlined, BookOutlined, PlayCircleOutlined, SearchOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Input, List, Card, Tag, Button, Tabs, Steps, message, Progress, Badge, Tooltip } from 'antd';
+import { QuestionCircleOutlined, BookOutlined, PlayCircleOutlined, SearchOutlined, CheckCircleOutlined, CloseOutlined } from '@ant-design/icons';
 
 const { TabPane } = Tabs;
 const { Step } = Steps;
@@ -17,6 +17,7 @@ const HelpCenter = ({ contextKey }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [tourActive, setTourActive] = useState(false);
   const [allProgress, setAllProgress] = useState([]);
+  const [activeTab, setActiveTab] = useState('1');
 
   useEffect(() => {
     // Listen for F1 key to open help
@@ -112,78 +113,129 @@ const HelpCenter = ({ contextKey }) => {
         />
       </Tooltip>
 
-      {/* Help Drawer */}
-      <Drawer
-        title="Help Center"
-        placement="right"
-        width={480}
-        visible={visible}
-        onClose={() => setVisible(false)}
-      >
-        <Tabs defaultActiveKey="1">
-          <TabPane tab={<><BookOutlined /> Articles</>} key="1">
-            <Search
-              placeholder="Search help articles..."
-              onSearch={handleSearch}
-              onChange={e => handleSearch(e.target.value)}
-              style={{ marginBottom: 16 }}
-            />
-            {selectedArticle ? (
-              <div>
-                <Button type="link" onClick={() => setSelectedArticle(null)} style={{ padding: 0, marginBottom: 8 }}>← Back to list</Button>
-                <h3>{selectedArticle.title}</h3>
-                <Tag color="blue">{selectedArticle.category}</Tag>
-                <div style={{ marginTop: 16 }}>
-                  {renderContent(selectedArticle.content)}
-                </div>
+      {/* ── Help Panel (custom — replaces antd Drawer) ── */}
+      {visible && (
+        <>
+          {/* Backdrop — click to close */}
+          <div
+            onClick={() => setVisible(false)}
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.45)', zIndex: 1049,
+            }}
+          />
+
+          {/* Sliding panel */}
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: 480,
+            background: '#fff', zIndex: 1050,
+            boxShadow: '-6px 0 16px -6px rgba(0,0,0,0.2)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Panel header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '16px 24px', borderBottom: '1px solid #f0f0f0', flexShrink: 0,
+            }}>
+              <span style={{ fontSize: 16, fontWeight: 600 }}>Help Center</span>
+              <div
+                onClick={() => setVisible(false)}
+                style={{
+                  cursor: 'pointer', fontSize: 18, lineHeight: 1,
+                  color: 'rgba(0,0,0,0.45)', padding: '4px 8px', borderRadius: 4,
+                  userSelect: 'none',
+                }}
+              >
+                ✕
               </div>
-            ) : (
-              <List
-                dataSource={articles}
-                renderItem={item => (
-                  <List.Item
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => viewArticle(item.id)}
-                  >
-                    <List.Item.Meta
-                      title={item.title}
-                      description={<Tag>{item.category}</Tag>}
+            </div>
+
+            {/* Panel body — scrollable */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+              {/* ── Custom tab bar ── */}
+              <div style={{ display: 'flex', borderBottom: '1px solid #f0f0f0', marginBottom: 16, marginLeft: -24, marginRight: -24, paddingLeft: 8 }}>
+                {[
+                  { key: '1', label: <><BookOutlined /> Articles</> },
+                  { key: '2', label: <><PlayCircleOutlined /> Training</> },
+                ].map(t => (
+                  <div key={t.key} onClick={() => setActiveTab(t.key)} style={{
+                    padding: '12px 16px',
+                    cursor: 'pointer',
+                    borderBottom: activeTab === t.key ? '2px solid #1890ff' : '2px solid transparent',
+                    color: activeTab === t.key ? '#1890ff' : 'rgba(0,0,0,0.65)',
+                    fontWeight: activeTab === t.key ? 500 : 400,
+                    marginBottom: -1,
+                    userSelect: 'none',
+                  }}>{t.label}</div>
+                ))}
+              </div>
+
+              {/* ── Tab content ── */}
+              {activeTab === '1' && (
+                <div>
+                  <Search
+                    placeholder="Search help articles..."
+                    onSearch={handleSearch}
+                    onChange={e => handleSearch(e.target.value)}
+                    style={{ marginBottom: 16 }}
+                  />
+                  {selectedArticle ? (
+                    <div>
+                      <Button type="link" onClick={() => setSelectedArticle(null)} style={{ padding: 0, marginBottom: 8 }}>← Back to list</Button>
+                      <h3>{selectedArticle.title}</h3>
+                      <Tag color="blue">{selectedArticle.category}</Tag>
+                      <div style={{ marginTop: 16 }}>
+                        {renderContent(selectedArticle.content)}
+                      </div>
+                    </div>
+                  ) : (
+                    <List
+                      dataSource={articles}
+                      renderItem={item => (
+                        <List.Item style={{ cursor: 'pointer' }} onClick={() => viewArticle(item.id)}>
+                          <List.Item.Meta
+                            title={item.title}
+                            description={<Tag>{item.category}</Tag>}
+                          />
+                        </List.Item>
+                      )}
                     />
-                  </List.Item>
-                )}
-              />
-            )}
-          </TabPane>
-          <TabPane tab={<><PlayCircleOutlined /> Training</>} key="2">
-            <List
-              dataSource={trainingModules}
-              renderItem={item => {
-                const progress = getModuleProgress(item.module);
-                return (
-                  <List.Item
-                    actions={[
-                      <Button type="primary" size="small" onClick={() => startTour(item.module)}>
-                        {progress > 0 && progress < 100 ? 'Continue' : progress >= 100 ? 'Restart' : 'Start'}
-                      </Button>
-                    ]}
-                  >
-                    <List.Item.Meta
-                      avatar={progress >= 100 ? <CheckCircleOutlined style={{ fontSize: 24, color: '#52c41a' }} /> : <PlayCircleOutlined style={{ fontSize: 24, color: '#1890ff' }} />}
-                      title={item.module.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                      description={
-                        <div>
-                          <span>{item.step_count} steps</span>
-                          <Progress percent={progress} size="small" style={{ width: 150, marginLeft: 8 }} />
-                        </div>
-                      }
-                    />
-                  </List.Item>
-                );
-              }}
-            />
-          </TabPane>
-        </Tabs>
-      </Drawer>
+                  )}
+                </div>
+              )}
+
+              {activeTab === '2' && (
+                <List
+                  dataSource={trainingModules}
+                  renderItem={item => {
+                    const progress = getModuleProgress(item.module);
+                    return (
+                      <List.Item
+                        actions={[
+                          <Button type="primary" size="small" onClick={() => startTour(item.module)}>
+                            {progress > 0 && progress < 100 ? 'Continue' : progress >= 100 ? 'Restart' : 'Start'}
+                          </Button>
+                        ]}
+                      >
+                        <List.Item.Meta
+                          avatar={progress >= 100 ? <CheckCircleOutlined style={{ fontSize: 24, color: '#52c41a' }} /> : <PlayCircleOutlined style={{ fontSize: 24, color: '#1890ff' }} />}
+                          title={item.module.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                          description={
+                            <div>
+                              <span>{item.step_count} steps</span>
+                              <Progress percent={progress} size="small" style={{ width: 150, marginLeft: 8 }} />
+                            </div>
+                          }
+                        />
+                      </List.Item>
+                    );
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Tour Overlay */}
       {tourActive && trainingSteps[currentStep] && (

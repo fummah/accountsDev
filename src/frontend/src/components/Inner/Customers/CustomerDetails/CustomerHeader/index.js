@@ -10,13 +10,14 @@ const { Text, Title } = Typography;
 
 const CustomerHeader = ({detail}) => {
   const type = useContext(CategoryContext);
+  const safe = (val) => (val && val !== 'null' && val !== 'undefined') ? val : '';
   const header = [
-    { id: 1, title: 'Email', icon: 'email', desc: [<span className="gx-link" key={1}>{detail?.email}</span>] },
-    { id: 2, title: 'Phone Number', icon: 'phone', desc: [`${detail?.phone_number}`]},
-    { id: 3, title: 'Mobile Number', icon: 'megaphone', desc: [`${detail?.mobile_number}`] },
-    { id: 4, title: 'Company Name',  icon: 'home', userList: '', desc: [`${detail?.company_name}`] },
-    { id: 5, title: 'Billing Address', icon: 'location', userList: '', desc: [`${detail?.address1} ${detail?.city} ${detail?.state} ${detail?.postal_code} ${detail?.country}`] },
-    { id: 6, title: 'Notes', icon: 'chat', userList: '',  desc: [`${detail?.notes}`] },
+    { id: 1, title: 'Email', icon: 'email', desc: [<span className="gx-link" key={1}>{safe(detail?.email)}</span>] },
+    { id: 2, title: 'Phone Number', icon: 'phone', desc: [safe(detail?.phone_number)]},
+    { id: 3, title: 'Mobile Number', icon: 'megaphone', desc: [safe(detail?.mobile_number)] },
+    { id: 4, title: 'Company Name',  icon: 'home', userList: '', desc: [safe(detail?.company_name)] },
+    { id: 5, title: 'Billing Address', icon: 'location', userList: '', desc: [[safe(detail?.address1), safe(detail?.city), safe(detail?.state), safe(detail?.postal_code), safe(detail?.country)].filter(Boolean).join(' ')] },
+    { id: 6, title: 'Notes', icon: 'chat', userList: '',  desc: [safe(detail?.notes)] },
   ];
   const open_balance =    new Intl.NumberFormat("en-US", {style: "currency", currency: "USD", 
     minimumFractionDigits: 2,
