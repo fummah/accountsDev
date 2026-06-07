@@ -160,129 +160,155 @@ const CheckPrinting = () => {
     // MICR line
     const micrRouting = routingNum ? `\u2446${routingNum}\u2446` : '\u2446000000000\u2446';
     const micrAccount = accountNum ? `${accountNum}\u2448` : '0000000000\u2448';
-    const micrCheck  = checkNum   ? `${checkNum}\u2468` : '';
-    const micrLine   = `${micrRouting} ${micrAccount} ${micrCheck}`;
+    const micrCheck   = checkNum   ? `${checkNum}\u2468`   : '';
+    const micrLine    = `${micrRouting} ${micrAccount} ${micrCheck}`;
+
+    // Routing fraction display (e.g. 60-1177/313)
+    const routingDisplay = routingNum ? routingNum : '';
+
+    // Dot-fill for written amount line
+    const dotFill = words + ' ' + '*'.repeat(Math.max(0, 72 - words.length));
 
     // Remittance rows for stubs
     const stubDetailRows = splitLns.length > 0
       ? splitLns.map(l => `
           <tr>
-            <td style="padding:1px 0; font-size:11px;">${l.description || l.account || ''}</td>
-            <td></td><td></td>
-            <td style="padding:1px 0; font-size:11px; text-align:right;">${Number(l.amount||0).toFixed(2)}</td>
+            <td colspan="2" style="padding:2px 0; font-size:11px; color:#333;">${l.description || l.account || ''}</td>
+            <td></td>
+            <td style="padding:2px 0; font-size:11px; text-align:right; color:#333;">${Number(l.amount||0).toFixed(2)}</td>
           </tr>`).join('')
       : memoLine ? `<tr>
-          <td style="padding:1px 0; font-size:11px;">${memoLine}</td>
-          <td></td><td></td>
-          <td style="padding:1px 0; font-size:11px; text-align:right;">${amtStr}</td>
+          <td colspan="2" style="padding:2px 0; font-size:11px; color:#333;">${memoLine}</td>
+          <td></td>
+          <td style="padding:2px 0; font-size:11px; text-align:right; color:#333;">${amtStr}</td>
         </tr>` : '';
 
-    // Stub section — matches image: payeeName | (spacer) | date | checkNum | amount
-    const stub = (borderTop, borderBottom) => `
-      <div style="height:190px; padding:10px 36px 0 36px; box-sizing:border-box;
-                  border-top:${borderTop || 'none'}; border-bottom:${borderBottom || 'none'};">
-        <table style="width:100%; border-collapse:collapse; font-family:Arial,sans-serif;">
-          <thead>
-            <tr style="border-bottom:1px solid #ccc;">
-              <th style="font-size:10px; font-weight:600; text-align:left; padding-bottom:3px; width:35%;">PAY TO</th>
-              <th style="font-size:10px; font-weight:600; text-align:left; padding-bottom:3px; width:22%;">DATE</th>
-              <th style="font-size:10px; font-weight:600; text-align:right; padding-bottom:3px; width:20%;">CHECK NO.</th>
-              <th style="font-size:10px; font-weight:600; text-align:right; padding-bottom:3px; width:23%;">AMOUNT</th>
-            </tr>
-          </thead>
+    // Stub section — matches image exactly:
+    // Row 1: payer name (bold, left) | blank | date (center) | check# (right)
+    // Row 2: payee name (left)       | blank | blank          | amount (right)
+    // detail rows, then memo bottom-left / amount bottom-right
+    const stub = () => `
+      <div style="height:185px; padding:10px 28px 8px 28px; box-sizing:border-box; border-top:1px dashed #aaa; font-family:Arial,sans-serif;">
+        <table style="width:100%; border-collapse:collapse;">
           <tbody>
             <tr>
-              <td style="font-size:12px; font-weight:700; padding:4px 0 2px 0;">${payeeName}</td>
-              <td style="font-size:12px; padding:4px 0 2px 0;">${dateStr}</td>
-              <td style="font-size:12px; text-align:right; padding:4px 0 2px 0;">${checkNum}</td>
-              <td style="font-size:12px; font-weight:700; text-align:right; padding:4px 0 2px 0;">${amtStr}</td>
+              <td style="font-size:12px; font-weight:700; padding:0 0 2px 0; width:45%;">${coName}</td>
+              <td style="width:20%;"></td>
+              <td style="font-size:11px; text-align:center; padding:0 0 2px 0; width:18%;">${dateStr}</td>
+              <td style="font-size:13px; font-weight:700; text-align:right; padding:0 0 2px 0; width:17%;">${checkNum}</td>
+            </tr>
+            <tr>
+              <td style="font-size:11px; color:#444; padding:0 0 6px 0;">${payeeName}</td>
+              <td></td>
+              <td></td>
+              <td style="font-size:12px; font-weight:600; text-align:right; padding:0 0 6px 0;">${amtStr}</td>
             </tr>
             ${stubDetailRows}
           </tbody>
         </table>
+        <div style="position:absolute; bottom:8px; left:28px; right:28px; display:flex; justify-content:space-between;">
+          <span style="font-size:10px; color:#555;">${memoLine}</span>
+          <span style="font-size:11px; font-weight:600;">${amtStr}</span>
+        </div>
       </div>`;
+
+    // Security background SVG (light blue diagonal lines pattern, like safety paper)
+    const secBg = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60'><rect width='60' height='60' fill='%23e8f4fd'/><line x1='0' y1='0' x2='60' y2='60' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.6'/><line x1='0' y1='20' x2='40' y2='60' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.6'/><line x1='20' y1='0' x2='60' y2='40' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.6'/><line x1='0' y1='40' x2='20' y2='60' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.4'/><line x1='40' y1='0' x2='60' y2='20' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.4'/></svg>`;
 
     return `<!doctype html><html><head><title>Check #${checkNum}</title>
     <style>
-      @page { margin: 0.25in 0.4in; size: letter portrait; }
+      @page { margin: 0.2in 0.35in; size: letter portrait; }
       * { box-sizing: border-box; }
       body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #1a1a1a; }
-      .check-section { width: 100%; }
-      .micr { font-family: 'MICR Encoding', 'Courier New', monospace; font-size: 14px; letter-spacing: 3px; }
+      .check-body { position: relative; }
+      .check-bg {
+        position: absolute; inset: 0;
+        background-image: url("${secBg}");
+        background-repeat: repeat;
+        opacity: 1;
+        z-index: 0;
+      }
+      .check-content { position: relative; z-index: 1; }
+      .micr { font-family: 'MICR Encoding', 'Courier New', monospace; font-size: 13px; letter-spacing: 2px; }
+      .stub-wrap { position: relative; }
     </style></head><body>
-    <div class="check-section">
 
-      <!-- ═══════════════ TOP STUB ═══════════════ -->
-      ${stub('none', '1px solid #aaa')}
+      <!-- ═══════════════ CHECK BODY (top third) ═══════════════ -->
+      <div class="check-body" style="height:330px; border-bottom:1px solid #999;">
+        <div class="check-bg"></div>
+        <div class="check-content" style="padding:12px 28px 0 28px; height:100%;">
 
-      <!-- ═══════════════ CHECK BODY (middle third) ═══════════════ -->
-      <div style="height:340px; padding:16px 36px 0 36px; position:relative; border-bottom:1px solid #aaa;">
-
-        <!-- Row 1: Company info (left) + Bank name (center) + Check number (right) -->
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-          <div style="font-size:11px; line-height:1.5; min-width:160px;">
-            ${coName  ? `<div style="font-weight:700; font-size:13px;">${coName}</div>` : ''}
-            ${coAddr  ? `<div>${coAddr}</div>` : ''}
-            ${coCity  ? `<div>${coCity}</div>` : ''}
-            ${coPhone ? `<div>${coPhone}</div>` : ''}
+          <!-- Header row: company left | bank+routing center | check# right -->
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+            <div style="font-size:11px; line-height:1.55; min-width:170px;">
+              ${coName  ? `<div style="font-weight:700; font-size:13px;">${coName}</div>` : ''}
+              ${coAddr  ? `<div>${coAddr}</div>` : ''}
+              ${coCity  ? `<div>${coCity}</div>` : ''}
+              ${coPhone ? `<div>${coPhone}</div>` : ''}
+            </div>
+            <div style="text-align:center; flex:1; padding:0 10px; font-size:11px;">
+              ${bankName ? `<div style="font-weight:700; font-size:12px;">${bankName}</div>` : ''}
+              ${routingDisplay ? `<div style="font-size:10px; color:#555;">${routingDisplay}</div>` : ''}
+            </div>
+            <div style="text-align:right; min-width:70px;">
+              <div style="font-size:20px; font-weight:700; letter-spacing:1px;">${checkNum}</div>
+            </div>
           </div>
-          <div style="font-size:11px; text-align:center; color:#555; flex:1; padding:0 12px;">
-            ${bankName ? `<div style="font-weight:600;">${bankName}</div>` : ''}
+
+          <!-- Date row -->
+          <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:8px;">
+            <span style="font-size:10px; margin-right:5px; color:#555;">DATE</span>
+            <span style="font-size:12px; font-weight:600; border-bottom:1px solid #333; min-width:100px; text-align:center; padding-bottom:1px;">${dateStr}</span>
           </div>
-          <div style="text-align:right; min-width:80px;">
-            <div style="font-size:18px; font-weight:700;">${checkNum}</div>
+
+          <!-- PAY TO THE ORDER OF -->
+          <div style="display:flex; align-items:center; margin-bottom:5px; gap:6px;">
+            <span style="font-size:9px; font-weight:700; white-space:nowrap; line-height:1.3;">PAY TO THE<br>ORDER OF</span>
+            <span style="font-size:13px; font-weight:700; flex:1; border-bottom:1px solid #333; padding:0 4px 2px 4px; min-height:20px;">${payeeName}</span>
+            <span style="font-size:11px; font-weight:700; border:1.5px solid #333; padding:2px 8px; white-space:nowrap; background:#fff;">$ **${amtStr}</span>
           </div>
-        </div>
 
-        <!-- Row 2: Date line -->
-        <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:10px;">
-          <span style="font-size:11px; margin-right:6px;">DATE</span>
-          <span style="font-size:13px; font-weight:600; border-bottom:1px solid #333; min-width:90px; text-align:center;">${dateStr}</span>
-        </div>
-
-        <!-- Row 3: PAY TO THE ORDER OF -->
-        <div style="display:flex; align-items:baseline; margin-bottom:6px; gap:8px;">
-          <span style="font-size:10px; white-space:nowrap; font-weight:600;">PAY TO THE<br/>ORDER OF</span>
-          <span style="font-size:13px; font-weight:700; flex:1; border-bottom:1px solid #333; padding-bottom:2px; padding-left:6px;">${payeeName}</span>
-          <span style="font-size:12px; white-space:nowrap; font-weight:700; border:1px solid #333; padding:2px 8px; min-width:90px; text-align:center;">$ **${amtStr}</span>
-        </div>
-
-        <!-- Row 4: Written amount line -->
-        <div style="display:flex; align-items:baseline; margin-bottom:12px; gap:8px;">
-          <span style="font-size:13px; font-weight:700; flex:1; border-bottom:1px solid #333; padding-bottom:2px; overflow:hidden; white-space:nowrap;">
-            ${words}**${'*'.repeat(Math.max(0, 70 - words.length))}
-          </span>
-          <span style="font-size:10px; font-weight:700; white-space:nowrap; padding-left:4px;">DOLLARS</span>
-        </div>
-
-        <!-- Row 5: Payee address (envelope window) -->
-        <div style="padding-left:8px; font-size:12px; line-height:1.8; min-height:52px;">
-          ${payeeName ? `<div style="font-weight:700;">${payeeName}</div>` : ''}
-          ${payeeAddr ? payeeAddr.split('\n').map(l => `<div>${l}</div>`).join('') : ''}
-        </div>
-
-        <!-- Row 6: Memo + Signature line -->
-        <div style="display:flex; justify-content:space-between; align-items:flex-end; position:absolute; bottom:16px; left:36px; right:36px;">
-          <div style="font-size:11px; min-width:220px;">
-            <span style="font-weight:600;">MEMO </span>
-            <span style="border-bottom:1px solid #333; display:inline-block; min-width:160px; padding-bottom:1px;">${memoLine}</span>
+          <!-- Written amount + DOLLARS -->
+          <div style="display:flex; align-items:stretch; margin-bottom:10px; gap:0;">
+            <span style="font-size:12px; font-weight:600; flex:1; border-bottom:1px solid #333; padding-bottom:2px; overflow:hidden; white-space:nowrap; letter-spacing:0.02em;">${dotFill}</span>
+            <span style="font-size:9px; font-weight:700; writing-mode:vertical-rl; text-orientation:mixed; transform:rotate(180deg); border:1px solid #aaa; padding:2px 1px; margin-left:4px; background:#fff; color:#333; letter-spacing:1px;">DOLLARS</span>
           </div>
-          <div style="font-size:10px; text-align:center; min-width:180px;">
-            <div style="border-top:1px solid #333; padding-top:3px;">AUTHORIZED SIGNATURE</div>
+
+          <!-- Payee address window -->
+          <div style="font-size:11px; line-height:1.8; min-height:54px; padding-left:4px;">
+            ${payeeName ? `<div style="font-weight:700;">${payeeName}</div>` : ''}
+            ${payeeAddr ? payeeAddr.split('\n').map(l => `<div>${l}</div>`).join('') : ''}
           </div>
-        </div>
 
-        <!-- Row 7: MICR line -->
-        <div class="micr" style="position:absolute; bottom:2px; left:36px; right:36px; text-align:center; color:#1a1a1a;">
-          ${micrLine}
-        </div>
+          <!-- Memo + Authorized Signature -->
+          <div style="display:flex; justify-content:space-between; align-items:flex-end; position:absolute; bottom:26px; left:28px; right:28px;">
+            <div style="font-size:10px;">
+              <span style="font-weight:700;">MEMO </span>
+              <span style="border-bottom:1px solid #333; display:inline-block; min-width:150px; padding-bottom:1px;">${memoLine}</span>
+            </div>
+            <div style="font-size:9px; text-align:center; min-width:170px;">
+              <div style="border-top:1px solid #333; padding-top:2px; letter-spacing:0.5px;">AUTHORIZED SIGNATURE</div>
+            </div>
+          </div>
 
+          <!-- MICR line -->
+          <div class="micr" style="position:absolute; bottom:4px; left:28px; right:28px; text-align:center; color:#1a1a1a; font-size:13px;">
+            ${micrLine}
+          </div>
+
+        </div>
       </div>
 
-      <!-- ═══════════════ BOTTOM STUB ═══════════════ -->
-      ${stub('none', 'none')}
+      <!-- ═══════════════ STUB 1 ═══════════════ -->
+      <div class="stub-wrap">
+        ${stub()}
+      </div>
 
-    </div>
+      <!-- ═══════════════ STUB 2 ═══════════════ -->
+      <div class="stub-wrap">
+        ${stub()}
+      </div>
+
     </body></html>`;
   };
 
@@ -448,104 +474,96 @@ const CheckPrinting = () => {
             )}
 
             <Form form={form} layout="vertical" onFinish={onFinish} initialValues={{ date: moment(), checkNumber: suggestedCheckNum }}>
-              <Row gutter={12}>
-                <Col xs={24} sm={8}>
-                  <Form.Item name="date" label="Date" rules={[{ required: true }]}>
-                    <DatePicker style={{ width: '100%' }} onChange={(d) => setWatchDate(d)} />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={8}>
-                  <Form.Item name="accountId" label="Bank Account" rules={[{ required: true, message: 'Select bank account' }]}>
-                    <Select showSearch optionFilterProp="children" placeholder="Select bank account" onChange={(v) => setWatchAccountId(v)}>
-                      {bankAccounts.map(a => (
-                        <Option key={a.id} value={a.id}>
-                          {a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}
-                        </Option>
-                      ))}
-                    </Select>
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={8}>
-                  <Form.Item name="checkNumber" label="Check #" rules={[{ required: true, message: 'Required' }]} validateStatus={isDuplicate ? 'warning' : undefined} help={isDuplicate ? 'Duplicate number' : undefined}>
-                    <Input placeholder={suggestedCheckNum} onChange={(e) => setWatchCheckNumber(e.target.value)} />
-                  </Form.Item>
-                </Col>
-              </Row>
 
-              <Row gutter={12}>
-                <Col xs={24} sm={12}>
-                  <Form.Item name="payee" label="Pay To">
-                    <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear onChange={(val, opt) => { const name = opt?.children || ''; form.setFieldsValue({ payeeName: name }); setWatchPayeeName(name); }}>
-                      {payees.map(p => (
-                        <Option key={p.id} value={p.id}>{p.name}</Option>
-                      ))}
-                    </Select>
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={12}>
-                  <Form.Item name="payeeName" label="Payee Name">
-                    <Input placeholder="Or type payee name directly" onChange={(e) => setWatchPayeeName(e.target.value)} />
-                  </Form.Item>
-                </Col>
-              </Row>
+              {/* Row 1: Date | Bank Account | Check # */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
+                <Form.Item name="date" label="Date" rules={[{ required: true }]} style={{ flex: '0 0 140px' }}>
+                  <DatePicker style={{ width: '100%' }} onChange={(d) => setWatchDate(d)} />
+                </Form.Item>
+                <Form.Item name="accountId" label="Bank Account" rules={[{ required: true, message: 'Select bank account' }]} style={{ flex: 1 }}>
+                  <Select showSearch optionFilterProp="children" placeholder="Select bank account" onChange={(v) => setWatchAccountId(v)}>
+                    {bankAccounts.map(a => (
+                      <Option key={a.id} value={a.id}>
+                        {a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+                <Form.Item name="checkNumber" label="Check #" rules={[{ required: true, message: 'Required' }]} validateStatus={isDuplicate ? 'warning' : undefined} help={isDuplicate ? 'Duplicate number' : undefined} style={{ flex: '0 0 100px' }}>
+                  <Input placeholder={suggestedCheckNum} onChange={(e) => setWatchCheckNumber(e.target.value)} />
+                </Form.Item>
+              </div>
 
-              <Row gutter={12}>
-                <Col xs={24} sm={8}>
-                  <Form.Item name="amount" label="Amount ($)" rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]}>
-                    <InputNumber min={0} step={0.01} style={{ width: '100%' }} formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} onChange={(v) => setAmount(v || 0)} />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={16}>
-                  <Form.Item label="Amount in Words">
-                    <Input value={amountWords} readOnly style={{ fontStyle: 'italic', background: '#f9f9f9' }} />
-                  </Form.Item>
-                </Col>
-              </Row>
+              {/* Row 2: Pay To (select) | Payee Name (text) */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
+                <Form.Item name="payee" label="Pay To" style={{ flex: 1 }}>
+                  <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear onChange={(val, opt) => { const name = opt?.children || ''; form.setFieldsValue({ payeeName: name }); setWatchPayeeName(name); }}>
+                    {payees.map(p => (
+                      <Option key={p.id} value={p.id}>{p.name}</Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+                <Form.Item name="payeeName" label="Payee Name (override)" style={{ flex: 1 }}>
+                  <Input placeholder="Or type payee name directly" onChange={(e) => setWatchPayeeName(e.target.value)} />
+                </Form.Item>
+              </div>
 
-              <Row gutter={12}>
-                <Col xs={24} sm={12}>
-                  <Form.Item name="routingNumber" label="Routing Number">
-                    <Input placeholder="For MICR line (optional)" maxLength={9} />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={12}>
-                  <Form.Item name="accountNumber" label="Account Number">
-                    <Input placeholder="For MICR line (optional)" />
-                  </Form.Item>
-                </Col>
-              </Row>
+              {/* Row 3: Amount | Words | Routing | Acct */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
+                <Form.Item name="amount" label="Amount ($)" rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]} style={{ flex: '0 0 120px' }}>
+                  <InputNumber min={0} step={0.01} style={{ width: '100%' }} formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} onChange={(v) => setAmount(v || 0)} />
+                </Form.Item>
+                <Form.Item label="In Words" style={{ flex: 1 }}>
+                  <Input value={amountWords} readOnly style={{ fontStyle: 'italic', background: '#f9f9f9' }} />
+                </Form.Item>
+                <Form.Item name="routingNumber" label="Routing #" style={{ flex: '0 0 110px' }}>
+                  <Input placeholder="MICR routing" maxLength={9} />
+                </Form.Item>
+                <Form.Item name="accountNumber" label="Acct #" style={{ flex: '0 0 110px' }}>
+                  <Input placeholder="MICR acct" />
+                </Form.Item>
+              </div>
 
-              <Form.Item name="payeeAddress" label="Payee Address">
-                <TextArea rows={2} placeholder={"P.O. Box 399\nGratz Pa 17030"} style={{ fontFamily: 'inherit' }} />
-              </Form.Item>
+              {/* Row 4: Payee Address | Memo */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
+                <Form.Item name="payeeAddress" label="Payee Address" style={{ flex: 1 }}>
+                  <TextArea rows={2} placeholder={"P.O. Box 399\nGratz Pa 17030"} style={{ fontFamily: 'inherit' }} />
+                </Form.Item>
+                <Form.Item name="memo" label="Memo" style={{ flex: 1 }}>
+                  <TextArea rows={2} placeholder="What is this check for?" maxLength={200} showCount onChange={(e) => setWatchMemo(e.target.value)} />
+                </Form.Item>
+              </div>
 
-              <Form.Item name="memo" label="Memo">
-                <TextArea rows={2} placeholder="What is this check for?" maxLength={200} showCount onChange={(e) => setWatchMemo(e.target.value)} />
-              </Form.Item>
-
-              <Divider orientation="left" style={{ fontSize: 13 }}>Split Lines (Expense Accounts)</Divider>
+              <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0' }}>Split Lines (Expense Accounts)</Divider>
               <div style={{ marginBottom: 12 }}>
-                {splitLines.map((line, idx) => (
-                  <Row gutter={8} key={line.key} style={{ marginBottom: 6 }}>
-                    <Col xs={24} sm={8}>
+                {/* Column headers */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 3 }}>
+                  <span style={{ flex: 2, fontSize: 11, color: '#888', fontWeight: 600 }}>Account</span>
+                  <span style={{ flex: 2, fontSize: 11, color: '#888', fontWeight: 600 }}>Description</span>
+                  <span style={{ flex: '0 0 100px', fontSize: 11, color: '#888', fontWeight: 600 }}>Amount</span>
+                  <span style={{ flex: '0 0 28px' }}></span>
+                </div>
+                {splitLines.map((line) => (
+                  <div key={line.key} style={{ display: 'flex', gap: 6, marginBottom: 5, alignItems: 'center' }}>
+                    <div style={{ flex: 2 }}>
                       <Select size="small" placeholder="Account" value={line.account || undefined} onChange={v => updateSplitLine(line.key, 'account', v)} style={{ width: '100%' }} showSearch optionFilterProp="children" allowClear>
                         {accounts.map(a => <Option key={a.id} value={a.accountName || a.name}>{a.accountName || a.name}</Option>)}
                       </Select>
-                    </Col>
-                    <Col xs={24} sm={9}>
+                    </div>
+                    <div style={{ flex: 2 }}>
                       <Input size="small" placeholder="Description" value={line.description} onChange={e => updateSplitLine(line.key, 'description', e.target.value)} />
-                    </Col>
-                    <Col xs={24} sm={5}>
-                      <InputNumber size="small" min={0} step={0.01} placeholder="Amount" value={line.amount} onChange={v => updateSplitLine(line.key, 'amount', v || 0)} style={{ width: '100%' }} />
-                    </Col>
-                    <Col xs={24} sm={2}>
-                      {splitLines.length > 1 && <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeSplitLine(line.key)} />}
-                    </Col>
-                  </Row>
+                    </div>
+                    <div style={{ flex: '0 0 100px' }}>
+                      <InputNumber size="small" min={0} step={0.01} placeholder="0.00" value={line.amount} onChange={v => updateSplitLine(line.key, 'amount', v || 0)} style={{ width: '100%' }} />
+                    </div>
+                    <div style={{ flex: '0 0 28px' }}>
+                      {splitLines.length > 1 && <Button size="small" danger type="text" icon={<DeleteOutlined />} onClick={() => removeSplitLine(line.key)} />}
+                    </div>
+                  </div>
                 ))}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
                   <Button size="small" type="dashed" onClick={addSplitLine} icon={<PlusOutlined />}>Add Line</Button>
-                  {splitLines.length > 1 && <Text type="secondary" style={{ fontSize: 12 }}>Split Total: ${cSym} {splitTotal.toFixed(2)}</Text>}
+                  {splitLines.length > 1 && <Text type="secondary" style={{ fontSize: 12 }}>Split Total: {cSym}{splitTotal.toFixed(2)}</Text>}
                 </div>
               </div>
 

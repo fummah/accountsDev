@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useHistory } from "react-router-dom";
-import { Row, Col, Card, Spin, Button, Steps, Modal, Form, Input, Select, message, Divider, Tooltip, Table, Tag } from "antd";
+import { Row, Col, Card, Spin, Button, Steps, Modal, Form, Input, Select, message, Table, Tag } from "antd";
 import {
   BankOutlined, DollarOutlined, CreditCardOutlined, WalletOutlined,
   FundOutlined, RiseOutlined, FallOutlined, PieChartOutlined,
@@ -10,7 +10,6 @@ import {
   ProfileOutlined, RocketOutlined, CheckCircleOutlined
 } from "@ant-design/icons";
 import Auxiliary from "util/Auxiliary";
-import Xarrow from "react-xarrows";
 import { useCurrency } from '../../../../utils/currency';
 
 const { Step } = Steps;
@@ -248,6 +247,45 @@ const Flow = () => {
   const totalH = CELL_H * 4 + 20;
   const totalW = CELL_W * 4 + 60;
 
+  // Node centre positions (matches GridNode: left = col*CELL_W+30+40, top = row*CELL_H+28+26)
+  const NODE_CX = (col) => col * CELL_W + 30 + 40;   // left + half node width (80/2)
+  const NODE_CY = (row) => row * CELL_H + 28 + 26;   // top  + half node height (52/2)
+
+  // Build arrow path data for SVG
+  const ARROW_COLOR = "#4096ff";
+  const ARROW_DASH_COLOR = "#91caff";
+  const HEAD = 7; // arrowhead size
+
+  // Returns SVG marker id suffix and <marker> element
+  const ArrowMarker = ({ id, color }) => (
+    <marker id={id} markerWidth={HEAD} markerHeight={HEAD} refX={HEAD - 1} refY={HEAD / 2} orient="auto">
+      <path d={`M0,0 L0,${HEAD} L${HEAD},${HEAD / 2} z`} fill={color} />
+    </marker>
+  );
+
+  // Straight workflow arrows from the arrows[] array
+  const svgArrows = arrows.map(([s, e, dir], i) => {
+    const sNode = nodes.find(n => n.id === s);
+    const eNode = nodes.find(n => n.id === e);
+    if (!sNode || !eNode) return null;
+    const x1 = dir === "h" ? NODE_CX(sNode.col) + 40 : NODE_CX(sNode.col);
+    const y1 = dir === "h" ? NODE_CY(sNode.row)       : NODE_CY(sNode.row) + 26;
+    const x2 = dir === "h" ? NODE_CX(eNode.col) - 40  : NODE_CX(eNode.col);
+    const y2 = dir === "h" ? NODE_CY(eNode.row)        : NODE_CY(eNode.row) - 26;
+    return { x1, y1, x2, y2, key: i, dashed: false };
+  }).filter(Boolean);
+
+  // Connector arrow: Reports (row 1, col 3) → right edge of grid (toward quick panel)
+  const rightConnectors = [
+    { row: 1, key: "rc-reports" },
+  ].map(nc => ({
+    x1: NODE_CX(3) + 40,
+    y1: NODE_CY(nc.row),
+    x2: totalW - 4,
+    y2: NODE_CY(nc.row),
+    key: nc.key,
+  }));
+
   /* ──── Quick action lists (QB right panel) ──── */
   const quickTop = [
     { icon: <AppstoreOutlined />,    label: "Chart of\nAccounts",  route: "/main/accountant/chart-of-accounts", color: "#1890ff" },
@@ -330,16 +368,33 @@ const Flow = () => {
               {/* ── Workflow nodes ── */}
               {nodes.map(n => <GridNode key={n.id} {...n} />)}
 
-              {/* ── Workflow arrows ── */}
-              {arrows.map(([s, e, dir], i) => (
-                <Xarrow key={i} start={s} end={e}
-                  path="straight"
-                  startAnchor={dir === "h" ? "right" : "bottom"}
-                  endAnchor={dir === "h" ? "left" : "top"}
-                  strokeWidth={1.8} headSize={6}
-                  color="#4096ff"
-                />
-              ))}
+              {/* ── Workflow arrows (pure SVG — always perfectly straight) ── */}
+              <svg
+                style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                  pointerEvents: "none", overflow: "visible", zIndex: 1 }}
+              >
+                <defs>
+                  <ArrowMarker id="ah-solid" color={ARROW_COLOR} />
+                  <ArrowMarker id="ah-dashed" color={ARROW_DASH_COLOR} />
+                </defs>
+                {/* Workflow arrows */}
+                {svgArrows.map(a => (
+                  <line key={a.key}
+                    x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2}
+                    stroke={ARROW_COLOR} strokeWidth={1.8}
+                    markerEnd="url(#ah-solid)"
+                  />
+                ))}
+                {/* Right-edge connectors → quick panel */}
+                {rightConnectors.map(a => (
+                  <line key={a.key}
+                    x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2}
+                    stroke={ARROW_DASH_COLOR} strokeWidth={1.8}
+                    strokeDasharray="6 4"
+                    markerEnd="url(#ah-dashed)"
+                  />
+                ))}
+              </svg>
             </div>
           </Card>
         </Col>
