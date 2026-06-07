@@ -242,7 +242,7 @@ const JournalEntries = () => {
 
   const columns = [
     { title: 'Date', dataIndex: 'date', key: 'date', width: 110, sorter: (a, b) => new Date(a.date) - new Date(b.date),
-      defaultSortOrder: 'descend', render: v => v ? moment(v).format('DD MMM YYYY') : '-' },
+      defaultSortOrder: 'descend', render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true,
       render: v => v ? <Tag style={{ fontSize: 11, borderRadius: 4 }}>{v}</Tag> : <Text type="secondary">-</Text> },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },

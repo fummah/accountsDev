@@ -85,7 +85,7 @@ const BALANCE_CATEGORIES = [
   },
   {
     key: 'expenses',
-    label: 'Expenses',
+    label: 'Enter Bills',
     route: '/main/accountant/reports',
     matchFn: a => {
       const t = (a.accountType || '').toLowerCase();
@@ -344,16 +344,6 @@ const Flow = () => {
           </Card>
         </Col>
 
-        {/* ── Cross-panel arrow: Reports → Record Deposits (BANKING) ── */}
-        <Xarrow
-          start="n-reports"
-          end="qa-record-deposits"
-          startAnchor="right"
-          endAnchor="left"
-          strokeWidth={2} headSize={7}
-          color="#1890ff"
-          dashness={{ animation: 1.2, strokeLen: 10, nonStrokeLen: 5 }}
-        />
 
         {/* Right: QB-style quick access panel */}
         <Col xl={7} lg={8} md={24} sm={24} xs={24}>

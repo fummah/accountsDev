@@ -96,6 +96,12 @@ const ChartOfAccounts = () => {
   const [addTypeModalVisible, setAddTypeModalVisible] = useState(false);
   const [addSubTypeModalVisible, setAddSubTypeModalVisible] = useState(false);
 
+  /* Add Parent Account nested modal */
+  const [parentModalVisible, setParentModalVisible] = useState(false);
+  const [parentForm] = Form.useForm();
+  const [parentSaving, setParentSaving] = useState(false);
+  const [parentSelectedType, setParentSelectedType] = useState(null);
+
   /* Filters */
   const [searchText, setSearchText] = useState('');
   const [filterType, setFilterType] = useState('all');
@@ -877,13 +883,12 @@ const ChartOfAccounts = () => {
                   Parent Account
                   <Tooltip title="Create a new parent account">
                     <PlusCircleOutlined
-                      onClick={() => {
-                        setIsModalVisible(false);
-                        setTimeout(() => {
-                          setEditingId(null); setSelectedType(null); form.resetFields();
-                          form.setFieldsValue({ status: 'Active', openingBalance: 0, normalBalance: 'Debit' });
-                          setIsModalVisible(true);
-                        }, 50);
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        parentForm.resetFields();
+                        parentForm.setFieldsValue({ status: 'Active', openingBalance: 0, normalBalance: 'Debit' });
+                        setParentSelectedType(null);
+                        setParentModalVisible(true);
                       }}
                       style={{ color: '#1890ff', cursor: 'pointer', marginLeft: 6 }}
                     />
@@ -902,6 +907,113 @@ const ChartOfAccounts = () => {
               <Input placeholder="Brief description (optional)" />
             </Form.Item>
           </div>
+        </Form>
+      </Modal>
+
+      {/* ─── Add Parent Account (nested, does NOT close main modal) ─── */}
+      <Modal
+        title={<Space><ApartmentOutlined style={{ color: '#1890ff' }} />Add Parent Account</Space>}
+        visible={parentModalVisible}
+        onCancel={() => { setParentModalVisible(false); parentForm.resetFields(); setParentSelectedType(null); }}
+        zIndex={1100}
+        okText="Save Parent"
+        confirmLoading={parentSaving}
+        onOk={async () => {
+          try {
+            const vals = await parentForm.validateFields();
+            setParentSaving(true);
+            const payload = {
+              name:               vals.accountName,
+              type:               vals.accountType,
+              subType:            vals.subType || null,
+              number:             vals.accountCode || null,
+              status:             vals.status || 'Active',
+              openingBalance:     Number(vals.openingBalance) || 0,
+              normalBalance:      vals.normalBalance || (ACCOUNT_TYPES[vals.accountType]?.normalBalance || 'Debit'),
+              description:        vals.description || '',
+              taxLine:            vals.taxLine || null,
+              parentId:           null,
+            };
+            const res = await window.electronAPI.insertChartAccount(payload);
+            if (res && res.success) {
+              message.success(`Parent account "${payload.name}" created`);
+              await loadAccounts();
+              if (res.id) { form.setFieldsValue({ parentId: res.id }); }
+              setParentModalVisible(false);
+              parentForm.resetFields();
+              setParentSelectedType(null);
+            } else {
+              message.error(res?.error || 'Failed to create parent account');
+            }
+          } catch (e) {
+            if (e?.errorFields) return;
+            message.error('Failed to create parent account');
+          } finally {
+            setParentSaving(false);
+          }
+        }}
+        destroyOnClose
+      >
+        <Form form={parentForm} layout="vertical">
+          <Row gutter={12}>
+            <Col span={14}>
+              <Form.Item name="accountName" label="Account Name" rules={[{ required: true, message: 'Required' }]}>
+                <Input placeholder="e.g. Fixed Assets" />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item name="accountCode" label="Account Code">
+                <Input placeholder="e.g. 1500" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="accountType" label="Account Type" rules={[{ required: true, message: 'Required' }]}>
+                <Select placeholder="Select type" onChange={(v) => {
+                  setParentSelectedType(v);
+                  const nb = ACCOUNT_TYPES[v]?.normalBalance || 'Debit';
+                  parentForm.setFieldsValue({ normalBalance: nb, subType: undefined });
+                }}>
+                  {Object.keys(ACCOUNT_TYPES).map(t => (
+                    <Option key={t} value={t}>
+                      <Space size={4}>{ACCOUNT_TYPES[t].icon}<span>{t}</span></Space>
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="subType" label="Sub-Type">
+                <Select placeholder="(optional)" allowClear>
+                  {(parentSelectedType ? ACCOUNT_SUBTYPES[parentSelectedType] || [] : []).map(s => (
+                    <Option key={s} value={s}>{s}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="status" label="Status" initialValue="Active">
+                <Select>
+                  <Option value="Active">Active</Option>
+                  <Option value="Inactive">Inactive</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="normalBalance" label="Normal Balance" initialValue="Debit">
+                <Select>
+                  <Option value="Debit">Debit</Option>
+                  <Option value="Credit">Credit</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="description" label="Description">
+            <Input placeholder="Brief description (optional)" />
+          </Form.Item>
         </Form>
       </Modal>
 

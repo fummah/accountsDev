@@ -76,7 +76,7 @@ const GeneralLedger = () => {
   const closingBalance = Number(selectedAccountData?.balance || 0);
 
   const columns = [
-    { title: 'Date', dataIndex: 'date', key: 'date', width: 110, sorter: (a, b) => new Date(a.date) - new Date(b.date), render: v => v ? moment(v).format('DD MMM YYYY') : '-' },
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 110, sorter: (a, b) => new Date(a.date) - new Date(b.date), render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true, filteredValue: searchText ? [searchText] : null, onFilter: (val, record) => (record.description || '').toLowerCase().includes(val.toLowerCase()) },
     { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120 },
     { title: 'Type', dataIndex: 'type', key: 'type', width: 100, render: v => v ? <Tag>{v}</Tag> : '-' },

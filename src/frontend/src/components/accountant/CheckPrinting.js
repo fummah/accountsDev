@@ -137,6 +137,19 @@ const CheckPrinting = () => {
     const payeeAddr = vals.payeeAddress || '';
     const amt = Number(vals.amount || 0);
     const amtStr = amt.toFixed(2);
+    const checkNum = vals.checkNumber || '';
+    const routingNum = vals.routingNumber || '';
+    const accountNum = vals.accountNumber || '';
+    const memoLine = vals.memo || '';
+    const bankName = vals.accountName || '';
+    const splitLns = (vals.splitLines || []).filter(l => Number(l.amount) > 0);
+
+    // Company info
+    const co = vals._company || {};
+    const coName = co.name || '';
+    const coAddr = co.address || '';
+    const coCity = co.city ? `${co.city}${co.state ? ', ' + co.state : ''}${co.zip ? ' ' + co.zip : ''}` : '';
+    const coPhone = co.phone || '';
 
     const words = (() => {
       const dollars = Math.floor(amt);
@@ -144,80 +157,130 @@ const CheckPrinting = () => {
       return `${toWords(dollars)} and ${String(cents).padStart(2, '0')}/100`;
     })();
 
-    // Fill remaining space with dots to end of line (matches image)
-    const dotFill = (text, totalLen = 90) => {
-      const remaining = Math.max(0, totalLen - text.length);
-      return text + '*'.repeat(remaining);
-    };
+    // MICR line
+    const micrRouting = routingNum ? `\u2446${routingNum}\u2446` : '\u2446000000000\u2446';
+    const micrAccount = accountNum ? `${accountNum}\u2448` : '0000000000\u2448';
+    const micrCheck  = checkNum   ? `${checkNum}\u2468` : '';
+    const micrLine   = `${micrRouting} ${micrAccount} ${micrCheck}`;
 
-    const memoLine = vals.memo || '';
-    const splitLines = (vals.splitLines || []).filter(l => Number(l.amount) > 0);
-
-    // Remittance stub rows (memo or split lines)
-    const stubRows = splitLines.length > 0
-      ? splitLines.map(l => `
+    // Remittance rows for stubs
+    const stubDetailRows = splitLns.length > 0
+      ? splitLns.map(l => `
           <tr>
-            <td style="padding:2px 0; font-size:13px; color:#1a1a1a;">${l.description || l.account || ''}</td>
-            <td style="padding:2px 0; font-size:13px; text-align:right; color:#1a1a1a;">${Number(l.amount||0).toFixed(2)}</td>
+            <td style="padding:1px 0; font-size:11px;">${l.description || l.account || ''}</td>
+            <td></td><td></td>
+            <td style="padding:1px 0; font-size:11px; text-align:right;">${Number(l.amount||0).toFixed(2)}</td>
           </tr>`).join('')
       : memoLine ? `<tr>
-          <td style="padding:2px 0; font-size:13px; color:#1a1a1a;">${memoLine}</td>
-          <td style="padding:2px 0; font-size:13px; text-align:right; color:#1a1a1a;">${amtStr}</td>
+          <td style="padding:1px 0; font-size:11px;">${memoLine}</td>
+          <td></td><td></td>
+          <td style="padding:1px 0; font-size:11px; text-align:right;">${amtStr}</td>
         </tr>` : '';
 
-    const stub = (borderTop) => `
-      <div style="height:190px; padding: 18px 36px 0 36px; box-sizing:border-box; border-top:${borderTop};">
-        <table style="width:100%; border-collapse:collapse;">
-          <tr>
-            <td style="font-size:13px; color:#b22222; font-weight:normal;">${payeeName}</td>
-            <td style="font-size:13px; text-align:center; color:#1a1a1a;">${dateStr}</td>
-            <td style="font-size:13px; text-align:right; color:#1a1a1a;">${amtStr}</td>
-          </tr>
-          ${stubRows}
+    // Stub section — matches image: payeeName | (spacer) | date | checkNum | amount
+    const stub = (borderTop, borderBottom) => `
+      <div style="height:190px; padding:10px 36px 0 36px; box-sizing:border-box;
+                  border-top:${borderTop || 'none'}; border-bottom:${borderBottom || 'none'};">
+        <table style="width:100%; border-collapse:collapse; font-family:Arial,sans-serif;">
+          <thead>
+            <tr style="border-bottom:1px solid #ccc;">
+              <th style="font-size:10px; font-weight:600; text-align:left; padding-bottom:3px; width:35%;">PAY TO</th>
+              <th style="font-size:10px; font-weight:600; text-align:left; padding-bottom:3px; width:22%;">DATE</th>
+              <th style="font-size:10px; font-weight:600; text-align:right; padding-bottom:3px; width:20%;">CHECK NO.</th>
+              <th style="font-size:10px; font-weight:600; text-align:right; padding-bottom:3px; width:23%;">AMOUNT</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-size:12px; font-weight:700; padding:4px 0 2px 0;">${payeeName}</td>
+              <td style="font-size:12px; padding:4px 0 2px 0;">${dateStr}</td>
+              <td style="font-size:12px; text-align:right; padding:4px 0 2px 0;">${checkNum}</td>
+              <td style="font-size:12px; font-weight:700; text-align:right; padding:4px 0 2px 0;">${amtStr}</td>
+            </tr>
+            ${stubDetailRows}
+          </tbody>
         </table>
       </div>`;
 
-    return `<!doctype html><html><head><title>Check #${vals.checkNumber || ''}</title>
+    return `<!doctype html><html><head><title>Check #${checkNum}</title>
     <style>
-      @page { margin: 0.3in; size: letter portrait; }
+      @page { margin: 0.25in 0.4in; size: letter portrait; }
       * { box-sizing: border-box; }
       body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #1a1a1a; }
-      .page { width: 100%; }
+      .check-section { width: 100%; }
+      .micr { font-family: 'MICR Encoding', 'Courier New', monospace; font-size: 14px; letter-spacing: 3px; }
     </style></head><body>
-    <div class="page">
+    <div class="check-section">
 
-      <!-- ═══════════════ CHECK BODY (top third) ═══════════════ -->
-      <div style="height:340px; padding:24px 36px 0 36px; position:relative;">
+      <!-- ═══════════════ TOP STUB ═══════════════ -->
+      ${stub('none', '1px solid #aaa')}
 
-        <!-- Date — top right -->
-        <div style="text-align:right; font-size:13px; margin-bottom:18px;">
-          ${dateStr}
+      <!-- ═══════════════ CHECK BODY (middle third) ═══════════════ -->
+      <div style="height:340px; padding:16px 36px 0 36px; position:relative; border-bottom:1px solid #aaa;">
+
+        <!-- Row 1: Company info (left) + Bank name (center) + Check number (right) -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+          <div style="font-size:11px; line-height:1.5; min-width:160px;">
+            ${coName  ? `<div style="font-weight:700; font-size:13px;">${coName}</div>` : ''}
+            ${coAddr  ? `<div>${coAddr}</div>` : ''}
+            ${coCity  ? `<div>${coCity}</div>` : ''}
+            ${coPhone ? `<div>${coPhone}</div>` : ''}
+          </div>
+          <div style="font-size:11px; text-align:center; color:#555; flex:1; padding:0 12px;">
+            ${bankName ? `<div style="font-weight:600;">${bankName}</div>` : ''}
+          </div>
+          <div style="text-align:right; min-width:80px;">
+            <div style="font-size:18px; font-weight:700;">${checkNum}</div>
+          </div>
         </div>
 
-        <!-- Pay To line: payee name left, **amount right -->
-        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
-          <span style="font-size:13px; color:#b22222; font-weight:normal; padding-left:50px;">${payeeName}</span>
-          <span style="font-size:13px; font-weight:bold;">**${amtStr}</span>
+        <!-- Row 2: Date line -->
+        <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:10px;">
+          <span style="font-size:11px; margin-right:6px;">DATE</span>
+          <span style="font-size:13px; font-weight:600; border-bottom:1px solid #333; min-width:90px; text-align:center;">${dateStr}</span>
         </div>
 
-        <!-- Written-amount line with dot fill -->
-        <div style="font-size:13px; color:#b22222; border-bottom:1px solid #ccc; padding-bottom:4px; margin-bottom:14px; letter-spacing:0.01em; overflow:hidden; white-space:nowrap;">
-          ${dotFill(words + '**', 110)}
+        <!-- Row 3: PAY TO THE ORDER OF -->
+        <div style="display:flex; align-items:baseline; margin-bottom:6px; gap:8px;">
+          <span style="font-size:10px; white-space:nowrap; font-weight:600;">PAY TO THE<br/>ORDER OF</span>
+          <span style="font-size:13px; font-weight:700; flex:1; border-bottom:1px solid #333; padding-bottom:2px; padding-left:6px;">${payeeName}</span>
+          <span style="font-size:12px; white-space:nowrap; font-weight:700; border:1px solid #333; padding:2px 8px; min-width:90px; text-align:center;">$ **${amtStr}</span>
         </div>
 
-        <!-- Payee address block (indented, like image) -->
-        <div style="padding-left:50px; font-size:13px; line-height:1.7; color:#b22222;">
-          ${payeeName ? `<div>${payeeName}</div>` : ''}
+        <!-- Row 4: Written amount line -->
+        <div style="display:flex; align-items:baseline; margin-bottom:12px; gap:8px;">
+          <span style="font-size:13px; font-weight:700; flex:1; border-bottom:1px solid #333; padding-bottom:2px; overflow:hidden; white-space:nowrap;">
+            ${words}**${'*'.repeat(Math.max(0, 70 - words.length))}
+          </span>
+          <span style="font-size:10px; font-weight:700; white-space:nowrap; padding-left:4px;">DOLLARS</span>
+        </div>
+
+        <!-- Row 5: Payee address (envelope window) -->
+        <div style="padding-left:8px; font-size:12px; line-height:1.8; min-height:52px;">
+          ${payeeName ? `<div style="font-weight:700;">${payeeName}</div>` : ''}
           ${payeeAddr ? payeeAddr.split('\n').map(l => `<div>${l}</div>`).join('') : ''}
+        </div>
+
+        <!-- Row 6: Memo + Signature line -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; position:absolute; bottom:16px; left:36px; right:36px;">
+          <div style="font-size:11px; min-width:220px;">
+            <span style="font-weight:600;">MEMO </span>
+            <span style="border-bottom:1px solid #333; display:inline-block; min-width:160px; padding-bottom:1px;">${memoLine}</span>
+          </div>
+          <div style="font-size:10px; text-align:center; min-width:180px;">
+            <div style="border-top:1px solid #333; padding-top:3px;">AUTHORIZED SIGNATURE</div>
+          </div>
+        </div>
+
+        <!-- Row 7: MICR line -->
+        <div class="micr" style="position:absolute; bottom:2px; left:36px; right:36px; text-align:center; color:#1a1a1a;">
+          ${micrLine}
         </div>
 
       </div>
 
-      <!-- ═══════════════ MIDDLE STUB ═══════════════ -->
-      ${stub('1px solid #999')}
-
       <!-- ═══════════════ BOTTOM STUB ═══════════════ -->
-      ${stub('1px solid #999')}
+      ${stub('none', 'none')}
 
     </div>
     </body></html>`;
@@ -228,6 +291,7 @@ const CheckPrinting = () => {
     vals.accountName = selectedAccount?.accountName || selectedAccount?.name || '';
     vals.splitLines = splitLines.filter(l => l.amount > 0);
     vals.payeeAddress = vals.payeeAddress || '';
+    vals._company = company;
     setPreviewHtml(generateCheckHtml(vals, false));
     setPreviewVisible(true);
   };
@@ -235,6 +299,7 @@ const CheckPrinting = () => {
   const handlePrint = (vals) => {
     vals.accountName = vals.accountName || selectedAccount?.accountName || selectedAccount?.name || '';
     vals.payeeAddress = vals.payeeAddress || form.getFieldValue('payeeAddress') || '';
+    vals._company = vals._company || company;
     const html = generateCheckHtml(vals, true);
     const w = window.open('', '_blank');
     w.document.open(); w.document.write(html); w.document.close();
@@ -271,7 +336,7 @@ const CheckPrinting = () => {
       };
       await window.electronAPI.insertTransaction(payload);
       message.success(`Check #${values.checkNumber} recorded successfully`);
-      const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0) };
+      const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
       handlePrint(vals);
       form.resetFields();
       setSplitLines([{ key: 1, account: '', description: '', amount: 0 }]);
@@ -506,6 +571,9 @@ const CheckPrinting = () => {
                 memo: watchMemo || '',
                 accountName: selectedAccount?.accountName || selectedAccount?.name || '',
                 splitLines: splitLines.filter(l => l.amount > 0),
+                routingNumber: form.getFieldValue('routingNumber') || '',
+                accountNumber: form.getFieldValue('accountNumber') || '',
+                _company: company,
               }, false) }} />
             </div>
           </Card>

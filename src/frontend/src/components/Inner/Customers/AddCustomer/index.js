@@ -212,7 +212,7 @@ useEffect(() => {
                        if (digits.length > 6) formatted = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
                        else if (digits.length > 3) formatted = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
                        else if (digits.length > 0) formatted = `(${digits}`;
-                       e.target.value = formatted;
+                       form.setFieldsValue({ phone_number: formatted });
                      }}
                    />
               </Form.Item>

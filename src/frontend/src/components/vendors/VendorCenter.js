@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Modal, Form, Input } from 'antd';
+import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Modal, Form, Input, Divider } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { ShopOutlined, DollarOutlined, FileTextOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -39,16 +39,16 @@ const VendorCenter = () => {
       const email = values.email || '';
       const display_name = values.display_name || values.first_name || '';
       const company_name = '';
-      const phone_number = '';
+      const phone_number = values.phone_number || '';
       const mobile_number = values.mobile_number || '';
       const fax = '';
       const other = '';
       const website = '';
-      const address1 = '';
+      const address1 = values.address1 || '';
       const address2 = '';
-      const city = '';
-      const state = '';
-      const postal_code = '';
+      const city = values.city || '';
+      const state = values.state || '';
+      const postal_code = values.zip || '';
       const country = '';
       const supplier_terms = '';
       const business_number = '';
@@ -258,24 +258,67 @@ const VendorCenter = () => {
             </div>
               <Modal
                 title="Add Vendor"
-                open={showAddVendor}
+                visible={showAddVendor}
                 onCancel={() => { setShowAddVendor(false); vendorForm.resetFields(); }}
                 onOk={() => vendorForm.submit()}
                 okText="Create"
               >
                 <Form form={vendorForm} layout="vertical" onFinish={onCreateVendor}>
-                  <Form.Item name="first_name" label="Name" rules={[{ required: true, message: 'Please enter vendor name' }]}>
-                    <Input />
+                  <Row gutter={16}>
+                    <Col span={16}>
+                      <Form.Item name="first_name" label="Vendor Name" rules={[{ required: true, message: 'Please enter vendor name' }]}>
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item name="display_name" label="Display Name">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item name="email" label="Email">
+                        <Input placeholder="vendor@example.com" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item name="phone_number" label="Phone">
+                        <Input
+                          placeholder="(XXX) XXX-XXXX"
+                          maxLength={14}
+                          onChange={e => {
+                            const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                            let formatted = digits;
+                            if (digits.length > 6) formatted = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+                            else if (digits.length > 3) formatted = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
+                            else if (digits.length > 0) formatted = `(${digits}`;
+                            vendorForm.setFieldsValue({ phone_number: formatted });
+                          }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Form.Item name="address1" label="Street Address">
+                    <Input placeholder="123 Main St" />
                   </Form.Item>
-                  <Form.Item name="display_name" label="Display Name">
-                    <Input />
-                  </Form.Item>
-                  <Form.Item name="email" label="Email">
-                    <Input />
-                  </Form.Item>
-                  <Form.Item name="mobile_number" label="Mobile Number">
-                    <Input />
-                  </Form.Item>
+                  <Row gutter={16}>
+                    <Col span={10}>
+                      <Form.Item name="city" label="City">
+                        <Input placeholder="City" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={7}>
+                      <Form.Item name="state" label="State">
+                        <Input placeholder="State" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={7}>
+                      <Form.Item name="zip" label="ZIP Code">
+                        <Input placeholder="00000" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
                   <Form.Item name="opening_balance" label="Opening Balance">
                     <Input />
                   </Form.Item>
