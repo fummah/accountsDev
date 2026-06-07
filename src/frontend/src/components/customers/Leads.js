@@ -45,7 +45,7 @@ const stageMap = Object.fromEntries(STAGES.map(s => [s.key, s]));
 const prioMap  = Object.fromEntries(PRIORITIES.map(p => [p.key, p]));
 const Leads = () => {
   const { symbol: cSym } = useCurrency();
-  const fmtMoney = v => `${cSym} ${Number(v || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtMoney = v => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const [activeTab, setActiveTab]             = useState('pipeline');
   const [leads, setLeads]                     = useState([]);
   const [loading, setLoading]                 = useState(true);

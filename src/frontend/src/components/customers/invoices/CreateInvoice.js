@@ -262,7 +262,11 @@ const CreateInvoice = () => {
         );
         if (res?.error) { message.error(typeof res.error === 'string' ? res.error : 'Insert failed'); setSaving(false); return; }
         if (res?.success === false) { message.error('Failed to create invoice'); setSaving(false); return; }
-        message.success('Invoice created');
+        if (res?.glWarning) {
+          message.warning(`Invoice saved but ledger post failed: ${res.glWarning}`, 8);
+        } else {
+          message.success('Invoice created');
+        }
       }
       history.push('/main/customers/invoices/list');
     } catch (e) {

@@ -190,7 +190,7 @@ const CustomerDetails = () => {
                       <List.Item extra={<Tag color={statusColors[inv.status] || 'default'}>{inv.status}</Tag>}>
                         <List.Item.Meta
                           title={<Link to={'/main/customers/invoices/edit/' + inv.id}>{inv.number || '#' + inv.id}</Link>}
-                          description={'R ' + Number(inv.amount || 0).toFixed(2) + ' — ' + (inv.start_date ? moment(inv.start_date).format('MM/DD/YYYY') : '')} />
+                          description={`${cSym} ${Number(inv.amount || 0).toFixed(2)} — ${inv.start_date ? moment(inv.start_date).format('MM/DD/YYYY') : ''}`} />
                       </List.Item>
                     ); }} />}
                 </Card>
@@ -203,7 +203,7 @@ const CustomerDetails = () => {
                       <List.Item extra={<Tag color={statusColors[q.status] || 'default'}>{q.status}</Tag>}>
                         <List.Item.Meta
                           title={<Link to={'/main/customers/quotes/edit/' + q.id}>{q.number || '#' + q.id}</Link>}
-                          description={'R ' + Number(q.amount || 0).toFixed(2) + ' — ' + (q.start_date ? moment(q.start_date).format('MM/DD/YYYY') : '')} />
+                          description={`${cSym} ${Number(q.amount || 0).toFixed(2)} — ${q.start_date ? moment(q.start_date).format('MM/DD/YYYY') : ''}`} />
                       </List.Item>
                     ); }} />}
                 </Card>

@@ -381,35 +381,43 @@ Transactions.getTrialBalance = function(startDate, endDate) {
     const start = startDate || '0000-01-01';
     const end = endDate || '9999-12-31';
 
-    const stmt = db.prepare(`
-      SELECT coa.id as accountId,
-             coa.name as accountName,
-             coa.type as accountType,
-             IFNULL(s.totalDebit, 0) as totalDebit,
-             IFNULL(s.totalCredit, 0) as totalCredit
+    // Read from journal_lines (authoritative double-entry source) — same as computedBalance()
+    const rows = db.prepare(`
+      SELECT coa.id                               AS accountId,
+             coa.name                             AS accountName,
+             coa.type                             AS accountType,
+             coa.subType                          AS accountSubType,
+             coa.number                           AS accountNumber,
+             coa.normalBalance,
+             COALESCE(SUM(jl.debit),  0)          AS totalDebit,
+             COALESCE(SUM(jl.credit), 0)          AS totalCredit
       FROM chart_of_accounts coa
-      LEFT JOIN (
-        SELECT accountId,
-               SUM(IFNULL(debit,0)) as totalDebit,
-               SUM(IFNULL(credit,0)) as totalCredit
-        FROM transactions
-        WHERE date >= ? AND date <= ? AND (status IS NULL OR LOWER(status) = 'active')
-        GROUP BY accountId
-      ) s ON s.accountId = coa.id
-      ORDER BY coa.number || coa.id
-    `);
+      LEFT JOIN journal_lines jl   ON jl.account_id = coa.id
+      LEFT JOIN journal_entries je ON je.id = jl.journal_id
+                                   AND je.status = 'Posted'
+                                   AND je.date >= ? AND je.date <= ?
+      WHERE coa.status = 'Active'
+      GROUP BY coa.id
+      ORDER BY CAST(coa.number AS INTEGER), coa.name
+    `).all(start, end);
 
-    const rows = stmt.all(start, end);
-
-    // Map to friendly structure expected by frontend
-    return rows.map(r => ({
-      accountId: r.accountId,
-      accountName: r.accountName,
-      accountType: r.accountType,
-      debit: Number(r.totalDebit) || 0,
-      credit: Number(r.totalCredit) || 0,
-      balance: (Number(r.totalDebit) || 0) - (Number(r.totalCredit) || 0)
-    }));
+    return rows.map(r => {
+      const nb = r.normalBalance || 'Debit';
+      const d = Number(r.totalDebit)  || 0;
+      const c = Number(r.totalCredit) || 0;
+      // Balance = normal-side amount (positive = normal, negative = contra)
+      const balance = nb === 'Debit' ? d - c : c - d;
+      return {
+        accountId:      r.accountId,
+        accountName:    r.accountName,
+        accountType:    r.accountType,
+        accountSubType: r.accountSubType || '',
+        accountNumber:  r.accountNumber  || '',
+        debit:          d,
+        credit:         c,
+        balance,
+      };
+    });
   } catch (error) {
     console.error('Error computing trial balance:', error);
     return [];

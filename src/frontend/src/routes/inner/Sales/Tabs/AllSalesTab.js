@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { getCurrencySymbol } from '../../../../utils/currency';
 import { Col, Row, Card, Progress, Alert, Spin } from "antd";
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
@@ -56,13 +57,13 @@ const AllSalesTab = () => {
       const creditCount = invoiceReport?.credit_notes?.[0]?.credit_count || 0;
       const creditAmt = invoiceReport?.credit_notes?.[0]?.credit_total || 0;
       const openLabel = creditCount > 0
-        ? `${openCount} open invoices / ${creditCount} credits (R ${formattedNumber(creditAmt)})`
+        ? `${openCount} open invoices / ${creditCount} credits (${getCurrencySymbol()} ${formattedNumber(creditAmt)})`
         : `${openCount} open invoices / credits`;
       setCards([
-        { title: `R ${formattedNumber(estAmt)}`, description: `${estCount} estimates`, color: '#40a9ff', wd: 6 },
-        { title: `R ${formattedNumber(overdueAmt)}`, description: `${overdueCount} overdue invoices`, color: '#fa8c16', wd: 6 },
-        { title: `R ${formattedNumber(openAmt)}`, description: openLabel, color: '#d9d9d9', wd: 6 },
-        { title: `R ${formattedNumber(paidAmt)}`, description: `${paidCount} recently paid`, color: '#52c41a', wd: 6 },
+        { title: `${getCurrencySymbol()} ${formattedNumber(estAmt)}`, description: `${estCount} estimates`, color: '#40a9ff', wd: 6 },
+        { title: `${getCurrencySymbol()} ${formattedNumber(overdueAmt)}`, description: `${overdueCount} overdue invoices`, color: '#fa8c16', wd: 6 },
+        { title: `${getCurrencySymbol()} ${formattedNumber(openAmt)}`, description: openLabel, color: '#d9d9d9', wd: 6 },
+        { title: `${getCurrencySymbol()} ${formattedNumber(paidAmt)}`, description: `${paidCount} recently paid`, color: '#52c41a', wd: 6 },
       ]);
     } catch (err) {
       setErrorMessage(err?.message || 'Failed to load summary');

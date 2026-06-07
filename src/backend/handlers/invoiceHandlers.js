@@ -93,21 +93,28 @@ const registerInvoiceHandlers = () => {
           });
         } catch (auditErr) { console.warn('Audit log failed (non-fatal):', auditErr.message); }
 
-        // ── Auto-post to COA: DR Accounts Receivable / CR Revenue ─────────
+        // ── Auto-post to COA: DR Accounts Receivable / CR Income per line ──
         if (status && status !== 'Draft') {
           try {
             const invoiceId = res.invoice_id || res.id;
             const inv = await Invoices.getSingleInvoice(invoiceId);
             if (inv) {
-              JournalEntries.postInvoice({
+              const postResult = JournalEntries.postInvoice({
                 id: invoiceId,
                 date: start_date,
                 number,
                 total: inv.total || inv.amount,
                 customerName: inv.customerName || '',
               });
+              if (postResult && postResult.error) {
+                console.warn('Journal auto-post (invoice) error:', postResult.error);
+                res.glWarning = postResult.error;
+              }
             }
-          } catch (jErr) { console.warn('Journal auto-post (invoice) failed:', jErr.message); }
+          } catch (jErr) {
+            console.warn('Journal auto-post (invoice) failed:', jErr.message);
+            res.glWarning = jErr.message;
+          }
         }
       }
       return res;

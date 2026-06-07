@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { getCurrencySymbol } from '../../../../utils/currency';
 import {
   Card,
   DatePicker,
@@ -49,19 +50,19 @@ const columns = [
     title: "Debit",
     dataIndex: "debit",
     key: "debit",
-    render: (val) => `R ${val.toFixed(2)}`,
+    render: (val) => `${getCurrencySymbol()} ${Number(val || 0).toFixed(2)}`,
   },
   {
     title: "Credit",
     dataIndex: "credit",
     key: "credit",
-    render: (val) => `R ${val.toFixed(2)}`,
+    render: (val) => `${getCurrencySymbol()} ${Number(val || 0).toFixed(2)}`,
   },
   {
     title: "Balance",
     dataIndex: "balance",
     key: "balance",
-    render: (val) => `R ${val.toFixed(2)}`,
+    render: (val) => `${getCurrencySymbol()} ${Number(val || 0).toFixed(2)}`,
   },
 ];
 

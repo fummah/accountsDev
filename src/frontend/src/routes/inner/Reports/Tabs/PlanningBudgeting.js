@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { getCurrencySymbol } from '../../../../utils/currency';
 import {
   Card,
   Form,
@@ -72,13 +73,13 @@ const PlanningBudgeting = () => {
       title: "Budget Amount",
       dataIndex: "amount",
       key: "amount",
-      render: (text) => `R ${Number(text).toFixed(2)}`,
+      render: (text) => `${getCurrencySymbol()} ${Number(text).toFixed(2)}`,
     },
     {
       title: "Forecast",
       dataIndex: "forecast",
       key: "forecast",
-      render: (text) => `R ${Number(text).toFixed(2)}`,
+      render: (text) => `${getCurrencySymbol()} ${Number(text).toFixed(2)}`,
     },
   ];
 
