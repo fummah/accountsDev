@@ -16,6 +16,15 @@ import 'jspdf-autotable';
  * @param {object} opts.company       – { name, email, phone, address, logo (base64) }
  * @returns {jsPDF} doc instance
  */
+// ── Parse a hex colour string (#rrggbb) → [r, g, b] ────────────────────────
+function hexToRgb(hex) {
+  try {
+    const h = (hex || '').replace('#', '');
+    if (h.length !== 6) return null;
+    return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+  } catch { return null; }
+}
+
 export function generateDocumentPDF({
   docType = 'Invoice',
   header = {},
@@ -27,57 +36,95 @@ export function generateDocumentPDF({
   message: docMessage = '',
   statementMemo = '',
   company = {},
-  currencySymbol = 'R',
+  currencySymbol = '$',
+  templateSettings = {},
 }) {
+  // ── Resolve template settings with defaults ──────────────────────────────
+  const T = {
+    logoBase64: '',
+    primaryColor: '#2962FF',
+    accentColor: '#f5f7fa',
+    fontFamily: 'helvetica',
+    headerFontSize: 18,
+    bodyFontSize: 9,
+    showLogo: true,
+    showCompanyAddress: true,
+    showCustomerEmail: true,
+    showBillingAddress: true,
+    showLineNumbers: true,
+    showQuantity: true,
+    showRate: true,
+    showTax: true,
+    footerText: 'Thank you for your business!',
+    paymentInstructions: '',
+    termsAndConditions: '',
+    invoiceLabel: 'INVOICE',
+    quoteLabel: 'QUOTE',
+    billToLabel: 'BILL TO',
+    dateLabel: 'DATE',
+    dueDateLabel: 'DUE DATE',
+    termsLabel: 'TERMS',
+    notesLabel: 'NOTES',
+    ...templateSettings,
+  };
+
+  const font = T.fontFamily || 'helvetica';
+  const primary  = hexToRgb(T.primaryColor)  || [41, 98, 255];
+  const altRowBg = hexToRgb(T.accentColor)   || [245, 247, 250];
+  const darkGrey = [51, 51, 51];
+  const midGrey  = [120, 120, 120];
+
+  // Use uploaded logo from template if available, fall back to company logo
+  const logoSrc = (T.showLogo && (T.logoBase64 || company.logo)) || null;
+
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 15;
   let y = margin;
 
-  // ── Colours ──
-  const primary = [41, 98, 255];   // brand blue
-  const darkGrey = [51, 51, 51];
-  const midGrey = [120, 120, 120];
-  const lightBg = [245, 247, 250];
-
   // ── Helper ──
   const fmt = (n) => `${currencySymbol} ${Number(n || 0).toFixed(2)}`;
+  const hfs = Math.max(10, Math.min(28, Number(T.headerFontSize) || 18));
+  const bfs = Math.max(7, Math.min(14, Number(T.bodyFontSize) || 9));
 
   // ═══════════════════  HEADER BAR  ═══════════════════
   doc.setFillColor(...primary);
   doc.rect(0, 0, pageW, 38, 'F');
 
-  // Company logo (if base64 provided)
+  // Logo
   let logoX = margin;
-  if (company.logo) {
+  if (logoSrc) {
     try {
-      doc.addImage(company.logo, 'PNG', margin, 6, 26, 26);
+      const fmt2 = logoSrc.includes('data:image/png') ? 'PNG' : 'JPEG';
+      doc.addImage(logoSrc, fmt2, margin, 6, 26, 26);
       logoX = margin + 30;
     } catch { /* ignore bad logo */ }
   }
 
-  // Company name in header
+  // Company name
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(hfs);
+  doc.setFont(font, 'bold');
   doc.text(company.name || 'Your Company', logoX, 16);
 
-  // Company contact
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  const contactParts = [company.email, company.phone, company.address].filter(Boolean);
-  if (contactParts.length) {
-    doc.text(contactParts.join('  |  '), logoX, 23);
+  // Company contact line
+  if (T.showCompanyAddress) {
+    doc.setFontSize(bfs);
+    doc.setFont(font, 'normal');
+    const contactParts = [company.email, company.phone, company.address].filter(Boolean);
+    if (contactParts.length) doc.text(contactParts.join('  |  '), logoX, 23);
   }
 
-  // Document title on right side of header
+  // Document title right-aligned
+  const docLabel = docType === 'Quote'
+    ? (T.quoteLabel || 'QUOTE').toUpperCase()
+    : (T.invoiceLabel || 'INVOICE').toUpperCase();
   doc.setFontSize(22);
-  doc.setFont('helvetica', 'bold');
-  doc.text(docType.toUpperCase(), pageW - margin, 18, { align: 'right' });
+  doc.setFont(font, 'bold');
+  doc.text(docLabel, pageW - margin, 18, { align: 'right' });
 
-  // Document number below title
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(font, 'normal');
   doc.text(`#${header.number || '—'}`, pageW - margin, 26, { align: 'right' });
 
   y = 48;
@@ -85,83 +132,79 @@ export function generateDocumentPDF({
   // ═══════════════════  INFO SECTION  ═══════════════════
   doc.setTextColor(...darkGrey);
 
-  // Left column – Bill To
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
+  // Left – Bill To
+  doc.setFontSize(bfs - 1);
+  doc.setFont(font, 'bold');
   doc.setTextColor(...midGrey);
-  doc.text('BILL TO', margin, y);
+  doc.text((T.billToLabel || 'BILL TO').toUpperCase(), margin, y);
   y += 5;
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(bfs + 2);
+  doc.setFont(font, 'bold');
   doc.setTextColor(...darkGrey);
   doc.text(header.customerName || '—', margin, y);
   y += 5;
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  if (header.email) { doc.text(header.email, margin, y); y += 4; }
-  if (header.billingAddress) {
+  doc.setFontSize(bfs);
+  doc.setFont(font, 'normal');
+  if (T.showCustomerEmail && header.email) { doc.text(header.email, margin, y); y += 4; }
+  if (T.showBillingAddress && header.billingAddress) {
     const addrLines = doc.splitTextToSize(header.billingAddress, 80);
     doc.text(addrLines, margin, y);
     y += addrLines.length * 4;
   }
 
-  // Right column – Details
+  // Right – Details
   const rightX = pageW - margin;
   let ry = 48;
   const addDetail = (label, value) => {
     if (!value) return;
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(bfs - 1);
+    doc.setFont(font, 'bold');
     doc.setTextColor(...midGrey);
-    doc.text(label, rightX - 55, ry);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
+    doc.text(label.toUpperCase(), rightX - 55, ry);
+    doc.setFontSize(bfs);
+    doc.setFont(font, 'normal');
     doc.setTextColor(...darkGrey);
     doc.text(String(value), rightX, ry, { align: 'right' });
     ry += 6;
   };
 
-  addDetail('DATE', header.date);
-  addDetail(docType === 'Quote' ? 'EXPIRY' : 'DUE DATE', header.dueDate);
-  if (header.terms) addDetail('TERMS', header.terms);
+  addDetail(T.dateLabel || 'DATE', header.date);
+  addDetail(docType === 'Quote' ? 'EXPIRY' : (T.dueDateLabel || 'DUE DATE'), header.dueDate);
+  if (header.terms) addDetail(T.termsLabel || 'TERMS', header.terms);
   addDetail('STATUS', header.status);
 
   y = Math.max(y, ry) + 8;
 
   // ═══════════════════  LINE ITEMS TABLE  ═══════════════════
-  const tableBody = lines.map((l, i) => [
-    i + 1,
-    l.description || '',
-    l.quantity || 0,
-    fmt(l.rate),
-    fmt(l.amount),
-  ]);
+  // Build columns dynamically based on visibility toggles
+  const colHeaders = ['Description'];
+  const colStyles = { 0: {} };
+  let colIdx = 1;
+  if (T.showLineNumbers)  { colHeaders.unshift('#'); colStyles[0] = { cellWidth: 10, halign: 'center' }; colIdx++; }
+  if (T.showQuantity)     { colHeaders.push('Qty');    colStyles[colIdx] = { cellWidth: 18, halign: 'center' }; colIdx++; }
+  if (T.showRate)         { colHeaders.push('Rate');   colStyles[colIdx] = { cellWidth: 28, halign: 'right' }; colIdx++; }
+  colHeaders.push('Amount');
+  colStyles[colIdx] = { cellWidth: 30, halign: 'right' };
+
+  const tableBody = lines.map((l, i) => {
+    const row = [];
+    if (T.showLineNumbers) row.push(i + 1);
+    row.push(l.description || '');
+    if (T.showQuantity) row.push(l.quantity || 0);
+    if (T.showRate)     row.push(fmt(l.rate));
+    row.push(fmt(l.amount));
+    return row;
+  });
 
   doc.autoTable({
     startY: y,
-    head: [['#', 'Description', 'Qty', 'Rate', 'Amount']],
+    head: [colHeaders],
     body: tableBody,
     margin: { left: margin, right: margin },
-    styles: {
-      fontSize: 9,
-      cellPadding: 3,
-      textColor: darkGrey,
-      lineColor: [220, 220, 220],
-      lineWidth: 0.2,
-    },
-    headStyles: {
-      fillColor: primary,
-      textColor: [255, 255, 255],
-      fontStyle: 'bold',
-      fontSize: 9,
-    },
-    alternateRowStyles: { fillColor: lightBg },
-    columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
-      2: { cellWidth: 18, halign: 'center' },
-      3: { cellWidth: 28, halign: 'right' },
-      4: { cellWidth: 30, halign: 'right' },
-    },
+    styles: { fontSize: bfs, cellPadding: 3, textColor: darkGrey, lineColor: [220, 220, 220], lineWidth: 0.2, font },
+    headStyles: { fillColor: primary, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: bfs },
+    alternateRowStyles: { fillColor: altRowBg },
+    columnStyles: colStyles,
   });
 
   y = doc.lastAutoTable.finalY + 6;
@@ -171,8 +214,8 @@ export function generateDocumentPDF({
   const valX = pageW - margin;
 
   const drawTotalLine = (label, value, bold) => {
-    doc.setFont('helvetica', bold ? 'bold' : 'normal');
-    doc.setFontSize(bold ? 11 : 9);
+    doc.setFont(font, bold ? 'bold' : 'normal');
+    doc.setFontSize(bold ? bfs + 2 : bfs);
     doc.setTextColor(...darkGrey);
     doc.text(label, totalsX, y);
     doc.text(value, valX, y, { align: 'right' });
@@ -180,10 +223,7 @@ export function generateDocumentPDF({
   };
 
   drawTotalLine('Subtotal', fmt(subtotal), false);
-  if (vatPercent > 0) {
-    drawTotalLine(`Tax (${vatPercent}%)`, fmt(vatAmount), false);
-  }
-  // Divider line above total
+  if (vatPercent > 0) drawTotalLine(`Tax (${vatPercent}%)`, fmt(vatAmount), false);
   doc.setDrawColor(...primary);
   doc.setLineWidth(0.5);
   doc.line(totalsX, y - 1, valX, y - 1);
@@ -192,37 +232,53 @@ export function generateDocumentPDF({
 
   // ═══════════════════  NOTES  ═══════════════════
   y += 6;
-  if (docMessage) {
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
+  const notesLabel = (T.notesLabel || 'NOTES').toUpperCase();
+  const combinedMessage = [docMessage, T.paymentInstructions].filter(Boolean).join('\n\n');
+  if (combinedMessage) {
+    doc.setFontSize(bfs - 1);
+    doc.setFont(font, 'bold');
     doc.setTextColor(...midGrey);
-    doc.text('NOTES', margin, y);
+    doc.text(notesLabel, margin, y);
     y += 4;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(bfs);
+    doc.setFont(font, 'normal');
     doc.setTextColor(...darkGrey);
-    const msgLines = doc.splitTextToSize(docMessage, pageW - 2 * margin);
+    const msgLines = doc.splitTextToSize(combinedMessage, pageW - 2 * margin);
     doc.text(msgLines, margin, y);
     y += msgLines.length * 4 + 4;
   }
   if (statementMemo) {
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(bfs - 1);
+    doc.setFont(font, 'bold');
     doc.setTextColor(...midGrey);
     doc.text('STATEMENT MEMO', margin, y);
     y += 4;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(bfs);
+    doc.setFont(font, 'normal');
     doc.setTextColor(...darkGrey);
     const memoLines = doc.splitTextToSize(statementMemo, pageW - 2 * margin);
     doc.text(memoLines, margin, y);
+    y += memoLines.length * 4 + 4;
+  }
+  if (T.termsAndConditions) {
+    doc.setFontSize(bfs - 1);
+    doc.setFont(font, 'bold');
+    doc.setTextColor(...midGrey);
+    doc.text((T.termsLabel || 'TERMS').toUpperCase() + ' & CONDITIONS', margin, y);
+    y += 4;
+    doc.setFontSize(bfs);
+    doc.setFont(font, 'normal');
+    doc.setTextColor(...darkGrey);
+    const tLines = doc.splitTextToSize(T.termsAndConditions, pageW - 2 * margin);
+    doc.text(tLines, margin, y);
   }
 
   // ═══════════════════  FOOTER  ═══════════════════
   const pageH = doc.internal.pageSize.getHeight();
-  doc.setFontSize(8);
+  const footerMsg = T.footerText || 'Thank you for your business!';
+  doc.setFontSize(bfs - 1);
   doc.setTextColor(...midGrey);
-  doc.text('Thank you for your business!', pageW / 2, pageH - 10, { align: 'center' });
+  doc.text(footerMsg, pageW / 2, pageH - 10, { align: 'center' });
 
   return doc;
 }

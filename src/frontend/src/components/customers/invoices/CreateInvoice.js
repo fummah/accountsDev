@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Table, Space, message, Divider, Row, Col, Spin, Modal } from 'antd';
-import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined, SettingOutlined } from '@ant-design/icons';
 import { handleDocumentPDF } from '../shared/generateDocumentPDF';
 import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
@@ -24,6 +24,7 @@ const CreateInvoice = () => {
   const [custModalOpen, setCustModalOpen] = useState(false);
   const [prodModalOpen, setProdModalOpen] = useState(false);
   const [vatModalOpen, setVatModalOpen] = useState(false);
+  const [invoiceTemplate, setInvoiceTemplate] = useState({});
   const [custForm] = Form.useForm();
   const [prodForm] = Form.useForm();
   const [vatForm] = Form.useForm();
@@ -129,10 +130,14 @@ const CreateInvoice = () => {
         form.setFieldsValue({ customer: Number(custId) });
       }
     } catch (err) { console.error('loadDeps error:', err); }
-    // Load company info separately so it never blocks the form
+    // Load company info and invoice template separately so they never block the form
     try {
       const comp = await window.electronAPI.getCompany?.();
       if (comp) setCompany(comp);
+    } catch {}
+    try {
+      const tmpl = await window.electronAPI.getInvoiceTemplate?.();
+      if (tmpl && !tmpl.error) setInvoiceTemplate(tmpl);
     } catch {}
   };
 
@@ -297,6 +302,7 @@ const CreateInvoice = () => {
         logo: company.logo || null,
       },
       currencySymbol: cSym,
+      templateSettings: invoiceTemplate,
     });
   };
 
@@ -329,13 +335,14 @@ const CreateInvoice = () => {
           <Button icon={<ArrowLeftOutlined />} onClick={() => history.push('/main/customers/invoices/list')}>Back</Button>
           <h2 style={{ margin: 0 }}>{isEdit ? `Edit Invoice #${id}` : 'Create Invoice'}</h2>
         </Space>
-        {isEdit && (
-          <Space wrap>
+        <Space wrap>
+          {isEdit && (<>
             <Button icon={<EyeOutlined />} onClick={() => doPDF('preview')}>Preview</Button>
             <Button icon={<FilePdfOutlined />} onClick={() => doPDF('download')}>Download PDF</Button>
             <Button icon={<PrinterOutlined />} onClick={() => doPDF('print')}>Print</Button>
-          </Space>
-        )}
+          </>)}
+          <Button icon={<SettingOutlined />} onClick={() => history.push('/main/customers/invoices/customize')}>Customize Template</Button>
+        </Space>
       </div>
 
       <Card loading={loading}>
