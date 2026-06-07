@@ -140,16 +140,62 @@ const JournalEntries = {
   },
 
   // ── POST FROM INVOICE ──────────────────────────────────────────────────
-  // DR Accounts Receivable / CR Revenue
+  // DR Accounts Receivable (full total) / CR each income account per invoice line
   postInvoice: (invoice) => {
     if (JournalEntries.hasPosting('invoice', invoice.id)) return { skipped: true };
     const COA = require('./chartOfAccounts');
-    const ar = COA.getSystemAccount('Accounts Receivable');
-    const revenue = COA.getByName('Sales Revenue') || COA.getByName('Service Revenue');
-    if (!ar || !revenue) return { error: 'Required COA accounts not found (AR/Revenue)' };
+    const ar = COA.getSystemAccount('Accounts Receivable') || COA.getByName('Accounts Receivable');
+    if (!ar) return { error: 'Accounts Receivable account not found in COA' };
 
-    const amount = Number(invoice.total || invoice.amount || 0);
-    if (!amount) return { error: 'Invoice has zero amount' };
+    // Resolve fallback revenue account (used when a line has no income_account)
+    const fallbackRevenue = COA.getByName('Sales Revenue') || COA.getByName('Service Revenue')
+      || db.prepare("SELECT * FROM chart_of_accounts WHERE (LOWER(type)='income' OR LOWER(type)='other income') AND status='Active' LIMIT 1").get();
+    if (!fallbackRevenue) return { error: 'No revenue/income account found in COA' };
+
+    // Fetch invoice lines to credit the correct income account per product
+    let invoiceLines = [];
+    try {
+      invoiceLines = db.prepare(`
+        SELECT il.amount, il.quantity, il.description, il.product,
+               p.income_account
+        FROM invoice_lines il
+        LEFT JOIN products p ON il.product = p.id
+        WHERE il.invoice_id = ?
+      `).all(Number(invoice.id));
+    } catch { invoiceLines = []; }
+
+    const vat = (() => {
+      try { return Number(db.prepare('SELECT vat FROM invoices WHERE id = ?').get(Number(invoice.id))?.vat || 0); }
+      catch { return 0; }
+    })();
+
+    // Build credit lines — one per invoice line mapped to its income account
+    const creditLines = [];
+    let totalCredit = 0;
+    for (const line of invoiceLines) {
+      const lineAmt = (Number(line.amount) || 0) * (Number(line.quantity) || 1) * (1 + vat / 100);
+      if (lineAmt <= 0) continue;
+
+      let incomeAcctId = null;
+      if (line.income_account) {
+        const acct = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(line.income_account, line.income_account);
+        if (acct) incomeAcctId = acct.id;
+      }
+      if (!incomeAcctId) incomeAcctId = fallbackRevenue.id;
+
+      creditLines.push({ account_id: incomeAcctId, debit: 0, credit: lineAmt, description: line.description || 'Revenue' });
+      totalCredit += lineAmt;
+    }
+
+    // If no lines found, fall back to invoice total against fallback revenue
+    if (!creditLines.length) {
+      const amount = Number(invoice.total || invoice.amount || 0);
+      if (!amount) return { error: 'Invoice has zero amount' };
+      creditLines.push({ account_id: fallbackRevenue.id, debit: 0, credit: amount, description: 'Revenue' });
+      totalCredit = amount;
+    }
+
+    if (totalCredit <= 0) return { error: 'Invoice has zero amount' };
 
     try {
       return JournalEntries.post({
@@ -158,8 +204,8 @@ const JournalEntries = {
         description: `Invoice ${invoice.number || '#' + invoice.id} — ${invoice.customerName || ''}`,
         source_type: 'invoice', source_id: invoice.id,
         lines: [
-          { account_id: ar.id,      debit: amount,  credit: 0,      description: 'Accounts Receivable' },
-          { account_id: revenue.id, debit: 0,        credit: amount, description: 'Revenue' },
+          { account_id: ar.id, debit: totalCredit, credit: 0, description: 'Accounts Receivable' },
+          ...creditLines,
         ],
       });
     } catch (e) { return { error: e.message }; }
@@ -192,20 +238,67 @@ const JournalEntries = {
   },
 
   // ── POST FROM EXPENSE / BILL ──────────────────────────────────────────
-  // DR Expense account / CR Accounts Payable (or Bank)
+  // DR each expense line's account / CR Accounts Payable (full total)
   postExpense: (expense) => {
     if (JournalEntries.hasPosting('expense', expense.id)) return { skipped: true };
     const COA = require('./chartOfAccounts');
-    const ap  = COA.getSystemAccount('Accounts Payable');
-    // Try to find the expense account by name or fall back to first expense type
-    const expAcct = (expense.accountId && COA.getAccount(expense.accountId))
-      || (expense.category && COA.getByName(expense.category))
-      || COA.getByName('General Expenses')
-      || db.prepare("SELECT * FROM chart_of_accounts WHERE type = 'Expense' AND status = 'Active' LIMIT 1").get();
-    if (!ap || !expAcct) return { error: 'Required COA accounts not found (Expense/AP)' };
+    const ap = COA.getSystemAccount('Accounts Payable');
+    if (!ap) return { error: 'Accounts Payable account not found in COA' };
 
-    const amount = Number(expense.amount || expense.total || 0);
-    if (!amount) return { error: 'Expense has zero amount' };
+    // Fallback expense account for lines whose category doesn't match any COA account
+    const fallbackExpAcct = COA.getByName('General Expenses')
+      || db.prepare("SELECT * FROM chart_of_accounts WHERE type = 'Expense' AND status = 'Active' LIMIT 1").get();
+    if (!fallbackExpAcct) return { error: 'No expense account found in COA' };
+
+    // Fetch expense lines for per-split posting
+    let expenseLines = [];
+    try {
+      expenseLines = db.prepare(`
+        SELECT el.amount, el.description, el.account_id,
+               ec.name AS categoryName
+        FROM expense_lines el
+        LEFT JOIN expense_categories ec ON el.account_id = ec.id
+        WHERE el.expense_id = ?
+      `).all(Number(expense.id));
+    } catch { expenseLines = []; }
+
+    const debitLines = [];
+    let totalDebit = 0;
+
+    for (const line of expenseLines) {
+      const lineAmt = Number(line.amount) || 0;
+      if (lineAmt <= 0) continue;
+
+      // Try: stored account_id → category name → fallback
+      let acctId = null;
+      if (line.account_id) {
+        const acctByCategory = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1").get(line.categoryName || '');
+        if (acctByCategory) acctId = acctByCategory.id;
+      }
+      if (!acctId && line.categoryName) {
+        const acctByName = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status='Active' LIMIT 1").get(line.categoryName);
+        if (acctByName) acctId = acctByName.id;
+      }
+      if (!acctId) acctId = fallbackExpAcct.id;
+
+      debitLines.push({ account_id: acctId, debit: lineAmt, credit: 0, description: line.description || line.categoryName || 'Expense' });
+      totalDebit += lineAmt;
+    }
+
+    // If no lines, fall back to expense-level total + category/description
+    if (!debitLines.length) {
+      const amount = Number(expense.amount || expense.total || 0);
+      if (!amount) return { error: 'Expense has zero amount' };
+      let acctId = fallbackExpAcct.id;
+      if (expense.category) {
+        const acctByName = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status='Active' LIMIT 1").get(expense.category);
+        if (acctByName) acctId = acctByName.id;
+      }
+      debitLines.push({ account_id: acctId, debit: amount, credit: 0, description: expense.description || expense.category || 'Expense' });
+      totalDebit = amount;
+    }
+
+    if (totalDebit <= 0) return { error: 'Expense has zero amount' };
 
     try {
       return JournalEntries.post({
@@ -214,8 +307,8 @@ const JournalEntries = {
         description: `Expense: ${expense.description || expense.category || ''}`,
         source_type: 'expense', source_id: expense.id,
         lines: [
-          { account_id: expAcct.id, debit: amount, credit: 0,      description: expense.description || expense.category || 'Expense' },
-          { account_id: ap.id,      debit: 0,       credit: amount, description: 'Accounts Payable' },
+          ...debitLines,
+          { account_id: ap.id, debit: 0, credit: totalDebit, description: 'Accounts Payable' },
         ],
       });
     } catch (e) { return { error: e.message }; }

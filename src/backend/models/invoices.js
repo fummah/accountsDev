@@ -128,52 +128,9 @@ const Invoices = {
       const balance = lineSum * (1 + (Number(vat) || 0) / 100);
       db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(balance, invoiceId);
 
-      // --- GL Posting: post each line to its income account in Chart of Accounts ---
-      try {
-        const txStmt = db.prepare(`INSERT INTO transactions (date, type, amount, description, status, accountId, customerId, reference, debit, credit, entered_by) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?, ?)`);
-
-        // Find or create Accounts Receivable account
-        let arAccount = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) LIKE '%accounts receivable%' OR LOWER(type) LIKE '%receivable%' LIMIT 1").get();
-        if (!arAccount) {
-          const arRes = db.prepare("INSERT INTO chart_of_accounts (name, type, number, entered_by) VALUES ('Accounts Receivable', 'Accounts Receivable', '1200', 'system')").run();
-          arAccount = { id: arRes.lastInsertRowid };
-        }
-
-        // Debit Accounts Receivable for full invoice amount
-        txStmt.run(String(start_date || ''), 'Invoice', balance, `Invoice #${number || invoiceId} - Accounts Receivable`, arAccount.id, Number(customer) || null, String(number || invoiceId), balance, null, entered_by || null);
-
-        // Credit each income account per product line
-        for (const line of linesArr) {
-          const lineTotal = (Number(line.amount) || 0) * (Number(line.quantity) || 1);
-          const lineWithVat = lineTotal * (1 + (Number(vat) || 0) / 100);
-          const productId = line.product_id || line.product || null;
-          let incomeAccountId = null;
-
-          if (productId) {
-            const prod = db.prepare('SELECT income_account FROM products WHERE id = ?').get(productId);
-            if (prod && prod.income_account) {
-              const coaRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ?").get(prod.income_account, prod.income_account);
-              if (coaRow) incomeAccountId = coaRow.id;
-            }
-          }
-
-          // Fallback: find a generic Sales/Income account
-          if (!incomeAccountId) {
-            const fallback = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%income%' OR LOWER(type) LIKE '%revenue%' OR LOWER(name) LIKE '%sales%' LIMIT 1").get();
-            if (fallback) incomeAccountId = fallback.id;
-          }
-
-          if (incomeAccountId) {
-            txStmt.run(String(start_date || ''), 'Invoice', lineWithVat, `Invoice #${number || invoiceId} - ${String(line.description || 'Revenue')}`, incomeAccountId, Number(customer) || null, String(number || invoiceId), null, lineWithVat, entered_by || null);
-          }
-        }
-
-        // Note: COA balances are computed live from journal_lines by computedBalance() in getAllAccounts.
-        // JournalEntries.postInvoice() (called from invoiceHandlers.js) writes the authoritative journal_lines.
-        // The transactions table above serves as an audit trail only.
-      } catch (glErr) {
-        console.error('[invoices] GL posting failed (non-fatal):', glErr);
-      }
+      // Note: The authoritative GL journal entry (DR AR / CR Income per line) is posted by
+      // JournalEntries.postInvoice() called from invoiceHandlers.js after this insert returns.
+      // computedBalance() in chartOfAccounts.getAllAccounts() reads those journal_lines live.
 
       return { success: true, invoiceId: Number(invoiceId) }; 
     } 
@@ -686,33 +643,20 @@ const Invoices = {
       const balance = Math.max(0, invoiceTotal - totalPaid);
       db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(balance, Number(id));
 
-      // Reverse old journal entries for this invoice, then re-post new ones
+      // Void old journal entries then re-post using per-line income accounts
       try {
-        // Void old journal entries — computedBalance() excludes non-'Posted' entries automatically
         const oldEntries = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted'").all(Number(id));
         for (const oe of oldEntries) {
           db.prepare("UPDATE journal_entries SET status = 'Void' WHERE id = ?").run(oe.id);
         }
-
-        // Re-post via JournalEntries.post() so computedBalance() picks it up automatically
+        // postInvoice has a hasPosting guard, but we just voided all old entries so it will proceed
         const JournalEntries = require('./journalEntries');
-        const COA = require('./chartOfAccounts');
-        const arAcct = COA.getSystemAccount('Accounts Receivable') || COA.getByName('Accounts Receivable');
-        const revenueAcct = COA.getByName('Sales Revenue') || COA.getByName('Service Revenue')
-          || db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(type) LIKE '%income%' LIMIT 1").get();
-        if (arAcct && revenueAcct && invoiceTotal > 0) {
-          JournalEntries.post({
-            date: String(invoiceDetails.start_date || new Date().toISOString().slice(0,10)),
-            reference: String(invoiceDetails.number || id),
-            description: `Invoice ${invoiceDetails.number || '#'+id} — (updated)`,
-            source_type: 'invoice',
-            source_id: Number(id),
-            lines: [
-              { account_id: arAcct.id,      debit: invoiceTotal, credit: 0,            description: 'Accounts Receivable' },
-              { account_id: revenueAcct.id, debit: 0,            credit: invoiceTotal, description: 'Revenue' },
-            ],
-          });
-        }
+        JournalEntries.postInvoice({
+          id: Number(id),
+          date: String(invoiceDetails.start_date || new Date().toISOString().slice(0, 10)),
+          number: String(invoiceDetails.number || id),
+          customerName: invoiceDetails.customerName || '',
+        });
       } catch (glUpdateErr) {
         console.error('[invoices] GL re-post on update failed (non-fatal):', glUpdateErr);
       }
@@ -795,7 +739,7 @@ const Invoices = {
         } else if (t === 'asset' || t === 'bank' || t === 'cash') {
           totalAssets += bsBalance;
           assetAccts.push({ name: r.name, amount: bsBalance, type: r.type });
-        } else if (t === 'liability') {
+        } else if (t === 'liability' || t === 'credit card' || t === 'loan') {
           totalLiabilities += bsBalance;
           liabilityAccts.push({ name: r.name, amount: bsBalance, type: r.type });
         } else if (t === 'equity') {
@@ -845,12 +789,12 @@ const Invoices = {
   },
   getManagementReport: function (start_date, last_date) {
     try {
-      const formattedNumber = (number) => { 
-        const num = new Intl.NumberFormat('fr-FR', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(number); 
-      return `$${num}`;
+      const formattedNumber = (number) => {
+        const num = new Intl.NumberFormat('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(number);
+        return `$${num}`;
       };
 
     const report = this.getFinancialReport(start_date, last_date);

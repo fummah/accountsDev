@@ -11,16 +11,12 @@ import {
 } from "@ant-design/icons";
 import Auxiliary from "util/Auxiliary";
 import Xarrow from "react-xarrows";
+import { useCurrency } from '../../../../utils/currency';
 
 const { Step } = Steps;
 const { Option } = Select;
 
 /* ──── helpers ──── */
-const fmt = (v) => {
-  const n = Number(v || 0);
-  const abs = Math.abs(n);
-  return (n < 0 ? '-' : '') + '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
 
 // matchFn maps to the EXACT types/subtypes defined in chartOfAccounts.js backend model
 const BALANCE_CATEGORIES = [
@@ -109,6 +105,7 @@ const BALANCE_CATEGORIES = [
 /* ──── Main Component ──── */
 const Flow = () => {
   const history = useHistory();
+  const { fmt } = useCurrency();
   const [loading, setLoading] = useState(true);
   const [balances, setBalances] = useState({});
   const [accountNames, setAccountNames] = useState({});
