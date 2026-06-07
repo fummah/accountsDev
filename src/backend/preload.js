@@ -82,6 +82,7 @@ insertVat: (vat_name,vat_percentage,entered_by) => ipcRenderer.invoke('insert-va
 deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   // Chart of accounts and fixed assets
   getChartOfAccounts: () => ipcRenderer.invoke('get-chart-of-accounts'),
+  getDashboardBalances: () => ipcRenderer.invoke('get-dashboard-balances'),
   insertChartAccount: (payload, type, number, entered_by, openingBalance, status, parentId, description) =>
     ipcRenderer.invoke('insert-chart-account', payload, type, number, entered_by, openingBalance, status, parentId, description),
   updateChartAccount: (accountData) => ipcRenderer.invoke('update-chart-account', accountData),

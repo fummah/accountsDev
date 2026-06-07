@@ -250,16 +250,12 @@ const JournalEntries = {
       || db.prepare("SELECT * FROM chart_of_accounts WHERE type = 'Expense' AND status = 'Active' LIMIT 1").get();
     if (!fallbackExpAcct) return { error: 'No expense account found in COA' };
 
-    // Fetch expense lines for per-split posting
+    // Fetch expense lines — category is a plain TEXT column (not a FK)
     let expenseLines = [];
     try {
-      expenseLines = db.prepare(`
-        SELECT el.amount, el.description, el.account_id,
-               ec.name AS categoryName
-        FROM expense_lines el
-        LEFT JOIN expense_categories ec ON el.account_id = ec.id
-        WHERE el.expense_id = ?
-      `).all(Number(expense.id));
+      expenseLines = db.prepare(
+        `SELECT amount, description, category FROM expense_lines WHERE expense_id = ?`
+      ).all(Number(expense.id));
     } catch { expenseLines = []; }
 
     const debitLines = [];
@@ -269,19 +265,19 @@ const JournalEntries = {
       const lineAmt = Number(line.amount) || 0;
       if (lineAmt <= 0) continue;
 
-      // Try: stored account_id → category name → fallback
+      // Match category text to COA account name (case-insensitive), fall back if unmatched
       let acctId = null;
-      if (line.account_id) {
-        const acctByCategory = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1").get(line.categoryName || '');
-        if (acctByCategory) acctId = acctByCategory.id;
-      }
-      if (!acctId && line.categoryName) {
-        const acctByName = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status='Active' LIMIT 1").get(line.categoryName);
-        if (acctByName) acctId = acctByName.id;
+      if (line.category) {
+        const matched = db.prepare(
+          `SELECT id FROM chart_of_accounts
+           WHERE LOWER(name) = LOWER(?) AND status = 'Active'
+           LIMIT 1`
+        ).get(line.category);
+        if (matched) acctId = matched.id;
       }
       if (!acctId) acctId = fallbackExpAcct.id;
 
-      debitLines.push({ account_id: acctId, debit: lineAmt, credit: 0, description: line.description || line.categoryName || 'Expense' });
+      debitLines.push({ account_id: acctId, debit: lineAmt, credit: 0, description: line.description || line.category || 'Expense' });
       totalDebit += lineAmt;
     }
 

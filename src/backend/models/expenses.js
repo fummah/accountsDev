@@ -189,6 +189,29 @@ const Expenses = {
         );
       }
   
+      // Void old GL entries then re-post with updated lines
+      try {
+        const JournalEntries = require('./journalEntries');
+        const oldEntries = db.prepare(
+          `SELECT id FROM journal_entries WHERE source_type = 'expense' AND source_id = ? AND status = 'Posted'`
+        ).all(Number(id));
+        for (const oe of oldEntries) {
+          db.prepare(`UPDATE journal_entries SET status = 'Void' WHERE id = ?`).run(oe.id);
+        }
+        const exp = db.prepare(`SELECT * FROM expenses WHERE id = ?`).get(Number(id));
+        if (exp) {
+          JournalEntries.postExpense({
+            id: Number(id),
+            date: exp.payment_date,
+            category: exp.category,
+            description: exp.category || '',
+            reference: exp.ref_no || String(id),
+          });
+        }
+      } catch (glErr) {
+        console.error('[expenses] GL re-post on update failed (non-fatal):', glErr);
+      }
+
       return { success: true, message: 'Expense updated successfully.' };
     } catch (error) {
       console.error('Error updating expense:', error);
@@ -200,6 +223,17 @@ const Expenses = {
   // Delete an expense and its related records
   deleteExpense: (id) => {
     try {
+      // Void GL journal entries before deleting
+      try {
+        const oldEntries = db.prepare(
+          `SELECT id FROM journal_entries WHERE source_type = 'expense' AND source_id = ? AND status = 'Posted'`
+        ).all(Number(id));
+        for (const oe of oldEntries) {
+          db.prepare(`UPDATE journal_entries SET status = 'Void' WHERE id = ?`).run(oe.id);
+        }
+      } catch (glErr) {
+        console.warn('[expenses] GL void on delete failed (non-fatal):', glErr.message);
+      }
       // Delete expense lines first
       db.prepare('DELETE FROM expense_lines WHERE expense_id = ?').run(id);
       // Delete associated transaction record

@@ -386,6 +386,56 @@ safeHandle('budget-periods', async () => {
     }
   });
 
+  // Dashboard balance cards — pre-aggregated by account category
+  safeHandle('get-dashboard-balances', async () => {
+    try {
+      const db = require('../models/dbmgr');
+      const rows = db.prepare(`
+        SELECT
+          coa.type        AS type,
+          coa.subType     AS subType,
+          coa.normalBalance,
+          coa.openingBalance,
+          coa.id          AS accountId,
+          COALESCE(SUM(jl.debit),  0) AS totalDebit,
+          COALESCE(SUM(jl.credit), 0) AS totalCredit
+        FROM chart_of_accounts coa
+        LEFT JOIN journal_lines jl   ON jl.account_id = coa.id
+        LEFT JOIN journal_entries je ON je.id = jl.journal_id AND je.status = 'Posted'
+        WHERE coa.status = 'Active'
+        GROUP BY coa.id
+      `).all();
+
+      const sum = (filterFn) => rows
+        .filter(filterFn)
+        .reduce((s, r) => {
+          const nb  = r.normalBalance || 'Debit';
+          const base = Number(r.openingBalance || 0);
+          const bal  = nb === 'Debit'
+            ? base + r.totalDebit - r.totalCredit
+            : base + r.totalCredit - r.totalDebit;
+          return s + bal;
+        }, 0);
+
+      const t  = (r) => (r.type    || '').toLowerCase();
+      const st = (r) => (r.subType || '').toLowerCase();
+
+      return {
+        bank:     sum(r => t(r) === 'bank' || t(r) === 'cash'),
+        ar:       sum(r => st(r) === 'accounts receivable' || t(r) === 'accounts receivable'),
+        ap:       sum(r => st(r) === 'accounts payable'    || t(r) === 'accounts payable'),
+        cc:       sum(r => t(r) === 'credit card'),
+        loans:    sum(r => t(r) === 'loan' || st(r).includes('loan') || st(r) === 'long-term liability' || st(r) === 'line of credit' || st(r) === 'mortgage'),
+        revenue:  sum(r => t(r) === 'income' || t(r) === 'other income'),
+        expenses: sum(r => t(r) === 'expense' || t(r) === 'other expense' || t(r) === 'cost of goods sold'),
+        equity:   sum(r => t(r) === 'equity'),
+      };
+    } catch (e) {
+      console.error('Error getting dashboard balances:', e);
+      return { bank: 0, ar: 0, ap: 0, cc: 0, loans: 0, revenue: 0, expenses: 0, equity: 0 };
+    }
+  });
+
   // Trial Balance by date range
   safeHandle('get-trial-balance', async (_, startDate, endDate) => {
     try {
@@ -524,12 +574,13 @@ safeHandle('budget-periods', async () => {
       const toInsert = [];
       for (const line of lines) {
         const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''));
-        const number  = idxNum     >= 0 ? parts[idxNum]     : null;
-        const name    = idxName    >= 0 ? parts[idxName]    : null;
-        const type    = idxType    >= 0 ? parts[idxType]    : null;
-        const subType = idxSubType >= 0 ? parts[idxSubType] : null;
-        const status  = idxStatus  >= 0 ? parts[idxStatus]  : 'Active';
-        if (!name || !type) continue;
+        const number  = idxNum     >= 0 ? (parts[idxNum]     || '').trim() || null : null;
+        const name    = idxName    >= 0 ? (parts[idxName]    || '').trim()         : null;
+        const rawType = idxType    >= 0 ? (parts[idxType]    || '').trim()         : '';
+        const type    = rawType || 'Expense'; // default to Expense if column absent or empty
+        const subType = idxSubType >= 0 ? (parts[idxSubType] || '').trim() || null : null;
+        const status  = idxStatus  >= 0 ? (parts[idxStatus]  || '').trim() || 'Active' : 'Active';
+        if (!name) continue; // only skip rows with no name
         toInsert.push({ name, type, subType, number, status });
       }
       for (const acc of toInsert) {

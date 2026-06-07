@@ -124,15 +124,20 @@ const Flow = () => {
   const loadData = async () => {
     setLoading(true);
     try {
+      // Primary: pre-aggregated balances from journal_lines (authoritative GL source)
+      const dbBals = await window.electronAPI?.getDashboardBalances?.() || {};
+      // Secondary: full account list for drill-down names
       const accounts = await window.electronAPI?.getChartOfAccounts?.() || [];
       const acctList = Array.isArray(accounts) ? accounts : [];
-      // Aggregate balances by category using matchFn
+
       const bals = {};
       const names = {};
       const catAccounts = {};
       BALANCE_CATEGORIES.forEach(cat => {
+        // Balance comes from the pre-aggregated backend endpoint
+        bals[cat.key] = Number(dbBals[cat.key] || 0);
+        // Account names and drill-down list still come from COA
         const matching = acctList.filter(cat.matchFn);
-        bals[cat.key] = matching.reduce((sum, a) => sum + Number(a.balance || 0), 0);
         names[cat.key] = matching.map(a => a.accountName || a.name || '').filter(Boolean);
         catAccounts[cat.key] = matching;
       });
