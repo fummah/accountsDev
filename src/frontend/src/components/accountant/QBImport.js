@@ -66,6 +66,16 @@ const QBImport = () => {
         ['Standard Tax','15']
       ]
     },
+    coa: {
+      headers: ['number','name','type','subType','status'],
+      rows: [
+        ['1100','Checking Account','Bank','Checking','Active'],
+        ['4000','Sales Revenue','Income','Sales','Active'],
+        ['6000','Office Supplies','Expense','Office Supplies','Active'],
+        ['2100','Visa Card','Credit Card','Visa','Active'],
+        ['2500','Equipment Loan','Loan','Equipment Loan','Active'],
+      ]
+    },
   };
 
   const makeCsv = (arr) => arr.map(row => row.map(cell => {
@@ -100,6 +110,7 @@ const QBImport = () => {
       case 'bills': return window.electronAPI.importBillsCsv;
       case 'balances': return window.electronAPI.importCustomerBalancesCsv;
       case 'tax': return window.electronAPI.importVatCsv;
+      case 'coa': return (csvText) => window.electronAPI.coaImport(csvText, 'QBImport');
       default: return window.electronAPI.importCustomersCsv;
     }
   };
@@ -147,7 +158,7 @@ const QBImport = () => {
             <Button type={section==='bills'?'primary':'default'} onClick={()=>setSection('bills')}>Unpaid Bills</Button>
             <Button type={section==='balances'?'primary':'default'} onClick={()=>setSection('balances')}>Customer Balances</Button>
             <Button type={section==='tax'?'primary':'default'} onClick={()=>setSection('tax')}>Tax Settings</Button>
-            <Button onClick={()=>{ setSection('coa'); message.info('Use COA Import/Export page for advanced options.'); }}>Chart of Accounts →</Button>
+            <Button type={section==='coa'?'primary':'default'} onClick={()=>setSection('coa')}>Chart of Accounts</Button>
           </Space>
         </div>
 

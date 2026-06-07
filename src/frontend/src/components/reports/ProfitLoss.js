@@ -31,10 +31,16 @@ const ProfitLoss = () => {
     const opex = Number(profit.operatingExpenses || 0);
     const gross = revenue - cogs;
     const net = Number(profit.netProfit != null ? profit.netProfit : (revenue - cogs - opex));
+    const incomeRows = Array.isArray(profit.incomeAccounts) && profit.incomeAccounts.length > 0
+      ? profit.incomeAccounts.map((a, i) => ({ key: `inc-${i}`, category: a.name || 'Income', amount: Number(a.amount || 0), isHeader: false }))
+      : [{ key: 'revenue', category: 'Total Revenue', amount: revenue, isHeader: false }];
+    const expenseRows = Array.isArray(profit.expenseAccounts) && profit.expenseAccounts.length > 0
+      ? profit.expenseAccounts.map((a, i) => ({ key: `exp-${i}`, category: a.name || 'Expense', amount: Number(a.amount || 0), isHeader: false }))
+      : [{ key: 'opex', category: 'Total Expenses', amount: opex, isHeader: false }];
     return {
-      income: [{ key: 'revenue', category: 'Sales Revenue', amount: revenue, isHeader: false }],
-      cogs: [{ key: 'cogs', category: 'Cost of Goods Sold', amount: cogs, isHeader: false }],
-      expenses: [{ key: 'opex', category: 'Operating Expenses', amount: opex, isHeader: false }],
+      income: incomeRows,
+      cogs: cogs > 0 ? [{ key: 'cogs', category: 'Cost of Goods Sold', amount: cogs, isHeader: false }] : [],
+      expenses: expenseRows,
       summary: { totalIncome: revenue, totalCOGS: cogs, grossProfit: gross, totalExpenses: opex, operatingProfit: gross - opex, netIncome: net },
     };
   };

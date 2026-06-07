@@ -6,7 +6,7 @@ import {
 } from 'antd';
 import {
   PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, DownloadOutlined,
-  AccountBookOutlined, DollarOutlined, BankOutlined, WalletOutlined,
+  AccountBookOutlined, DollarOutlined, BankOutlined, WalletOutlined, CreditCardOutlined,
   ArrowUpOutlined, ArrowDownOutlined, CopyOutlined, EyeOutlined,
   ApartmentOutlined, UnorderedListOutlined, ReloadOutlined, PrinterOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SwapOutlined, LockOutlined,
@@ -20,25 +20,30 @@ const { TabPane } = Tabs;
 const { Text, Title } = Typography;
 
 /* ─── Account type config ─── */
+
 const ACCOUNT_TYPES = {
   Asset:                { color: '#52c41a', icon: <AccountBookOutlined />, order: 1,  range: '1000', normalBalance: 'Debit'  },
-  Bank:                 { color: '#722ed1', icon: <BankOutlined />,        order: 2,  range: '1100', normalBalance: 'Debit'  },
+  Bank:                 { color: '#1890ff', icon: <BankOutlined />,        order: 2,  range: '1100', normalBalance: 'Debit'  },
   Cash:                 { color: '#eb2f96', icon: <WalletOutlined />,      order: 3,  range: '1050', normalBalance: 'Debit'  },
   Liability:            { color: '#f5222d', icon: <ArrowDownOutlined />,   order: 4,  range: '2000', normalBalance: 'Credit' },
-  Equity:               { color: '#1890ff', icon: <AccountBookOutlined />, order: 5,  range: '3000', normalBalance: 'Credit' },
-  Income:               { color: '#13c2c2', icon: <ArrowUpOutlined />,     order: 6,  range: '4000', normalBalance: 'Credit' },
-  'Cost of Goods Sold': { color: '#fa8c16', icon: <DollarOutlined />,      order: 7,  range: '5000', normalBalance: 'Debit'  },
-  Expense:              { color: '#faad14', icon: <DollarOutlined />,      order: 8,  range: '6000', normalBalance: 'Debit'  },
-  'Other Income':       { color: '#52c41a', icon: <ArrowUpOutlined />,     order: 9,  range: '7000', normalBalance: 'Credit' },
-  'Other Expense':      { color: '#faad14', icon: <DollarOutlined />,      order: 10, range: '8000', normalBalance: 'Debit'  },
+  'Credit Card':        { color: '#722ed1', icon: <CreditCardOutlined />,  order: 5,  range: '2100', normalBalance: 'Credit' },
+  Loan:                 { color: '#eb2f96', icon: <WalletOutlined />,      order: 6,  range: '2500', normalBalance: 'Credit' },
+  Equity:               { color: '#1890ff', icon: <AccountBookOutlined />, order: 7,  range: '3000', normalBalance: 'Credit' },
+  Income:               { color: '#13c2c2', icon: <ArrowUpOutlined />,     order: 8,  range: '4000', normalBalance: 'Credit' },
+  'Cost of Goods Sold': { color: '#fa8c16', icon: <DollarOutlined />,      order: 9,  range: '5000', normalBalance: 'Debit'  },
+  Expense:              { color: '#faad14', icon: <DollarOutlined />,      order: 10, range: '6000', normalBalance: 'Debit'  },
+  'Other Income':       { color: '#52c41a', icon: <ArrowUpOutlined />,     order: 11, range: '7000', normalBalance: 'Credit' },
+  'Other Expense':      { color: '#faad14', icon: <DollarOutlined />,      order: 12, range: '8000', normalBalance: 'Debit'  },
 };
 
 /* ─── Sub-types per account type ─── */
 const ACCOUNT_SUBTYPES = {
-  Asset:                ['Bank','Accounts Receivable','Inventory','Fixed Assets','Other Current Assets','Prepaid Expenses','Undeposited Funds','Other Asset'],
+  Asset:                ['Accounts Receivable','Inventory','Fixed Assets','Other Current Assets','Prepaid Expenses','Undeposited Funds','Other Asset'],
   Bank:                 ['Checking','Savings','Money Market','Other Bank'],
   Cash:                 ['Petty Cash','Cash on Hand'],
-  Liability:            ['Accounts Payable','Credit Card','Long-Term Liability','Payroll Liability','Other Current Liability','Deferred Revenue'],
+  Liability:            ['Accounts Payable','Payroll Liability','Other Current Liability','Deferred Revenue'],
+  'Credit Card':        ['Visa','Mastercard','American Express','Other Credit Card'],
+  Loan:                 ['Short-Term Loan','Long-Term Loan','Line of Credit','Mortgage','Equipment Loan','Vehicle Loan','Other Loan'],
   Equity:               ["Owner's Equity",'Retained Earnings','Opening Balance Equity','Common Stock','Drawings'],
   Income:               ['Sales','Service Income','Product Sales','Discounts','Other Income'],
   'Cost of Goods Sold': ['Cost of Goods Sold','Purchases','Direct Labor','Freight'],
@@ -852,10 +857,10 @@ const ChartOfAccounts = () => {
             <Form.Item name="openingBalance" label="Opening Balance" style={{ flex: 1 }}>
               <InputNumber style={{ width: '100%' }} placeholder="0.00" precision={2} />
             </Form.Item>
-            <Form.Item name="normalBalance" label="Normal Balance" style={{ flex: 1 }}>
+            <Form.Item name="normalBalance" label="Normal Balance" tooltip="Expenses & Assets increase on Debit side; Income, Liabilities & Equity increase on Credit side" style={{ flex: 1 }}>
               <Select>
-                <Option value="Debit">Debit</Option>
-                <Option value="Credit">Credit</Option>
+                <Option value="Debit">Expenses / Assets (Debit)</Option>
+                <Option value="Credit">Income / Liabilities / Equity (Credit)</Option>
               </Select>
             </Form.Item>
             <Form.Item name="taxLine" label="Tax Line" style={{ flex: 1 }}>
@@ -865,7 +870,28 @@ const ChartOfAccounts = () => {
 
           {/* Row 4: Parent Account / Description */}
           <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item name="parentId" label="Parent Account" style={{ flex: 1 }}>
+            <Form.Item
+              name="parentId"
+              label={
+                <span>
+                  Parent Account
+                  <Tooltip title="Create a new parent account">
+                    <PlusCircleOutlined
+                      onClick={() => {
+                        setIsModalVisible(false);
+                        setTimeout(() => {
+                          setEditingId(null); setSelectedType(null); form.resetFields();
+                          form.setFieldsValue({ status: 'Active', openingBalance: 0, normalBalance: 'Debit' });
+                          setIsModalVisible(true);
+                        }, 50);
+                      }}
+                      style={{ color: '#1890ff', cursor: 'pointer', marginLeft: 6 }}
+                    />
+                  </Tooltip>
+                </span>
+              }
+              style={{ flex: 1 }}
+            >
               <Select placeholder="(none — top level)" allowClear showSearch optionFilterProp="children">
                 {accounts.filter(a => a.id !== editingId && a.status === 'Active').map(a => (
                   <Option key={a.id} value={a.id}>{a.accountCode ? a.accountCode + ' — ' : ''}{a.accountName}</Option>

@@ -23,16 +23,23 @@ const BalanceSheet = () => {
 
   const extractBS = (report) => {
     const data = report?.balanceSheet || {};
-    return {
-      assets: Array.isArray(data.assets) ? data.assets : [],
-      liabilities: Array.isArray(data.liabilities) ? data.liabilities : [],
-      equity: Array.isArray(data.equity) ? data.equity : [],
-      summary: {
-        totalAssets: Number(data.summary?.totalAssets || 0),
-        totalLiabilities: Number(data.summary?.totalLiabilities || 0),
-        totalEquity: Number(data.summary?.totalEquity || 0),
-      },
-    };
+    const mapRows = (arr) =>
+      Array.isArray(arr)
+        ? arr.map((r, i) => ({ key: r.name || r.category || String(i), category: r.name || r.category || '', amount: Number(r.amount || 0), type: r.type || '', isSubcategory: false }))
+        : [];
+    const assets = mapRows(data.assets);
+    const liabilities = mapRows(data.liabilities);
+    const equity = mapRows(data.equity);
+    const totalAssets = data.summary?.totalAssets != null
+      ? Number(data.summary.totalAssets)
+      : assets.reduce((s, r) => s + r.amount, 0);
+    const totalLiabilities = data.summary?.totalLiabilities != null
+      ? Number(data.summary.totalLiabilities)
+      : liabilities.reduce((s, r) => s + r.amount, 0);
+    const totalEquity = data.summary?.totalEquity != null
+      ? Number(data.summary.totalEquity)
+      : equity.reduce((s, r) => s + r.amount, 0);
+    return { assets, liabilities, equity, summary: { totalAssets, totalLiabilities, totalEquity } };
   };
 
   const loadBalanceSheet = async () => {

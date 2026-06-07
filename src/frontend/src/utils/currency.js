@@ -11,8 +11,8 @@
 import { useState, useEffect, useCallback } from 'react';
 
 // ─── Module-level cache (shared across all components) ─────────────────────
-let _cachedSymbol = 'R';
-let _cachedCode = 'ZAR';
+let _cachedSymbol = '$';
+let _cachedCode = 'USD';
 let _cachedDecimals = 2;
 let _loaded = false;
 let _loading = false;

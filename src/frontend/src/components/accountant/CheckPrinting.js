@@ -132,91 +132,109 @@ const CheckPrinting = () => {
   }, [watchAccountId, accounts]);
 
   const generateCheckHtml = (vals, forPrint) => {
-    const dateStr = vals.date ? (vals.date.format ? vals.date.format('MMMM DD, YYYY') : vals.date) : '';
-    const companyName = company?.name || company?.company_name || 'Company Name';
-    const companyAddr = [company?.address, company?.city, company?.state, company?.postal_code].filter(Boolean).join(', ');
+    const dateStr = vals.date ? (vals.date.format ? vals.date.format('M/D/YYYY') : vals.date) : '';
+    const payeeName = vals.payeeName || '';
+    const payeeAddr = vals.payeeAddress || '';
     const amt = Number(vals.amount || 0);
+    const amtStr = amt.toFixed(2);
+
     const words = (() => {
       const dollars = Math.floor(amt);
       const cents = Math.round((amt - dollars) * 100);
       return `${toWords(dollars)} and ${String(cents).padStart(2, '0')}/100`;
     })();
-    const starPad = '★'.repeat(Math.max(0, 60 - words.length));
+
+    // Fill remaining space with dots to end of line (matches image)
+    const dotFill = (text, totalLen = 90) => {
+      const remaining = Math.max(0, totalLen - text.length);
+      return text + '*'.repeat(remaining);
+    };
+
+    const memoLine = vals.memo || '';
+    const splitLines = (vals.splitLines || []).filter(l => Number(l.amount) > 0);
+
+    // Remittance stub rows (memo or split lines)
+    const stubRows = splitLines.length > 0
+      ? splitLines.map(l => `
+          <tr>
+            <td style="padding:2px 0; font-size:13px; color:#1a1a1a;">${l.description || l.account || ''}</td>
+            <td style="padding:2px 0; font-size:13px; text-align:right; color:#1a1a1a;">${Number(l.amount||0).toFixed(2)}</td>
+          </tr>`).join('')
+      : memoLine ? `<tr>
+          <td style="padding:2px 0; font-size:13px; color:#1a1a1a;">${memoLine}</td>
+          <td style="padding:2px 0; font-size:13px; text-align:right; color:#1a1a1a;">${amtStr}</td>
+        </tr>` : '';
+
+    const stub = (borderTop) => `
+      <div style="height:190px; padding: 18px 36px 0 36px; box-sizing:border-box; border-top:${borderTop};">
+        <table style="width:100%; border-collapse:collapse;">
+          <tr>
+            <td style="font-size:13px; color:#b22222; font-weight:normal;">${payeeName}</td>
+            <td style="font-size:13px; text-align:center; color:#1a1a1a;">${dateStr}</td>
+            <td style="font-size:13px; text-align:right; color:#1a1a1a;">${amtStr}</td>
+          </tr>
+          ${stubRows}
+        </table>
+      </div>`;
 
     return `<!doctype html><html><head><title>Check #${vals.checkNumber || ''}</title>
     <style>
-      @page { margin: 0; size: landscape; }
-      body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: ${forPrint ? '20px' : '0'}; background: ${forPrint ? '#fff' : 'transparent'}; }
-      .check-container { width: 780px; margin: 0 auto; }
-      .check { border: 2px solid #334155; border-radius: 4px; padding: 24px 28px; background: #fff; position: relative; }
-      .check-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e2e8f0; }
-      .company-info { font-size: 11px; color: #475569; line-height: 1.5; }
-      .company-name { font-size: 15px; font-weight: 700; color: #1e293b; margin-bottom: 2px; }
-      .check-number { text-align: right; }
-      .check-number span { font-size: 13px; font-weight: 700; color: #334155; background: #f1f5f9; padding: 4px 12px; border-radius: 4px; }
-      .date-line { text-align: right; font-size: 13px; color: #334155; margin-bottom: 16px; }
-      .date-line strong { border-bottom: 1px solid #94a3b8; padding-bottom: 1px; }
-      .pay-line { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
-      .pay-label { white-space: nowrap; color: #64748b; font-weight: 600; }
-      .pay-value { flex: 1; border-bottom: 1px solid #94a3b8; padding-bottom: 2px; font-weight: 700; font-size: 14px; color: #1e293b; }
-      .amount-box { border: 2px solid #334155; padding: 6px 14px; font-size: 16px; font-weight: 800; color: #1e293b; min-width: 130px; text-align: center; border-radius: 3px; background: #f8fafc; }
-      .words-line { font-size: 12px; color: #334155; border-bottom: 1px solid #94a3b8; padding: 4px 0; margin-bottom: 20px; font-weight: 600; }
-      .memo-sig { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 28px; }
-      .memo { font-size: 12px; color: #64748b; }
-      .memo strong { color: #334155; }
-      .signature { text-align: center; }
-      .sig-line { width: 220px; border-top: 1px solid #334155; padding-top: 4px; font-size: 11px; color: #64748b; }
-      .micr-line { margin-top: 20px; padding-top: 12px; border-top: 1px dashed #cbd5e1; font-family: 'Courier New', monospace; font-size: 14px; letter-spacing: 3px; color: #475569; text-align: center; }
-      .void-stamp { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 72px; color: rgba(255,0,0,0.15); font-weight: 900; pointer-events: none; }
+      @page { margin: 0.3in; size: letter portrait; }
+      * { box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #1a1a1a; }
+      .page { width: 100%; }
     </style></head><body>
-    <div class="check-container"><div class="check">
-      <div class="check-header">
-        <div class="company-info"><div class="company-name">${companyName}</div>${companyAddr ? `<div>${companyAddr}</div>` : ''}</div>
-        <div class="check-number"><span>Check # ${vals.checkNumber || '____'}</span></div>
-      </div>
-      <div class="date-line">Date: <strong>${dateStr || '_______________'}</strong></div>
-      <div class="pay-line">
-        <span class="pay-label">PAY TO THE ORDER OF:</span>
-        <span class="pay-value">${vals.payeeName || '________________________________'}</span>
-        <span class="amount-box">$${amt.toFixed(2)}</span>
-      </div>
-      <div class="words-line">${words} ${starPad} DOLLARS</div>
-      <div style="font-size:12px;color:#64748b;margin-bottom:4px">Bank: ${vals.accountName || selectedAccount?.accountName || selectedAccount?.name || ''}</div>
-      <div class="memo-sig">
-        <div class="memo">Memo: <strong>${vals.memo || ''}</strong></div>
-        <div class="signature"><div class="sig-line">Authorized Signature</div></div>
-      </div>
-      <div class="stub-section" style="margin-top:20px;padding-top:12px;border-top:2px dashed #cbd5e1;">
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:#334155;margin-bottom:6px;">
-          <span><strong>Date:</strong> ${dateStr || '_______________'}</span>
-          <span><strong>Payee:</strong> ${vals.payeeName || '________________________________'}</span>
-          <span><strong>Amount:</strong> $${amt.toFixed(2)}</span>
+    <div class="page">
+
+      <!-- ═══════════════ CHECK BODY (top third) ═══════════════ -->
+      <div style="height:340px; padding:24px 36px 0 36px; position:relative;">
+
+        <!-- Date — top right -->
+        <div style="text-align:right; font-size:13px; margin-bottom:18px;">
+          ${dateStr}
         </div>
-        <div style="font-size:11px;color:#64748b;margin-bottom:4px;">${vals.memo ? '<strong>Memo:</strong> ' + vals.memo : ''}</div>
-        ${(vals.splitLines && vals.splitLines.length > 0) ? `
-        <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:6px;">
-          <tr style="border-bottom:1px solid #e2e8f0;">
-            <th style="text-align:left;padding:3px 4px;color:#64748b;">Account</th>
-            <th style="text-align:left;padding:3px 4px;color:#64748b;">Description</th>
-            <th style="text-align:right;padding:3px 4px;color:#64748b;">Amount</th>
-          </tr>
-          ${vals.splitLines.filter(l => l.amount > 0).map(l => `<tr><td style="padding:2px 4px;">${l.account || '-'}</td><td style="padding:2px 4px;">${l.description || '-'}</td><td style="padding:2px 4px;text-align:right;">$${Number(l.amount||0).toFixed(2)}</td></tr>`).join('')}
-          <tr style="border-top:1px solid #334155;font-weight:700;"><td colspan="2" style="padding:3px 4px;">Total</td><td style="padding:3px 4px;text-align:right;">$${amt.toFixed(2)}</td></tr>
-        </table>` : ''}
+
+        <!-- Pay To line: payee name left, **amount right -->
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+          <span style="font-size:13px; color:#b22222; font-weight:normal; padding-left:50px;">${payeeName}</span>
+          <span style="font-size:13px; font-weight:bold;">**${amtStr}</span>
+        </div>
+
+        <!-- Written-amount line with dot fill -->
+        <div style="font-size:13px; color:#b22222; border-bottom:1px solid #ccc; padding-bottom:4px; margin-bottom:14px; letter-spacing:0.01em; overflow:hidden; white-space:nowrap;">
+          ${dotFill(words + '**', 110)}
+        </div>
+
+        <!-- Payee address block (indented, like image) -->
+        <div style="padding-left:50px; font-size:13px; line-height:1.7; color:#b22222;">
+          ${payeeName ? `<div>${payeeName}</div>` : ''}
+          ${payeeAddr ? payeeAddr.split('\n').map(l => `<div>${l}</div>`).join('') : ''}
+        </div>
+
       </div>
-    </div></div></body></html>`;
+
+      <!-- ═══════════════ MIDDLE STUB ═══════════════ -->
+      ${stub('1px solid #999')}
+
+      <!-- ═══════════════ BOTTOM STUB ═══════════════ -->
+      ${stub('1px solid #999')}
+
+    </div>
+    </body></html>`;
   };
 
   const handlePreview = () => {
     const vals = form.getFieldsValue(true);
     vals.accountName = selectedAccount?.accountName || selectedAccount?.name || '';
     vals.splitLines = splitLines.filter(l => l.amount > 0);
+    vals.payeeAddress = vals.payeeAddress || '';
     setPreviewHtml(generateCheckHtml(vals, false));
     setPreviewVisible(true);
   };
 
   const handlePrint = (vals) => {
     vals.accountName = vals.accountName || selectedAccount?.accountName || selectedAccount?.name || '';
+    vals.payeeAddress = vals.payeeAddress || form.getFieldValue('payeeAddress') || '';
     const html = generateCheckHtml(vals, true);
     const w = window.open('', '_blank');
     w.document.open(); w.document.write(html); w.document.close();
@@ -432,6 +450,10 @@ const CheckPrinting = () => {
                 </Col>
               </Row>
 
+              <Form.Item name="payeeAddress" label="Payee Address">
+                <TextArea rows={2} placeholder={"P.O. Box 399\nGratz Pa 17030"} style={{ fontFamily: 'inherit' }} />
+              </Form.Item>
+
               <Form.Item name="memo" label="Memo">
                 <TextArea rows={2} placeholder="What is this check for?" maxLength={200} showCount onChange={(e) => setWatchMemo(e.target.value)} />
               </Form.Item>
@@ -474,16 +496,15 @@ const CheckPrinting = () => {
         {/* Live Preview */}
         <Col xs={24} lg={10}>
           <Card title={<><EyeOutlined style={{ marginRight: 4 }} /> Live Preview</>} size="small" bodyStyle={{ padding: 8, overflow: 'auto' }}>
-            <div style={{ transform: 'scale(0.48)', transformOrigin: 'top left', height: 220, width: '208%' }}>
+            <div style={{ transform: 'scale(0.36)', transformOrigin: 'top left', height: 310, width: '278%', overflow: 'hidden' }}>
               <div dangerouslySetInnerHTML={{ __html: generateCheckHtml({
                 date: watchDate ? { format: (f) => watchDate.format(f) } : null,
                 payeeName: watchPayeeName || '',
+                payeeAddress: form.getFieldValue('payeeAddress') || '',
                 amount: splitLines.length > 1 ? splitTotal : (amount || 0),
                 checkNumber: watchCheckNumber || '',
                 memo: watchMemo || '',
                 accountName: selectedAccount?.accountName || selectedAccount?.name || '',
-                routingNumber: form.getFieldValue('routingNumber') || '',
-                accountNumber: form.getFieldValue('accountNumber') || '',
                 splitLines: splitLines.filter(l => l.amount > 0),
               }, false) }} />
             </div>

@@ -168,8 +168,9 @@ const Invoices = {
           }
         }
 
-        // Update COA balances
-        db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(balance, arAccount.id);
+        // Note: COA balances are computed live from journal_lines by computedBalance() in getAllAccounts.
+        // JournalEntries.postInvoice() (called from invoiceHandlers.js) writes the authoritative journal_lines.
+        // The transactions table above serves as an audit trail only.
       } catch (glErr) {
         console.error('[invoices] GL posting failed (non-fatal):', glErr);
       }
@@ -685,6 +686,37 @@ const Invoices = {
       const balance = Math.max(0, invoiceTotal - totalPaid);
       db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(balance, Number(id));
 
+      // Reverse old journal entries for this invoice, then re-post new ones
+      try {
+        // Void old journal entries — computedBalance() excludes non-'Posted' entries automatically
+        const oldEntries = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted'").all(Number(id));
+        for (const oe of oldEntries) {
+          db.prepare("UPDATE journal_entries SET status = 'Void' WHERE id = ?").run(oe.id);
+        }
+
+        // Re-post via JournalEntries.post() so computedBalance() picks it up automatically
+        const JournalEntries = require('./journalEntries');
+        const COA = require('./chartOfAccounts');
+        const arAcct = COA.getSystemAccount('Accounts Receivable') || COA.getByName('Accounts Receivable');
+        const revenueAcct = COA.getByName('Sales Revenue') || COA.getByName('Service Revenue')
+          || db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(type) LIKE '%income%' LIMIT 1").get();
+        if (arAcct && revenueAcct && invoiceTotal > 0) {
+          JournalEntries.post({
+            date: String(invoiceDetails.start_date || new Date().toISOString().slice(0,10)),
+            reference: String(invoiceDetails.number || id),
+            description: `Invoice ${invoiceDetails.number || '#'+id} — (updated)`,
+            source_type: 'invoice',
+            source_id: Number(id),
+            lines: [
+              { account_id: arAcct.id,      debit: invoiceTotal, credit: 0,            description: 'Accounts Receivable' },
+              { account_id: revenueAcct.id, debit: 0,            credit: invoiceTotal, description: 'Revenue' },
+            ],
+          });
+        }
+      } catch (glUpdateErr) {
+        console.error('[invoices] GL re-post on update failed (non-fatal):', glUpdateErr);
+      }
+
       return { success: true, message: 'Invoice updated successfully.' };
     } catch (error) {
       console.error('Error updating invoice:', error);
@@ -693,6 +725,15 @@ const Invoices = {
   },
   deleteInvoice: async (id) => {
     try {
+      // Void journal entries so computedBalance() stops counting them (excludes non-'Posted' entries)
+      try {
+        const oldEntries = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted'").all(Number(id));
+        for (const oe of oldEntries) {
+          db.prepare("UPDATE journal_entries SET status = 'Void' WHERE id = ?").run(oe.id);
+        }
+      } catch (glErr) {
+        console.error('[invoices] GL void on delete failed (non-fatal):', glErr);
+      }
       const transaction = db.transaction((invoiceId) => {
         db.prepare(`DELETE FROM invoice_lines WHERE invoice_id = ?`).run(invoiceId);
         const res = db.prepare(`DELETE FROM invoices WHERE id = ?`).run(invoiceId);
@@ -707,73 +748,100 @@ const Invoices = {
   },
   getFinancialReport: function (start_date, last_date) {
     try {
-      // Use LEFT JOINs and COALESCE to avoid nulls when product mapping isn't present
-      const stmt_revenue = db.prepare(
-        `SELECT 
-           COALESCE(SUM(l.amount * l.quantity + ((l.amount * l.quantity) * i.vat / 100)), 0) AS revenue_total_amount,
-           COALESCE(SUM(COALESCE(p.price,0) * l.quantity), 0) AS product_total_amount
-         FROM invoice_lines AS l
-         LEFT JOIN products AS p ON l.product = p.id OR l.product = p.name
-         INNER JOIN invoices AS i ON l.invoice_id = i.id
-         WHERE i.status IN ('Paid', 'Partially Paid') AND i.start_date BETWEEN ? AND ?`
-      );
+      const dateFrom = start_date || '0000-01-01';
+      const dateTo = last_date || '9999-12-31';
 
-      const stmt_expense = db.prepare(
-        `SELECT COALESCE(SUM(l.amount), 0) AS expense_total_amount
-         FROM expense_lines AS l
-         INNER JOIN expenses AS e ON l.expense_id = e.id
-         WHERE e.approval_status IN ('Paid', 'Pending') AND e.payment_date BETWEEN ? AND ?`
-      );
+      // ── COA-driven balances from journal_lines ──────────────────────────
+      const acctRows = db.prepare(`
+        SELECT coa.id, coa.name, coa.type, coa.normalBalance, coa.openingBalance,
+               COALESCE(SUM(CASE WHEN je.date <= ? AND jl.account_id = coa.id THEN jl.debit ELSE 0 END), 0) AS totalDebit,
+               COALESCE(SUM(CASE WHEN je.date <= ? AND jl.account_id = coa.id THEN jl.credit ELSE 0 END), 0) AS totalCredit,
+               COALESCE(SUM(CASE WHEN je.date BETWEEN ? AND ? AND jl.account_id = coa.id THEN jl.debit ELSE 0 END), 0) AS periodDebit,
+               COALESCE(SUM(CASE WHEN je.date BETWEEN ? AND ? AND jl.account_id = coa.id THEN jl.credit ELSE 0 END), 0) AS periodCredit
+        FROM chart_of_accounts coa
+        LEFT JOIN journal_lines jl ON jl.account_id = coa.id
+        LEFT JOIN journal_entries je ON je.id = jl.journal_id AND je.status = 'Posted'
+        WHERE coa.status = 'Active'
+        GROUP BY coa.id
+      `).all(dateTo, dateTo, dateFrom, dateTo, dateFrom, dateTo);
 
-      const revenue = stmt_revenue.get(start_date, last_date) || { revenue_total_amount: 0, product_total_amount: 0 };
-      const expense = stmt_expense.get(start_date, last_date) || { expense_total_amount: 0 };
+      // Compute balance for each account (period-driven for income/expense, cumulative for BS)
+      let totalIncome = 0, totalCOGS = 0, totalExpenses = 0;
+      let totalAssets = 0, totalLiabilities = 0, totalEquity = 0;
+      const assetAccts = [], liabilityAccts = [], equityAccts = [];
+      const incomeAccts = [], expenseAccts = [];
 
-      // Ensure numeric values
-      const revenueTotal = Number(revenue.revenue_total_amount) || 0;
-      const productTotal = Number(revenue.product_total_amount) || 0;
-      const expenseTotal = Number(expense.expense_total_amount) || 0;
+      for (const r of acctRows) {
+        const nb = r.normalBalance || 'Debit';
+        const openBal = Number(r.openingBalance || 0);
+        // Balance sheet: cumulative (to date)
+        const bsBalance = nb === 'Debit'
+          ? openBal + Number(r.totalDebit) - Number(r.totalCredit)
+          : openBal + Number(r.totalCredit) - Number(r.totalDebit);
+        // P&L: period only (income/expense accounts reset each period)
+        const plBalance = nb === 'Debit'
+          ? Number(r.periodDebit) - Number(r.periodCredit)
+          : Number(r.periodCredit) - Number(r.periodDebit);
 
-      const grossProfit = revenueTotal - productTotal;
-      const netProfit = grossProfit - expenseTotal;
+        const t = (r.type || '').toLowerCase();
+        if (t === 'income' || t === 'other income') {
+          totalIncome += plBalance;
+          incomeAccts.push({ name: r.name, amount: plBalance });
+        } else if (t === 'cost of goods sold') {
+          totalCOGS += plBalance;
+        } else if (t === 'expense' || t === 'other expense') {
+          totalExpenses += plBalance;
+          expenseAccts.push({ name: r.name, amount: plBalance });
+        } else if (t === 'asset' || t === 'bank' || t === 'cash') {
+          totalAssets += bsBalance;
+          assetAccts.push({ name: r.name, amount: bsBalance, type: r.type });
+        } else if (t === 'liability') {
+          totalLiabilities += bsBalance;
+          liabilityAccts.push({ name: r.name, amount: bsBalance, type: r.type });
+        } else if (t === 'equity') {
+          totalEquity += bsBalance;
+          equityAccts.push({ name: r.name, amount: bsBalance, type: r.type });
+        }
+      }
+
+      const grossProfit = totalIncome - totalCOGS;
+      const netProfit = grossProfit - totalExpenses;
+
+      // Add net income to equity for BS balancing
+      const retainedEarnings = totalEquity;
+      const totalEquityFull = retainedEarnings + netProfit;
 
       return {
         profitLoss: {
-          revenue: revenueTotal,
-          cogs: productTotal,
-          operatingExpenses: expenseTotal,
+          revenue: totalIncome,
+          cogs: totalCOGS,
+          operatingExpenses: totalExpenses,
           grossProfit: grossProfit,
           netProfit: netProfit,
+          incomeAccounts: incomeAccts,
+          expenseAccounts: expenseAccts,
         },
         balanceSheet: {
-          assets: {
-            cash: grossProfit - expenseTotal,
-            accountsReceivable: 0,
-            inventory: 0,
-            total: (grossProfit - expenseTotal),
-          },
-          liabilities: {
-            accountsPayable: expenseTotal,
-            shortTermDebt: 0,
-            total: expenseTotal,
-          },
-          equity: {
-            retainedEarnings: 0,
-            shareholderEquity: 0,
-            total: 0,
+          assets: assetAccts,
+          liabilities: liabilityAccts,
+          equity: equityAccts,
+          summary: {
+            totalAssets,
+            totalLiabilities,
+            totalEquity: totalEquityFull,
           },
         },
         cashFlow: {
-          operating: grossProfit - expenseTotal,
+          operating: netProfit,
           investing: 0,
           financing: 0,
-          netCashFlow: grossProfit - expenseTotal,
+          netCashFlow: netProfit,
         },
       };
     } catch (error) {
       console.error('Error fetching report:', error);
       throw error;
     }
-
   },
   getManagementReport: function (start_date, last_date) {
     try {

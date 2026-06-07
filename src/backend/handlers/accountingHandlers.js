@@ -516,22 +516,24 @@ safeHandle('budget-periods', async () => {
       if (lines.length <= 1) throw new Error('CSV has no data rows');
       const header = lines.shift();
       const cols = header.split(',').map(h => h.trim().toLowerCase());
-      const idxNum = cols.indexOf('number');
-      const idxName = cols.indexOf('name');
-      const idxType = cols.indexOf('type');
-      const idxStatus = cols.indexOf('status');
+      const idxNum     = cols.indexOf('number');
+      const idxName    = cols.indexOf('name');
+      const idxType    = cols.indexOf('type');
+      const idxSubType = cols.indexOf('subtype');
+      const idxStatus  = cols.indexOf('status');
       const toInsert = [];
       for (const line of lines) {
-        const parts = line.split(',').map(p => p.trim());
-        const number = idxNum >= 0 ? parts[idxNum] : null;
-        const name = idxName >= 0 ? parts[idxName] : null;
-        const type = idxType >= 0 ? parts[idxType] : null;
-        const status = idxStatus >= 0 ? parts[idxStatus] : 'Active';
+        const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''));
+        const number  = idxNum     >= 0 ? parts[idxNum]     : null;
+        const name    = idxName    >= 0 ? parts[idxName]    : null;
+        const type    = idxType    >= 0 ? parts[idxType]    : null;
+        const subType = idxSubType >= 0 ? parts[idxSubType] : null;
+        const status  = idxStatus  >= 0 ? parts[idxStatus]  : 'Active';
         if (!name || !type) continue;
-        toInsert.push({ name, type, number, status });
+        toInsert.push({ name, type, subType, number, status });
       }
       for (const acc of toInsert) {
-        try { await ChartOfAccounts.insertAccount(acc.name, acc.type, acc.number || null, 'import'); } catch {}
+        try { ChartOfAccounts.insertAccount({ name: acc.name, type: acc.type, subType: acc.subType || null, number: acc.number || null, status: acc.status || 'Active', entered_by: 'import' }); } catch {}
       }
       // snapshot after
       try { COAVersions.createFromCurrent(note || 'Post-import snapshot'); } catch {}

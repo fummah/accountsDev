@@ -145,7 +145,6 @@ useEffect(() => {
               <Form.Item
                 name="title"
                 label="Title"
-                rules={[{ required: true, message: 'Please select a title', }]}
               >
                 <Select placeholder="Select">
                   <Option value="Mr">Mr</Option>
@@ -198,20 +197,31 @@ useEffect(() => {
 
               <Row gutter={16}>           
             <Col span={12}>
-              <Form.Item name="email" label="Email" rules={[{ required: true, message: 'Enter Email', },{type: "email",message: "Please enter a valid email address!", },]}>
+              <Form.Item name="email" label="Email" rules={[{type: "email",message: "Please enter a valid email address!", },]}>
                    <Input placeholder="Enter Email" /> 
               </Form.Item>
               </Col>
               <Col span={12}>
               <Form.Item name="phone_number" label="Phone number">
-                   <Input placeholder="Enter Phone number" /> 
+                   <Input
+                     placeholder="(XXX) XXX-XXXX"
+                     maxLength={14}
+                     onChange={e => {
+                       const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                       let formatted = digits;
+                       if (digits.length > 6) formatted = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+                       else if (digits.length > 3) formatted = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
+                       else if (digits.length > 0) formatted = `(${digits}`;
+                       e.target.value = formatted;
+                     }}
+                   />
               </Form.Item>
               </Col>
               </Row>
 
               <Row gutter={16}>           
             <Col span={12}>
-              <Form.Item name="mobile_number" label="Mobile number" rules={[{ required: true, message: 'Enter Mobile number', },]}>
+              <Form.Item name="mobile_number" label="Mobile number">
                    <Input placeholder="Enter Mobile number" /> 
               </Form.Item>
               </Col>

@@ -14,7 +14,6 @@ import IntlMessages from "../../util/IntlMessages";
 import {useSelector} from "react-redux";
 import {  PlusOutlined,} from '@ant-design/icons';
 
-const SubMenu = Menu.SubMenu;
 const MenuItemGroup = Menu.ItemGroup;
 
 
@@ -29,23 +28,13 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
     }
     return "";
   };
-  const getNavStyleSubMenuClass = (navStyle) => {
-    if (navStyle === NAV_STYLE_NO_HEADER_MINI_SIDEBAR) {
-      return "gx-no-header-submenu-popup";
-    }
-    return "";
-  };
   
 
   const selectedKeys = pathname.substr(1);
-  const defaultOpenKeys = selectedKeys.split('/')[1];
 
-  // Layout-only CSS for collapsed mode. Text hiding is done by React conditional rendering.
   const collapsedLayoutCSS = `
     .sidebar-collapsed-mode .ant-menu-item-group-title { display: none !important; }
-    .sidebar-collapsed-mode .ant-menu-submenu-arrow { display: none !important; }
-    .sidebar-collapsed-mode .ant-menu-item,
-    .sidebar-collapsed-mode .ant-menu-submenu-title {
+    .sidebar-collapsed-mode .ant-menu-item {
       padding: 0 28px !important;
       text-align: center !important;
     }
@@ -61,385 +50,162 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
       <SidebarLogo sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}/>
       <div className={`gx-sidebar-content ${sidebarCollapsed ? 'sidebar-collapsed-mode' : ''}`}>
         {!sidebarCollapsed && (
-        <div className={`gx-sidebar-notifications ${getNoHeaderClass(navStyle)}`}>
-        <div style={{ padding: '1px' }}>
-        <Popover
-            content={PopOverComponent}
-            trigger="click"
-            placement="rightTop"
-            overlayStyle={{ width: 800 }}
-          >
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            block
-            style={{
-              marginBottom: '16px',
-              backgroundColor: '#2ca01c',
-              borderColor: '#2ca01c',
-            }}
-          >
-            New
-          </Button>
-          </Popover>
-        </div>
-        </div>
+          <div className={`gx-sidebar-notifications ${getNoHeaderClass(navStyle)}`}>
+            <div style={{ padding: '1px' }}>
+              <Popover content={PopOverComponent} trigger="click" placement="rightTop" overlayStyle={{ width: 800 }}>
+                <Button type="primary" icon={<PlusOutlined />} block style={{ marginBottom: '16px', backgroundColor: '#2ca01c', borderColor: '#2ca01c' }}>
+                  New
+                </Button>
+              </Popover>
+            </div>
+          </div>
         )}
         <CustomScrollbars className="gx-layout-sider-scrollbar">
           <Menu
-            defaultOpenKeys={sidebarCollapsed ? [] : [defaultOpenKeys]}
             selectedKeys={[selectedKeys]}
             theme={themeType === THEME_TYPE_LITE ? 'lite' : 'dark'}
             mode="inline"
             inlineCollapsed={sidebarCollapsed}>
 
-            <MenuItemGroup key="main" className="gx-menu-group" title={<IntlMessages id="accounts.menu"/>}>
-              <SubMenu key="dashboard" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-                     
-<span>
-<i className="icon icon-dasbhoard" />
-{!sidebarCollapsed && <Link to="/main/dashboard/home-dash">
-  <span>
-    <IntlMessages id="sidebar.dashboard" />
-  </span>
-</Link>}
-</span>
-
-                        }>
-                <Menu.Item key="main/dashboard/home-dash">
-                  <Link to={{ pathname: "/main/dashboard/home-dash", state: { tabKey: "1" } }}>
-                    <i className="icon icon-home"/>
-                    <span><IntlMessages id="accounts.home"/></span>
-                  </Link>
-                  </Menu.Item>
-                  <Menu.Item key="main/dashboard/home1">
-                  <Link to={{ pathname: "/main/dashboard/home-dash", state: { tabKey: "2" } }}>
-                    <i className="icon icon-revenue-new"/>
-                    <span><IntlMessages id="accounts.cashflow"/></span>
-                  </Link>
-                  </Menu.Item>
-                                
-              </SubMenu>
-             
+            {/* ── Dashboard ── */}
+            <MenuItemGroup key="main" className="gx-menu-group" title={!sidebarCollapsed && <IntlMessages id="accounts.menu"/>}>
+              <Menu.Item key="main/dashboard/home-dash">
+                <Link to="/main/dashboard/home-dash">
+                  <i className="icon icon-dasbhoard"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="sidebar.dashboard"/></span>}
+                </Link>
+              </Menu.Item>
             </MenuItemGroup>
 
-            <MenuItemGroup key="in-built-apps" className="gx-menu-group" title={<IntlMessages id="accounts.activities"/>}>
-                          <SubMenu
-  key="sales"
-  popupClassName={getNavStyleSubMenuClass(navStyle)}
-  title={
-    <span>
-      <i className="icon icon-crm" />
-      {!sidebarCollapsed && <Link to="/inner/sales">
-        <span>
-          <IntlMessages id="accounts.sales" />
-        </span>
-      </Link>}
-    </span>
-  }
->
-  <Menu.Item key="inner/sales">
-    <Link to={{ pathname: "/inner/sales", state: { tabKey: "1" } }}>
-      <i className="icon icon-lising-dbrd" />
-      <span>
-        <IntlMessages id="accounts.allsales" />
-      </span>
-    </Link>
-  </Menu.Item>
-  <Menu.Item key="inner/invoices">
-    <Link to={{ pathname: "/inner/sales", state: { tabKey: "2" } }}>
-      <i className="icon icon-orders" />
-      <span>
-        <IntlMessages id="accounts.invoices" />
-      </span>
-    </Link>
-  </Menu.Item>
-  <Menu.Item key="inner/quotes">
-    <Link to={{ pathname: "/inner/sales", state: { tabKey: "3" } }}>
-      <i className="icon icon-crm" />
-      <span>Quotes</span>
-    </Link>
-  </Menu.Item>
-  <Menu.Item key="inner/customers">
-    <Link to={{ pathname: "/inner/sales", state: { tabKey: "9" } }}>
-      <i className="icon icon-profile2" />
-      <span>
-        <IntlMessages id="accounts.customers" />
-      </span>
-    </Link>
-  </Menu.Item>
-  <Menu.Item key="inner/products">
-    <Link to={{ pathname: "/inner/sales", state: { tabKey: "10" } }}>
-      <i className="icon icon-view-o" />
-      <span>
-        <IntlMessages id="accounts.productsandservices" />
-      </span>
-    </Link>
-  </Menu.Item>
-</SubMenu>
+            {/* ── Activities ── */}
+            <MenuItemGroup key="in-built-apps" className="gx-menu-group" title={!sidebarCollapsed && <IntlMessages id="accounts.activities"/>}>
 
-             <SubMenu key="expenses" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-<span>
-<i className="icon icon-contacts" />
-{!sidebarCollapsed && <Link to="/main/expenses/tracking">
-  <span>
-    <IntlMessages id="accounts.expenses" />
-  </span>
-</Link>}
-</span>
-                        }>
-                         <Menu.Item key="main/expenses/tracking">
-                         <Link to="/main/expenses/tracking">
-                <i className="icon icon-contacts"/><span>Expenses & Bills</span></Link>
+              {/* Sales */}
+              <Menu.Item key="inner/sales">
+                <Link to="/inner/sales">
+                  <i className="icon icon-crm"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="accounts.sales"/></span>}
+                </Link>
+              </Menu.Item>
+              <Menu.Item key="inner/invoices">
+                <Link to={{ pathname: "/inner/sales", state: { tabKey: "2" } }}>
+                  <i className="icon icon-orders"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="accounts.invoices"/></span>}
+                </Link>
+              </Menu.Item>
+              <Menu.Item key="inner/customers">
+                <Link to={{ pathname: "/inner/sales", state: { tabKey: "9" } }}>
+                  <i className="icon icon-profile2"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="accounts.customers"/></span>}
+                </Link>
+              </Menu.Item>
+
+              {/* Expenses */}
+              <Menu.Item key="main/expenses/tracking">
+                <Link to="/main/expenses/tracking">
+                  <i className="icon icon-contacts"/>
+                  {!sidebarCollapsed && <span>Expenses &amp; Bills</span>}
+                </Link>
               </Menu.Item>
               <Menu.Item key="main/expenses/suppliers">
-              <Link to="/main/expenses/suppliers">
-                <i className="icon icon-user"/><span>Suppliers / Vendors</span></Link>
+                <Link to="/main/expenses/suppliers">
+                  <i className="icon icon-user"/>
+                  {!sidebarCollapsed && <span>Suppliers / Vendors</span>}
+                </Link>
               </Menu.Item>
-              <Menu.Item key="main/expenses/categories">
-              <Link to="/main/expenses/categories">
-                <i className="icon icon-tag"/><span>Expense Categories</span></Link>
-              </Menu.Item>
-</SubMenu>
 
-<SubMenu key="customersandleads" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={                     
-  <span>
-  <i className="icon icon-all-contacts" />
-  {!sidebarCollapsed && <Link to="/inner/customersleads">
-    <span>
-      <IntlMessages id="accounts.customersandleads" />
-    </span>
-  </Link>}
-</span>
-                        }>
-              <Menu.Item key="inner/customersleads">
-              <Link to={{ pathname: "/inner/customersleads", state: { tabKey: "1" } }}><i
-                  className="icon icon-all-contacts"/><span><IntlMessages
-                  id="accounts.customers"/></span></Link>
+              {/* Banking */}
+              <Menu.Item key="inner/transactions">
+                <Link to="/inner/transactions">
+                  <i className="icon icon-card"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="accounts.transactions"/></span>}
+                </Link>
               </Menu.Item>
-              <Menu.Item key="main/customers/leads">
-                <Link to="/main/customers/leads"><i className="icon icon-crm"/><span>Leads</span></Link>
-              </Menu.Item>
-             
-              </SubMenu>
-              <SubMenu key="transactions" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-                    
-
-<span>
-<i className="icon icon-card" />
-{!sidebarCollapsed && <Link to="/inner/transactions">
-  <span>
-    <IntlMessages id="accounts.transactions" />
-  </span>
-</Link>}
-</span>
-                        }>
-            
-           
               <Menu.Item key="main/banking/reconcile">
-              <Link to="/main/banking/reconcile">
-                <i className="icon icon icon-check-square-o -flex-column-reverse"/><span><IntlMessages
-                  id="accounts.reconcile"/></span></Link>
+                <Link to="/main/banking/reconcile">
+                  <i className="icon icon-check-square-o"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="accounts.reconcile"/></span>}
+                </Link>
               </Menu.Item>
-           
-           
-              </SubMenu>             
-            
+
+              {/* VAT */}
               <Menu.Item key="inner/vat">
-                <Link to="/inner/vat"><i
-                  className="icon icon-inbuilt-apps"/>{!sidebarCollapsed && <span><IntlMessages
-                  id="accounts.vat"/></span>}</Link>
+                <Link to="/inner/vat">
+                  <i className="icon icon-inbuilt-apps"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="accounts.vat"/></span>}
+                </Link>
               </Menu.Item>
-             
-              <SubMenu key="employees" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-<span>
-<i className="icon icon-profile2"/>
-{!sidebarCollapsed && <Link to="/main/employees/center">
-  <span><IntlMessages id="accounts.employees"/></span>
-</Link>}
-</span>
-                       }>
-                <Menu.Item key="main/employees/center">
-                  <Link to="/main/employees/center"><i className="icon icon-profile2"/><span>Employee Center</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/employees/departments">
-                  <Link to="/main/employees/departments"><i className="icon icon-apps"/><span>Departments</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/employees/roles">
-                  <Link to="/main/employees/roles"><i className="icon icon-auth-screen"/><span>Roles</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/employees/time-attendance">
-                  <Link to="/main/employees/time-attendance"><i className="icon icon-tasks"/><span>Time & Attendance</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/employees/direct-deposit">
-                  <Link to="/main/employees/direct-deposit"><i className="icon icon-card"/><span>Direct Deposit</span></Link>
-                </Menu.Item>
-              </SubMenu>
-              <SubMenu key="reports" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-<span>
-<i className="icon icon-chart" />
-{!sidebarCollapsed && <Link to="/inner/reports">
-  <span>
-    <IntlMessages id="accounts.reports" />
-  </span>
-</Link>}
-</span>
-                        }>
-                         <Menu.Item key="inner/reports">
-                         <Link to={{ pathname: "/inner/reports", state: { tabKey: "1" } }}>
-                <i className="icon icon-etherium"/><span>Financial Reports</span></Link>
+
+              {/* Employees */}
+              <Menu.Item key="main/employees/center">
+                <Link to="/main/employees/center">
+                  <i className="icon icon-profile2"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="accounts.employees"/></span>}
+                </Link>
               </Menu.Item>
-              <Menu.Item key="lists/reports0">
-              <Link to={{ pathname: "/inner/reports", state: { tabKey: "2" } }}>
-                <i className="icon icon-ripple"/><span>Management Reports</span></Link>
-              </Menu.Item>   
-              <Menu.Item key="lists/reports1">
-                <Link to={{ pathname: "/inner/reports", state: { tabKey: "3" } }}>
-                  <i className="icon icon-invert-color"/><span>Tax Reports</span></Link>
-                </Menu.Item>   
 
-                   <Menu.Item key="lists/reports2">
-                <Link to={{ pathname: "/inner/reports", state: { tabKey: "4" } }}>
-                  <i className="icon icon-orders"/><span>Planning & Reporting</span></Link>
-                </Menu.Item> 
+              {/* Reports */}
+              <Menu.Item key="inner/reports">
+                <Link to="/inner/reports">
+                  <i className="icon icon-chart"/>
+                  {!sidebarCollapsed && <span><IntlMessages id="accounts.reports"/></span>}
+                </Link>
+              </Menu.Item>
 
-                   <Menu.Item key="lists/reports3">
-                <Link to={{ pathname: "/inner/reports", state: { tabKey: "5" } }}>
-                  <i className="icon icon-crm"/><span>Cashflow Projector</span></Link>
-                </Menu.Item>        
-</SubMenu>
+              {/* Inventory */}
+              <Menu.Item key="main/inventory/stock">
+                <Link to="/main/inventory/stock">
+                  <i className="icon icon-shopping-cart"/>
+                  {!sidebarCollapsed && <span>Inventory</span>}
+                </Link>
+              </Menu.Item>
 
-              <SubMenu key="inventory" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-<span>
-<i className="icon icon-shopping-cart"/>
-{!sidebarCollapsed && <Link to="/main/inventory/stock">
-  <span>Inventory</span>
-</Link>}
-</span>
-                       }>
-                <Menu.Item key="main/inventory/items">
-                  <Link to="/main/inventory/items"><i className="icon icon-view-o"/><span>Items List</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/inventory/stock">
-                  <Link to="/main/inventory/stock"><i className="icon icon-check-square-o -flex-column-reverse"/><span>Stock</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/inventory/warehouses">
-                  <Link to="/main/inventory/warehouses"><i className="icon icon-apps"/><span>Warehouses</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/inventory/bom">
-                  <Link to="/main/inventory/bom"><i className="icon icon-orders"/><span>Bill of Materials</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/inventory/serials">
-                  <Link to="/main/inventory/serials"><i className="icon icon-calendar"/><span>Serial Numbers</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/inventory/barcodes">
-                  <Link to="/main/inventory/barcodes"><i className="icon icon-invert-color"/><span>Barcodes</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/inventory/adjustments">
-                  <Link to="/main/inventory/adjustments"><i className="icon icon-edit"/><span>Adjustments</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/inventory/pricing-rules">
-                  <Link to="/main/inventory/pricing-rules"><i className="icon icon-tag"/><span>Pricing Rules</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/inventory/pick-pack-ship">
-                  <Link to="/main/inventory/pick-pack-ship"><i className="icon icon-orders"/><span>Pick, Pack & Ship</span></Link>
-                </Menu.Item>
-              </SubMenu>
+              {/* Projects */}
+              <Menu.Item key="main/projects/center">
+                <Link to="/main/projects/center">
+                  <i className="icon icon-widgets"/>
+                  {!sidebarCollapsed && <span>Projects</span>}
+                </Link>
+              </Menu.Item>
 
-              <SubMenu key="projects" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-<span>
-<i className="icon icon-widgets"/>
-{!sidebarCollapsed && <Link to="/main/projects/center">
-  <span>Projects</span>
-</Link>}
-</span>
-                       }>
-                <Menu.Item key="main/projects/center">
-                  <Link to="/main/projects/center"><i className="icon icon-widgets"/><span>Project Center</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/projects/profitability">
-                  <Link to="/main/projects/profitability"><i className="icon icon-chart-area-new"/><span>Profitability</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/projects/timesheets">
-                  <Link to="/main/projects/timesheets"><i className="icon icon-tasks"/><span>Timesheets</span></Link>
-                </Menu.Item>
-              </SubMenu>
+              {/* POS */}
+              <Menu.Item key="main/pos/session">
+                <Link to="/main/pos/session">
+                  <i className="icon icon-orders"/>
+                  {!sidebarCollapsed && <span>Point of Sale</span>}
+                </Link>
+              </Menu.Item>
 
-              <SubMenu key="pos" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-<span>
-<i className="icon icon-orders"/>
-{!sidebarCollapsed && <Link to="/main/pos/session">
-  <span>Point of Sale</span>
-</Link>}
-</span>
-                       }>
-                <Menu.Item key="main/pos/session">
-                  <Link to="/main/pos/session"><i className="icon icon-profile2"/><span>Session</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/pos/sale">
-                  <Link to="/main/pos/sale"><i className="icon icon-add-circle"/><span>New Sale</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/pos/sales">
-                  <Link to="/main/pos/sales"><i className="icon icon-lising-dbrd"/><span>Sales</span></Link>
-                </Menu.Item>
-              </SubMenu>
+              {/* CRM */}
+              <Menu.Item key="main/customers/leads">
+                <Link to="/main/customers/leads">
+                  <i className="icon icon-all-contacts"/>
+                  {!sidebarCollapsed && <span>CRM</span>}
+                </Link>
+              </Menu.Item>
 
-              <SubMenu key="crm" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-<span>
-<i className="icon icon-all-contacts"/>
-{!sidebarCollapsed && <Link to="/main/customers/leads">
-  <span>CRM</span>
-</Link>}
-</span>
-                       }>
-                <Menu.Item key="main/customers/leads">
-                  <Link to="/main/customers/leads"><i className="icon icon-all-contacts"/><span>Leads</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/customers/leads-activities">
-                  <Link to={{ pathname: "/main/customers/leads", state: { tabKey: "activities" } }}><i className="icon icon-tasks"/><span>Activities</span></Link>
-                </Menu.Item>
-              </SubMenu>
-
-              <SubMenu key="bank-statements" popupClassName={getNavStyleSubMenuClass(navStyle)}
-                       title={
-<span>
-<i className="icon icon-card"/>
-{!sidebarCollapsed && <Link to="/main/bank-statements/list">
-  <span>Bank Statements</span>
-</Link>}
-</span>
-                       }>
-                <Menu.Item key="main/bank-statements/upload">
-                  <Link to="/main/bank-statements/upload"><i className="icon icon-upload"/><span>Upload & Parse</span></Link>
-                </Menu.Item>
-                <Menu.Item key="main/bank-statements/list">
-                  <Link to="/main/bank-statements/list"><i className="icon icon-lising-dbrd"/><span>Parsed Statements</span></Link>
-                </Menu.Item>
-              </SubMenu>
+              {/* Bank Statements */}
+              <Menu.Item key="main/bank-statements/list">
+                <Link to="/main/bank-statements/list">
+                  <i className="icon icon-card"/>
+                  {!sidebarCollapsed && <span>Bank Statements</span>}
+                </Link>
+              </Menu.Item>
 
               <Menu.Item key="main/analytics">
-                <Link to="/main/analytics"><i className="icon icon-chart-area-new"/>{!sidebarCollapsed && <span>Analytics</span>}</Link>
+                <Link to="/main/analytics">
+                  <i className="icon icon-chart-area-new"/>
+                  {!sidebarCollapsed && <span>Analytics</span>}
+                </Link>
               </Menu.Item>
-              <Menu.Item key="main/reports/consolidated">
-                <Link to="/main/reports/consolidated"><i className="icon icon-chart"/>{!sidebarCollapsed && <span>Consolidated Reports</span>}</Link>
-              </Menu.Item>
-              <Menu.Item key="main/reports/tax-forms">
-                <Link to="/main/reports/tax-forms"><i className="icon icon-files"/>{!sidebarCollapsed && <span>Tax Forms</span>}</Link>
-              </Menu.Item>
+
               <Menu.Item key="inner/profile">
-                <Link to="/inner/profile"><i
-                  className="icon icon-user"/>{!sidebarCollapsed && <span>Profile</span>}</Link>
+                <Link to="/inner/profile">
+                  <i className="icon icon-user"/>
+                  {!sidebarCollapsed && <span>Profile</span>}
+                </Link>
               </Menu.Item>
+
             </MenuItemGroup>
           </Menu>
         </CustomScrollbars>

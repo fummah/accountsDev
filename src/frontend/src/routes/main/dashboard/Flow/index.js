@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useHistory } from "react-router-dom";
-import { Row, Col, Card, Spin, Button, Steps, Modal, Form, Input, Select, message, Divider } from "antd";
+import { Row, Col, Card, Spin, Button, Steps, Modal, Form, Input, Select, message, Divider, Tooltip, Table, Tag } from "antd";
 import {
   BankOutlined, DollarOutlined, CreditCardOutlined, WalletOutlined,
   FundOutlined, RiseOutlined, FallOutlined, PieChartOutlined,
@@ -22,15 +22,88 @@ const fmt = (v) => {
   return (n < 0 ? '-' : '') + '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+// matchFn maps to the EXACT types/subtypes defined in chartOfAccounts.js backend model
 const BALANCE_CATEGORIES = [
-  { key: 'bank',       label: 'Bank Accounts',        types: ['Bank'],                     icon: <BankOutlined />,       color: '#1890ff' },
-  { key: 'ar',         label: 'Accounts Receivable',   types: ['Accounts Receivable'],       icon: <RiseOutlined />,      color: '#52c41a' },
-  { key: 'ap',         label: 'Accounts Payable',      types: ['Accounts Payable'],          icon: <FallOutlined />,      color: '#fa541c' },
-  { key: 'cc',         label: 'Credit Cards',          types: ['Credit Card'],               icon: <CreditCardOutlined />,color: '#722ed1' },
-  { key: 'loans',      label: 'Loans',                 types: ['Other Current Liability','Long Term Liability','Loan'], icon: <WalletOutlined />,    color: '#eb2f96' },
-  { key: 'revenue',    label: 'Revenue',               types: ['Income','Other Income'],     icon: <FundOutlined />,      color: '#13c2c2' },
-  { key: 'expenses',   label: 'Expenses',              types: ['Expense','Other Expense','Cost of Goods Sold'], icon: <PieChartOutlined />,  color: '#faad14' },
-  { key: 'equity',     label: 'Equity',                types: ['Equity'],                    icon: <DollarOutlined />,    color: '#2f54eb' },
+  {
+    key: 'bank',
+    label: 'Bank Accounts',
+    route: '/main/banking/reconcile',
+    matchFn: a => {
+      const t = (a.accountType || '').toLowerCase();
+      return t === 'bank' || t === 'cash';
+    },
+    icon: <BankOutlined />, color: '#1890ff',
+  },
+  {
+    key: 'ar',
+    label: 'Accounts Receivable',
+    route: '/inner/sales?tab=5',
+    matchFn: a => {
+      const t  = (a.accountType    || '').toLowerCase();
+      const st = (a.accountSubType || a.subType || '').toLowerCase();
+      return st === 'accounts receivable' || t === 'accounts receivable';
+    },
+    icon: <RiseOutlined />, color: '#52c41a',
+  },
+  {
+    key: 'ap',
+    label: 'Accounts Payable',
+    route: '/inner/expenses',
+    matchFn: a => {
+      const t  = (a.accountType    || '').toLowerCase();
+      const st = (a.accountSubType || a.subType || '').toLowerCase();
+      return st === 'accounts payable' || t === 'accounts payable';
+    },
+    icon: <FallOutlined />, color: '#fa541c',
+  },
+  {
+    key: 'cc',
+    label: 'Credit Cards',
+    route: '/main/expenses/credit-cards',
+    matchFn: a => {
+      const t = (a.accountType || '').toLowerCase();
+      return t === 'credit card';
+    },
+    icon: <CreditCardOutlined />, color: '#722ed1',
+  },
+  {
+    key: 'loans',
+    label: 'Loans',
+    route: '/main/accountant/chart-of-accounts',
+    matchFn: a => {
+      const t  = (a.accountType    || '').toLowerCase();
+      const st = (a.accountSubType || a.subType || '').toLowerCase();
+      return t === 'loan' || st.includes('loan') || st === 'long-term liability' || st === 'line of credit' || st === 'mortgage';
+    },
+    icon: <WalletOutlined />, color: '#eb2f96',
+  },
+  {
+    key: 'revenue',
+    label: 'Revenue',
+    route: '/main/accountant/reports',
+    matchFn: a => {
+      const t = (a.accountType || '').toLowerCase();
+      return t === 'income' || t === 'other income';
+    },
+    icon: <FundOutlined />, color: '#13c2c2',
+  },
+  {
+    key: 'expenses',
+    label: 'Expenses',
+    route: '/main/accountant/reports',
+    matchFn: a => {
+      const t = (a.accountType || '').toLowerCase();
+      return t === 'expense' || t === 'other expense' || t === 'cost of goods sold';
+    },
+    icon: <PieChartOutlined />, color: '#faad14',
+  },
+  {
+    key: 'equity',
+    label: 'Equity',
+    route: '/main/accountant/reports',
+    matchFn: a => (a.accountType || '').toLowerCase() === 'equity',
+    icon: <DollarOutlined />, color: '#2f54eb',
+  },
 ];
 
 /* ──── Main Component ──── */
@@ -38,6 +111,9 @@ const Flow = () => {
   const history = useHistory();
   const [loading, setLoading] = useState(true);
   const [balances, setBalances] = useState({});
+  const [accountNames, setAccountNames] = useState({});
+  const [categoryAccounts, setCategoryAccounts] = useState({});
+  const [drillDown, setDrillDown] = useState(null); // { key, label, color, icon }
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardStep, setOnboardStep] = useState(0);
   const [onboardForm] = Form.useForm();
@@ -53,15 +129,19 @@ const Flow = () => {
     try {
       const accounts = await window.electronAPI?.getChartOfAccounts?.() || [];
       const acctList = Array.isArray(accounts) ? accounts : [];
-      // Aggregate balances by category
+      // Aggregate balances by category using matchFn
       const bals = {};
+      const names = {};
+      const catAccounts = {};
       BALANCE_CATEGORIES.forEach(cat => {
-        const matching = acctList.filter(a =>
-          cat.types.some(t => (a.accountType || a.type || '').toLowerCase() === t.toLowerCase())
-        );
+        const matching = acctList.filter(cat.matchFn);
         bals[cat.key] = matching.reduce((sum, a) => sum + Number(a.balance || 0), 0);
+        names[cat.key] = matching.map(a => a.accountName || a.name || '').filter(Boolean);
+        catAccounts[cat.key] = matching;
       });
       setBalances(bals);
+      setAccountNames(names);
+      setCategoryAccounts(catAccounts);
 
       // Check if onboarding needed
       const comp = await window.electronAPI?.getCompany?.();
@@ -96,7 +176,7 @@ const Flow = () => {
   const nodes = [
     // Row 0
     { id: "n-products",      icon: P("/assets/icons/products.svg"),  label: "Products",         col: 0, row: 0, route: "/inner/sales?tab=10" },
-    { id: "n-expenses",      icon: P("/assets/icons/expenses.svg"),  label: "Expenses",         col: 1, row: 0, route: "/inner/expenses" },
+    { id: "n-expenses",      icon: P("/assets/icons/expenses.svg"),  label: "Enter\nBills",     col: 1, row: 0, route: "/inner/expenses" },
     { id: "n-paybills",      icon: P("/assets/icons/pay.svg"),       label: "Pay Bills",        col: 2, row: 0, route: "/inner/expenses" },
     { id: "n-analysis",      icon: P("/assets/icons/analysis.svg"),  label: "Analysis",         col: 3, row: 0, route: "/main/accountant/reports" },
     // Row 1
@@ -192,25 +272,49 @@ const Flow = () => {
       {/* ──── Account Balances ──── */}
       <div style={{ marginBottom: 20 }}>
         <Row gutter={[12, 12]}>
-          {BALANCE_CATEGORIES.map(cat => (
-            <Col xl={3} lg={6} md={6} sm={12} xs={12} key={cat.key}>
-              <Card
-                size="small"
-                hoverable
-                style={{ borderTop: `3px solid ${cat.color}`, borderRadius: 6 }}
-                bodyStyle={{ padding: "12px 14px" }}
-                onClick={() => history.push("/main/accountant/chart-of-accounts")}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 18, color: cat.color }}>{cat.icon}</span>
-                  <span style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{cat.label}</span>
-                </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: (balances[cat.key] || 0) < 0 ? '#f5222d' : '#262626' }}>
-                  {fmt(balances[cat.key])}
-                </div>
-              </Card>
-            </Col>
-          ))}
+          {BALANCE_CATEGORIES.map(cat => {
+            const acctNamesForCat = accountNames[cat.key] || [];
+            const count = acctNamesForCat.length;
+            return (
+              <Col xl={3} lg={6} md={6} sm={12} xs={12} key={cat.key}>
+                <Card
+                  size="small"
+                  hoverable
+                  style={{ borderTop: `3px solid ${cat.color}`, borderRadius: 6, cursor: 'pointer' }}
+                  bodyStyle={{ padding: "12px 14px" }}
+                  onClick={() => setDrillDown(cat)}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: 'space-between', marginBottom: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 16, color: cat.color }}>{cat.icon}</span>
+                      <span style={{ fontSize: 11, color: "#888", fontWeight: 500 }}>{cat.label}</span>
+                    </div>
+                    {count > 0 && (
+                      <Tag color={cat.color} style={{ fontSize: 9, lineHeight: '16px', padding: '0 4px', margin: 0 }}>
+                        {count}
+                      </Tag>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: (balances[cat.key] || 0) < 0 ? '#f5222d' : '#262626' }}>
+                    {fmt(balances[cat.key])}
+                  </div>
+                  {count === 1 && (
+                    <div style={{ fontSize: 10, color: '#aaa', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {acctNamesForCat[0]}
+                    </div>
+                  )}
+                  {count > 1 && (
+                    <div style={{ fontSize: 10, color: cat.color, marginTop: 2 }}>
+                      {count} accounts — click to view
+                    </div>
+                  )}
+                  {count === 0 && (
+                    <div style={{ fontSize: 10, color: '#ccc', marginTop: 2 }}>No accounts yet</div>
+                  )}
+                </Card>
+              </Col>
+            );
+          })}
         </Row>
       </div>
 
@@ -302,6 +406,102 @@ const Flow = () => {
           </Card>
         </Col>
       </Row>
+
+      {/* ──── Drill-Down Modal ──── */}
+      {drillDown && (() => {
+        const accts = categoryAccounts[drillDown.key] || [];
+        const total = accts.reduce((s, a) => s + Number(a.balance || 0), 0);
+        const isIncomeOrExpense = ['revenue','expenses'].includes(drillDown.key);
+        const drillColumns = [
+          {
+            title: 'Account',
+            dataIndex: 'accountName',
+            key: 'accountName',
+            render: (v, r) => (
+              <div>
+                <div style={{ fontWeight: 500 }}>{v}</div>
+                {r.accountNumber && <div style={{ fontSize: 11, color: '#aaa' }}>#{r.accountNumber}</div>}
+              </div>
+            ),
+          },
+          {
+            title: 'Sub-type',
+            dataIndex: 'accountSubType',
+            key: 'accountSubType',
+            render: v => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : null,
+            responsive: ['sm'],
+          },
+          {
+            title: 'Balance',
+            dataIndex: 'balance',
+            key: 'balance',
+            align: 'right',
+            render: v => (
+              <span style={{ fontWeight: 600, color: Number(v) < 0 ? '#f5222d' : '#262626' }}>
+                {fmt(v)}
+              </span>
+            ),
+          },
+        ];
+        return (
+          <Modal
+            visible={!!drillDown}
+            title={
+              <span style={{ color: drillDown.color }}>
+                {drillDown.icon}&nbsp;&nbsp;{drillDown.label}
+              </span>
+            }
+            onCancel={() => setDrillDown(null)}
+            width={580}
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, fontSize: 15 }}>
+                  Total:&nbsp;
+                  <span style={{ color: total < 0 ? '#f5222d' : drillDown.color }}>{fmt(total)}</span>
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button type="default" onClick={() => { setDrillDown(null); history.push(drillDown.route); }}>
+                    {isIncomeOrExpense ? 'View P&L Report' : 'View Detail'}
+                  </Button>
+                  <Button onClick={() => { setDrillDown(null); history.push('/main/accountant/chart-of-accounts'); }}>
+                    Manage Accounts
+                  </Button>
+                  <Button type="primary" onClick={() => setDrillDown(null)}>Close</Button>
+                </div>
+              </div>
+            }
+          >
+            {accts.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '32px 0', color: '#aaa' }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>{drillDown.icon}</div>
+                <div>No {drillDown.label} accounts yet.</div>
+                <Button type="link" onClick={() => { setDrillDown(null); history.push('/main/accountant/chart-of-accounts'); }}>
+                  + Add an account
+                </Button>
+              </div>
+            ) : (
+              <Table
+                dataSource={accts.map((a, i) => ({ ...a, key: a.id || i }))}
+                columns={drillColumns}
+                size="small"
+                pagination={accts.length > 10 ? { pageSize: 10, size: 'small' } : false}
+                summary={() => (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell colSpan={2}>
+                      <span style={{ fontWeight: 700 }}>Total {drillDown.label}</span>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell align="right">
+                      <span style={{ fontWeight: 700, color: total < 0 ? '#f5222d' : drillDown.color }}>
+                        {fmt(total)}
+                      </span>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                )}
+              />
+            )}
+          </Modal>
+        );
+      })()}
 
       {/* ──── Guided Onboarding Modal ──── */}
       <Modal

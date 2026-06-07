@@ -174,36 +174,6 @@ const registerIpcHandlers = () => {
       });
     } catch {}
     try {
-      safeHandle('coa-import', async (_e, { csvText, note }) => {
-        try {
-          if (!csvText || typeof csvText !== 'string') throw new Error('csvText required');
-          try { COAVersions.createFromCurrent(note || 'Pre-import snapshot'); } catch {}
-
-          const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-          if (lines.length <= 1) throw new Error('CSV has no data rows');
-          const header = lines.shift();
-          const cols = header.split(',').map(h => h.trim().toLowerCase());
-          const idxNum = cols.indexOf('number');
-          const idxName = cols.indexOf('name');
-          const idxType = cols.indexOf('type');
-          const idxStatus = cols.indexOf('status');
-          let inserted = 0;
-          for (const line of lines) {
-            const parts = line.split(',').map(p => p.trim());
-            const number = idxNum >= 0 ? parts[idxNum] : null;
-            const name = idxName >= 0 ? parts[idxName] : null;
-            const type = idxType >= 0 ? parts[idxType] : null;
-            if (!name || !type) continue;
-            try { await ChartOfAccounts.insertAccount(name, type, number || null, 'import'); inserted++; } catch {}
-          }
-          try { COAVersions.createFromCurrent(note || 'Post-import snapshot'); } catch {}
-          return { success: true, inserted };
-        } catch (e) {
-          return { error: e.message };
-        }
-      });
-    } catch {}
-    try {
       safeHandle('coa-versions-list', async () => {
         try { return COAVersions.list(100); } catch (e) { return { error: e.message }; }
       });
