@@ -64,7 +64,7 @@ const Customers = {
  
   // Retrieve all customers
   getAllCustomers: function() {
-    const stmt = db.prepare('SELECT * FROM customers ORDER BY id DESC');
+    const stmt = db.prepare('SELECT * FROM customers ORDER BY COALESCE(display_name, first_name) COLLATE NOCASE ASC');
     const report = this.getCustomerReport();
     return {all:stmt.all(),report:report};
   },
@@ -78,11 +78,11 @@ const Customers = {
     if (searchParam) {
       const stmtCount = db.prepare('SELECT COUNT(*) AS total FROM customers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?)');
       total = stmtCount.get(searchParam, searchParam, searchParam).total;
-      const stmtData = db.prepare('SELECT * FROM customers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?');
+      const stmtData = db.prepare('SELECT * FROM customers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?) ORDER BY COALESCE(display_name, first_name) COLLATE NOCASE ASC LIMIT ? OFFSET ?');
       data = stmtData.all(searchParam, searchParam, searchParam, limit, offset);
     } else {
       total = db.prepare('SELECT COUNT(*) AS total FROM customers').get().total;
-      data = db.prepare('SELECT * FROM customers ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
+      data = db.prepare('SELECT * FROM customers ORDER BY COALESCE(display_name, first_name) COLLATE NOCASE ASC LIMIT ? OFFSET ?').all(limit, offset);
     }
     return { data, total };
   },

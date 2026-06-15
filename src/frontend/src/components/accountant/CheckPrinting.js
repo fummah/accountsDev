@@ -71,7 +71,7 @@ const CheckPrinting = () => {
       const customers = Array.isArray(customersRes?.all) ? customersRes.all : (Array.isArray(customersRes) ? customersRes : []);
       const employees = Array.isArray(employeesRes?.data) ? employeesRes.data : (Array.isArray(employeesRes) ? employeesRes : []);
       const merged = [
-        ...vendors.map(v => ({ id: `v-${v.id}`, name: v.display_name || v.name || `${v.first_name||''} ${v.last_name||''}`.trim(), type: 'Vendor' })),
+        ...vendors.map(v => ({ id: `v-${v.id}`, name: v.display_name || v.name || `${v.first_name||''} ${v.last_name||''}`.trim(), type: 'Vendor', _raw: v })),
         ...customers.map(c => ({ id: `c-${c.id}`, name: c.display_name || `${c.first_name||''} ${c.last_name||''}`.trim(), type: 'Customer' })),
         ...employees.map(e => ({ id: `e-${e.id}`, name: e.name || `${e.first_name||''} ${e.last_name||''}`.trim(), type: 'Employee' })),
       ].filter(p => p.name);
@@ -101,6 +101,14 @@ const CheckPrinting = () => {
   const [splitLines, setSplitLines] = useState([{ key: 1, account: '', description: '', amount: 0 }]);
 
   const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
+
+  // Auto-update the main amount field from split lines when there are multiple lines
+  useEffect(() => {
+    if (splitLines.length > 1 && splitTotal > 0) {
+      setAmount(splitTotal);
+      form.setFieldsValue({ amount: splitTotal });
+    }
+  }, [splitTotal, splitLines.length]);
 
   const addSplitLine = () => setSplitLines(prev => [...prev, { key: Date.now(), account: '', description: '', amount: 0 }]);
   const removeSplitLine = (key) => setSplitLines(prev => prev.length > 1 ? prev.filter(l => l.key !== key) : prev);
@@ -132,39 +140,20 @@ const CheckPrinting = () => {
   }, [watchAccountId, accounts]);
 
   const generateCheckHtml = (vals, forPrint) => {
-    const dateStr = vals.date ? (vals.date.format ? vals.date.format('M/D/YYYY') : vals.date) : '';
+    const dateStr = vals.date ? (vals.date.format ? vals.date.format('MM/DD/YYYY') : vals.date) : '';
     const payeeName = vals.payeeName || '';
     const payeeAddr = vals.payeeAddress || '';
     const amt = Number(vals.amount || 0);
     const amtStr = amt.toFixed(2);
     const checkNum = vals.checkNumber || '';
-    const routingNum = vals.routingNumber || '';
-    const accountNum = vals.accountNumber || '';
     const memoLine = vals.memo || '';
-    const bankName = vals.accountName || '';
     const splitLns = (vals.splitLines || []).filter(l => Number(l.amount) > 0);
-
-    // Company info
-    const co = vals._company || {};
-    const coName = co.name || '';
-    const coAddr = co.address || '';
-    const coCity = co.city ? `${co.city}${co.state ? ', ' + co.state : ''}${co.zip ? ' ' + co.zip : ''}` : '';
-    const coPhone = co.phone || '';
 
     const words = (() => {
       const dollars = Math.floor(amt);
       const cents = Math.round((amt - dollars) * 100);
       return `${toWords(dollars)} and ${String(cents).padStart(2, '0')}/100`;
     })();
-
-    // MICR line
-    const micrRouting = routingNum ? `\u2446${routingNum}\u2446` : '\u2446000000000\u2446';
-    const micrAccount = accountNum ? `${accountNum}\u2448` : '0000000000\u2448';
-    const micrCheck   = checkNum   ? `${checkNum}\u2468`   : '';
-    const micrLine    = `${micrRouting} ${micrAccount} ${micrCheck}`;
-
-    // Routing fraction display (e.g. 60-1177/313)
-    const routingDisplay = routingNum ? routingNum : '';
 
     // Dot-fill for written amount line
     const dotFill = words + ' ' + '*'.repeat(Math.max(0, 72 - words.length));
@@ -183,25 +172,16 @@ const CheckPrinting = () => {
           <td style="padding:2px 0; font-size:11px; text-align:right; color:#333;">${amtStr}</td>
         </tr>` : '';
 
-    // Stub section — matches image exactly:
-    // Row 1: payer name (bold, left) | blank | date (center) | check# (right)
-    // Row 2: payee name (left)       | blank | blank          | amount (right)
-    // detail rows, then memo bottom-left / amount bottom-right
+    // Stub section — only dynamic data (payee, date, amounts, detail lines)
     const stub = () => `
-      <div style="height:185px; padding:10px 28px 8px 28px; box-sizing:border-box; border-top:1px dashed #aaa; font-family:Arial,sans-serif;">
+      <div style="height:185px; padding:10px 28px 8px 28px; box-sizing:border-box; font-family:Arial,sans-serif; position:relative;">
         <table style="width:100%; border-collapse:collapse;">
           <tbody>
             <tr>
-              <td style="font-size:12px; font-weight:700; padding:0 0 2px 0; width:45%;">${coName}</td>
+              <td style="font-size:11px; color:#444; padding:0 0 2px 0; width:45%;">${payeeName}</td>
               <td style="width:20%;"></td>
               <td style="font-size:11px; text-align:center; padding:0 0 2px 0; width:18%;">${dateStr}</td>
-              <td style="font-size:13px; font-weight:700; text-align:right; padding:0 0 2px 0; width:17%;">${checkNum}</td>
-            </tr>
-            <tr>
-              <td style="font-size:11px; color:#444; padding:0 0 6px 0;">${payeeName}</td>
-              <td></td>
-              <td></td>
-              <td style="font-size:12px; font-weight:600; text-align:right; padding:0 0 6px 0;">${amtStr}</td>
+              <td style="font-size:12px; font-weight:600; text-align:right; padding:0 0 2px 0; width:17%;">${amtStr}</td>
             </tr>
             ${stubDetailRows}
           </tbody>
@@ -212,88 +192,57 @@ const CheckPrinting = () => {
         </div>
       </div>`;
 
-    // Security background SVG (light blue diagonal lines pattern, like safety paper)
-    const secBg = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60'><rect width='60' height='60' fill='%23e8f4fd'/><line x1='0' y1='0' x2='60' y2='60' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.6'/><line x1='0' y1='20' x2='40' y2='60' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.6'/><line x1='20' y1='0' x2='60' y2='40' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.6'/><line x1='0' y1='40' x2='20' y2='60' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.4'/><line x1='40' y1='0' x2='60' y2='20' stroke='%23b8d9f0' stroke-width='0.5' opacity='0.4'/></svg>`;
-
+    /* ═══════════════════════════════════════════════════════════════════
+       PRINT LAYOUT for preprinted check stock.
+       Only dynamic data is printed. Everything preprinted on the check
+       stock (company name, check number, MICR line, DATE label, DOLLARS
+       text, signature line, horizontal lines) is NOT printed.
+       Positions are absolute within a fixed check-body height to align
+       with standard preprinted check stock.
+       ═══════════════════════════════════════════════════════════════════ */
     return `<!doctype html><html><head><title>Check #${checkNum}</title>
     <style>
       @page { margin: 0.2in 0.35in; size: letter portrait; }
       * { box-sizing: border-box; }
       body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #1a1a1a; }
-      .check-body { position: relative; }
-      .check-bg {
-        position: absolute; inset: 0;
-        background-image: url("${secBg}");
-        background-repeat: repeat;
-        opacity: 1;
-        z-index: 0;
-      }
-      .check-content { position: relative; z-index: 1; }
-      .micr { font-family: 'MICR Encoding', 'Courier New', monospace; font-size: 13px; letter-spacing: 2px; }
-      .stub-wrap { position: relative; }
+      .check-body { position: relative; height: 330px; }
+      .check-content { position: relative; height: 100%; padding: 0 28px; }
+      .stub-wrap { position: relative; border-top: 1px dashed #ccc; }
     </style></head><body>
 
-      <!-- ═══════════════ CHECK BODY (top third) ═══════════════ -->
-      <div class="check-body" style="height:330px; border-bottom:1px solid #999;">
-        <div class="check-bg"></div>
-        <div class="check-content" style="padding:12px 28px 0 28px; height:100%;">
+      <!-- ═══════════════ CHECK BODY ═══════════════ -->
+      <div class="check-body">
+        <div class="check-content">
 
-          <!-- Header row: company left | bank+routing center | check# right -->
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
-            <div style="font-size:11px; line-height:1.55; min-width:170px;">
-              ${coName  ? `<div style="font-weight:700; font-size:13px;">${coName}</div>` : ''}
-              ${coAddr  ? `<div>${coAddr}</div>` : ''}
-              ${coCity  ? `<div>${coCity}</div>` : ''}
-              ${coPhone ? `<div>${coPhone}</div>` : ''}
-            </div>
-            <div style="text-align:center; flex:1; padding:0 10px; font-size:11px;">
-              ${bankName ? `<div style="font-weight:700; font-size:12px;">${bankName}</div>` : ''}
-              ${routingDisplay ? `<div style="font-size:10px; color:#555;">${routingDisplay}</div>` : ''}
-            </div>
-            <div style="text-align:right; min-width:70px;">
-              <div style="font-size:20px; font-weight:700; letter-spacing:1px;">${checkNum}</div>
-            </div>
+          <!-- Date value (positioned to align with preprinted DATE label) -->
+          <div style="position:absolute; top:58px; right:28px;">
+            <span style="font-size:12px; font-weight:600; min-width:100px; display:inline-block; text-align:center;">${dateStr}</span>
           </div>
 
-          <!-- Date row -->
-          <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:8px;">
-            <span style="font-size:10px; margin-right:5px; color:#555;">DATE</span>
-            <span style="font-size:12px; font-weight:600; border-bottom:1px solid #333; min-width:100px; text-align:center; padding-bottom:1px;">${dateStr}</span>
+          <!-- PAY TO payee name (positioned next to preprinted PAY TO THE ORDER OF) -->
+          <div style="position:absolute; top:88px; left:120px; right:120px;">
+            <span style="font-size:13px; font-weight:700;">${payeeName}</span>
           </div>
 
-          <!-- PAY TO THE ORDER OF -->
-          <div style="display:flex; align-items:center; margin-bottom:5px; gap:6px;">
-            <span style="font-size:9px; font-weight:700; white-space:nowrap; line-height:1.3;">PAY TO THE<br>ORDER OF</span>
-            <span style="font-size:13px; font-weight:700; flex:1; border-bottom:1px solid #333; padding:0 4px 2px 4px; min-height:20px;">${payeeName}</span>
-            <span style="font-size:11px; font-weight:700; border:1.5px solid #333; padding:2px 8px; white-space:nowrap; background:#fff;">$ **${amtStr}</span>
+          <!-- Numeric amount (positioned in the preprinted amount box) -->
+          <div style="position:absolute; top:84px; right:28px;">
+            <span style="font-size:12px; font-weight:700;">**${amtStr}</span>
           </div>
 
-          <!-- Written amount + DOLLARS -->
-          <div style="display:flex; align-items:stretch; margin-bottom:10px; gap:0;">
-            <span style="font-size:12px; font-weight:600; flex:1; border-bottom:1px solid #333; padding-bottom:2px; overflow:hidden; white-space:nowrap; letter-spacing:0.02em;">${dotFill}</span>
-            <span style="font-size:9px; font-weight:700; writing-mode:vertical-rl; text-orientation:mixed; transform:rotate(180deg); border:1px solid #aaa; padding:2px 1px; margin-left:4px; background:#fff; color:#333; letter-spacing:1px;">DOLLARS</span>
+          <!-- Written amount text (positioned on the preprinted amount line) -->
+          <div style="position:absolute; top:116px; left:28px; right:70px;">
+            <span style="font-size:12px; font-weight:600; letter-spacing:0.02em;">${dotFill}</span>
           </div>
 
-          <!-- Payee address window -->
-          <div style="font-size:11px; line-height:1.8; min-height:54px; padding-left:4px;">
+          <!-- Payee address (positioned in the address window area) -->
+          <div style="position:absolute; top:148px; left:32px; font-size:11px; line-height:1.6;">
             ${payeeName ? `<div style="font-weight:700;">${payeeName}</div>` : ''}
             ${payeeAddr ? payeeAddr.split('\n').map(l => `<div>${l}</div>`).join('') : ''}
           </div>
 
-          <!-- Memo + Authorized Signature -->
-          <div style="display:flex; justify-content:space-between; align-items:flex-end; position:absolute; bottom:26px; left:28px; right:28px;">
-            <div style="font-size:10px;">
-              <span style="font-weight:700;">MEMO </span>
-              <span style="border-bottom:1px solid #333; display:inline-block; min-width:150px; padding-bottom:1px;">${memoLine}</span>
-            </div>
-            <div style="font-size:9px; text-align:center; min-width:170px;">
-              <div style="border-top:1px solid #333; padding-top:2px; letter-spacing:0.5px;">AUTHORIZED SIGNATURE</div>
-            </div>
-          </div>
-
-          <!-- MICR line -->
-          <div class="micr" style="position:absolute; bottom:4px; left:28px; right:28px; text-align:center; color:#1a1a1a; font-size:13px;">
-            ${micrLine}
+          <!-- Memo text (positioned next to preprinted MEMO label) -->
+          <div style="position:absolute; bottom:26px; left:80px;">
+            <span style="font-size:10px;">${memoLine}</span>
           </div>
 
         </div>
@@ -350,6 +299,12 @@ const CheckPrinting = () => {
     try {
       setLoading(true);
       const totalAmt = splitLines.length > 1 ? splitTotal : Number(values.amount || 0);
+      // Validate split lines match check amount
+      if (splitLines.length > 1 && Math.abs(splitTotal - totalAmt) > 0.005) {
+        message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not match the check amount (${cSym}${totalAmt.toFixed(2)}). Please correct before saving.`);
+        setLoading(false);
+        return;
+      }
       const payload = {
         date: values.date.format('YYYY-MM-DD'),
         type: 'Check',
@@ -393,7 +348,6 @@ const CheckPrinting = () => {
       checkNumber: record.reference || '',
       memo: record.description || '',
       accountName: '',
-      routingNumber: '', accountNumber: '',
     };
     handlePrint(vals);
   };
@@ -497,7 +451,20 @@ const CheckPrinting = () => {
               {/* Row 2: Pay To (select) | Payee Name (text) */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
                 <Form.Item name="payee" label="Pay To" style={{ flex: 1 }}>
-                  <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear onChange={(val, opt) => { const name = opt?.children || ''; form.setFieldsValue({ payeeName: name }); setWatchPayeeName(name); }}>
+                  <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear onChange={(val, opt) => {
+                    const name = opt?.children || '';
+                    form.setFieldsValue({ payeeName: name });
+                    setWatchPayeeName(name);
+                    // Auto-fill vendor address
+                    if (val && val.startsWith('v-')) {
+                      const vendor = payees.find(p => p.id === val);
+                      if (vendor && vendor._raw) {
+                        const r = vendor._raw;
+                        const addrParts = [r.address1, r.address2, [r.city, r.state].filter(Boolean).join(', '), r.postal_code].filter(Boolean);
+                        form.setFieldsValue({ payeeAddress: addrParts.join('\n') });
+                      }
+                    }
+                  }}>
                     {payees.map(p => (
                       <Option key={p.id} value={p.id}>{p.name}</Option>
                     ))}
@@ -508,21 +475,18 @@ const CheckPrinting = () => {
                 </Form.Item>
               </div>
 
-              {/* Row 3: Amount | Words | Routing | Acct */}
+              {/* Row 3: Amount | Words */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
-                <Form.Item name="amount" label="Amount ($)" rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]} style={{ flex: '0 0 120px' }}>
+                <Form.Item name="amount" label="Amount ($)" rules={[{ required: true, message: 'Required' }, { type: 'number', min: 0.01, message: 'Must be > 0' }]} style={{ flex: '0 0 150px' }}>
                   <InputNumber min={0} step={0.01} style={{ width: '100%' }} formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} onChange={(v) => setAmount(v || 0)} />
                 </Form.Item>
                 <Form.Item label="In Words" style={{ flex: 1 }}>
                   <Input value={amountWords} readOnly style={{ fontStyle: 'italic', background: '#f9f9f9' }} />
                 </Form.Item>
-                <Form.Item name="routingNumber" label="Routing #" style={{ flex: '0 0 110px' }}>
-                  <Input placeholder="MICR routing" maxLength={9} />
-                </Form.Item>
-                <Form.Item name="accountNumber" label="Acct #" style={{ flex: '0 0 110px' }}>
-                  <Input placeholder="MICR acct" />
-                </Form.Item>
               </div>
+              {splitLines.length > 1 && Math.abs(splitTotal - (amount || 0)) > 0.005 && (
+                <Alert message={`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not match the check amount (${cSym}${(amount || 0).toFixed(2)}). The amount will auto-update from split totals.`} type="warning" showIcon style={{ marginBottom: 8 }} />
+              )}
 
               {/* Row 4: Payee Address | Memo */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
@@ -589,8 +553,6 @@ const CheckPrinting = () => {
                 memo: watchMemo || '',
                 accountName: selectedAccount?.accountName || selectedAccount?.name || '',
                 splitLines: splitLines.filter(l => l.amount > 0),
-                routingNumber: form.getFieldValue('routingNumber') || '',
-                accountNumber: form.getFieldValue('accountNumber') || '',
                 _company: company,
               }, false) }} />
             </div>

@@ -63,7 +63,7 @@ const Suppliers = {
 
   // Retrieve all Suppliers
   getAllSuppliers: () => {
-    const stmt = db.prepare('SELECT * FROM suppliers ORDER BY id DESC');
+    const stmt = db.prepare('SELECT * FROM suppliers ORDER BY COALESCE(display_name, first_name) COLLATE NOCASE ASC');
     return stmt.all();
   },
 
@@ -75,10 +75,10 @@ const Suppliers = {
     let data;
     if (searchParam) {
       total = db.prepare('SELECT COUNT(*) AS total FROM suppliers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?)').get(searchParam, searchParam, searchParam).total;
-      data = db.prepare('SELECT * FROM suppliers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?').all(searchParam, searchParam, searchParam, limit, offset);
+      data = db.prepare('SELECT * FROM suppliers WHERE (first_name || \' \' || COALESCE(last_name,\'\') LIKE ? OR company_name LIKE ? OR email LIKE ?) ORDER BY COALESCE(display_name, first_name) COLLATE NOCASE ASC LIMIT ? OFFSET ?').all(searchParam, searchParam, searchParam, limit, offset);
     } else {
       total = db.prepare('SELECT COUNT(*) AS total FROM suppliers').get().total;
-      data = db.prepare('SELECT * FROM suppliers ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
+      data = db.prepare('SELECT * FROM suppliers ORDER BY COALESCE(display_name, first_name) COLLATE NOCASE ASC LIMIT ? OFFSET ?').all(limit, offset);
     }
     return { data, total };
   },

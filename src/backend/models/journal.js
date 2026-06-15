@@ -3,6 +3,7 @@ const Settings = require('./settings');
 
 const Journal = {
   createTable() {
+    // Create base tables (may already exist with old or new schema)
     db.prepare(`CREATE TABLE IF NOT EXISTS journal_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT,
@@ -13,43 +14,69 @@ const Journal = {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       entry_id INTEGER,
       account TEXT,
-      debit REAL,
-      credit REAL,
+      debit REAL DEFAULT 0,
+      credit REAL DEFAULT 0,
       FOREIGN KEY(entry_id) REFERENCES journal_entries(id)
     )`).run();
-    // Indices
-    try {
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_journal_entry_date ON journal_entries(date)`).run();
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_journal_lines_entry ON journal_lines(entry_id)`).run();
-    } catch {}
 
-    // Safe migrations: add reversal_of, is_template, entity_id, class, location, department if missing
+    // ── Migrate journal_entries: add ALL columns needed by BOTH old and new engines ──
     try {
-      const cols = db.prepare("PRAGMA table_info('journal_entries')").all().map(c => c.name.toLowerCase());
-      if (!cols.includes('reversal_of')) {
-        db.prepare(`ALTER TABLE journal_entries ADD COLUMN reversal_of INTEGER`).run();
-      }
-      if (!cols.includes('is_template')) {
-        db.prepare(`ALTER TABLE journal_entries ADD COLUMN is_template INTEGER DEFAULT 0`).run();
-      }
-      if (!cols.includes('entity_id')) {
-        db.prepare(`ALTER TABLE journal_entries ADD COLUMN entity_id INTEGER`).run();
-      }
-      if (!cols.includes('class')) {
-        db.prepare(`ALTER TABLE journal_entries ADD COLUMN class TEXT`).run();
-      }
-      if (!cols.includes('location')) {
-        db.prepare(`ALTER TABLE journal_entries ADD COLUMN location TEXT`).run();
-      }
-      if (!cols.includes('department')) {
-        db.prepare(`ALTER TABLE journal_entries ADD COLUMN department TEXT`).run();
-      }
+      const jeCols = new Set(db.prepare("PRAGMA table_info('journal_entries')").all().map(c => c.name.toLowerCase()));
+      const addJE = (col, ddl) => { if (!jeCols.has(col.toLowerCase())) db.prepare(`ALTER TABLE journal_entries ADD COLUMN ${col} ${ddl}`).run(); };
+      // New engine columns (journalEntries.js)
+      addJE('reference',    'TEXT');
+      addJE('source_type',  'TEXT');
+      addJE('source_id',    'INTEGER');
+      addJE('memo',         'TEXT');
+      addJE('status',       "TEXT DEFAULT 'Posted'");
+      addJE('created_at',   "DATETIME DEFAULT CURRENT_TIMESTAMP");
+      addJE('created_by',   'TEXT');
+      // Old engine columns (journal.js)
+      addJE('entered_by',   'TEXT');
+      addJE('reversal_of',  'INTEGER');
+      addJE('is_template',  'INTEGER DEFAULT 0');
+      addJE('entity_id',    'INTEGER');
+      addJE('class',        'TEXT');
+      addJE('location',     'TEXT');
+      addJE('department',   'TEXT');
+    } catch (e) { console.error('[journal] journal_entries migration error:', e.message); }
+
+    // ── Migrate journal_lines: add ALL columns needed by BOTH engines ──
+    try {
+      const jlCols = new Set(db.prepare("PRAGMA table_info('journal_lines')").all().map(c => c.name.toLowerCase()));
+      const addJL = (col, ddl) => { if (!jlCols.has(col.toLowerCase())) db.prepare(`ALTER TABLE journal_lines ADD COLUMN ${col} ${ddl}`).run(); };
+      // New engine columns
+      addJL('journal_id',   'INTEGER REFERENCES journal_entries(id)');
+      addJL('account_id',   'INTEGER');
+      addJL('description',  'TEXT');
+      addJL('class',        'TEXT');
+      addJL('location',     'TEXT');
+      addJL('department',   'TEXT');
+      // Old engine columns (backward compat)
+      addJL('entry_id',     'INTEGER');
+      addJL('account',      'TEXT');
+    } catch (e) { console.error('[journal] journal_lines migration error:', e.message); }
+
+    // ── Back-fill journal_id ↔ entry_id so both engines can read each other's data ──
+    try { db.prepare("UPDATE journal_lines SET journal_id = entry_id WHERE journal_id IS NULL AND entry_id IS NOT NULL").run(); } catch {}
+    try { db.prepare("UPDATE journal_lines SET entry_id = journal_id WHERE entry_id IS NULL AND journal_id IS NOT NULL").run(); } catch {}
+
+    // ── Back-fill status for old entries that pre-date the status column ──
+    try { db.prepare("UPDATE journal_entries SET status = 'Posted' WHERE status IS NULL").run(); } catch {}
+
+    // Indices (all of them, for both engines)
+    try {
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_journal_entry_date ON journal_entries(date)').run();
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_journal_lines_entry ON journal_lines(entry_id)').run();
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_jl_journal_id ON journal_lines(journal_id)').run();
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_jl_account ON journal_lines(account_id)').run();
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_je_source ON journal_entries(source_type, source_id)').run();
     } catch {}
   },
   getAll() {
     const entries = db.prepare("SELECT * FROM journal_entries ORDER BY date DESC").all();
     for (const entry of entries) {
-      entry.lines = db.prepare("SELECT * FROM journal_lines WHERE entry_id=?").all(entry.id);
+      entry.lines = db.prepare("SELECT * FROM journal_lines WHERE journal_id=? OR entry_id=?").all(entry.id, entry.id);
     }
     return entries;
   },
@@ -78,11 +105,11 @@ const Journal = {
       throw new Error('Journal lines must not contain negative amounts');
     }
 
-    const entry = db.prepare("INSERT INTO journal_entries (date, description, entered_by, entity_id, class, location, department) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(date, description, entered_by, entity_id || null, classTag || null, location || null, department || null);
+    const entry = db.prepare("INSERT INTO journal_entries (date, description, entered_by, created_by, entity_id, class, location, department, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Posted', datetime('now'))")
+      .run(date, description, entered_by, entered_by, entity_id || null, classTag || null, location || null, department || null);
     const entry_id = entry.lastInsertRowid;
     for (const line of sanitizedLines) {
-      db.prepare("INSERT INTO journal_lines (entry_id, account, debit, credit) VALUES (?, ?, ?, ?)").run(entry_id, line.account, line.debit || 0, line.credit || 0);
+      db.prepare("INSERT INTO journal_lines (entry_id, journal_id, account, debit, credit) VALUES (?, ?, ?, ?, ?)").run(entry_id, entry_id, line.account, line.debit || 0, line.credit || 0);
     }
     return entry_id;
   },
@@ -92,7 +119,7 @@ const Journal = {
     if (!originalEntryId) throw new Error('originalEntryId is required');
     const entry = db.prepare("SELECT * FROM journal_entries WHERE id=?").get(originalEntryId);
     if (!entry) throw new Error(`Original entry ${originalEntryId} not found`);
-    const lines = db.prepare("SELECT * FROM journal_lines WHERE entry_id=?").all(originalEntryId);
+    const lines = db.prepare("SELECT * FROM journal_lines WHERE journal_id=? OR entry_id=?").all(originalEntryId, originalEntryId);
     const reversedLines = lines.map(l => ({
       account: l.account,
       // swap debit/credit
@@ -128,8 +155,8 @@ const Journal = {
       .run(newDate, template.description, newEnteredBy, originalEntryId, original ? original.entity_id : null);
     const newId = ins.lastInsertRowid;
     for (const line of template.lines) {
-      db.prepare("INSERT INTO journal_lines (entry_id, account, debit, credit) VALUES (?, ?, ?, ?)")
-        .run(newId, line.account, line.debit || 0, line.credit || 0);
+      db.prepare("INSERT INTO journal_lines (entry_id, journal_id, account, debit, credit) VALUES (?, ?, ?, ?, ?)")
+        .run(newId, newId, line.account, line.debit || 0, line.credit || 0);
     }
     return newId;
   },

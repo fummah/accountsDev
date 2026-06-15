@@ -2,39 +2,66 @@ const db = require('./dbmgr');
 
 const JournalEntries = {
   createTable: () => {
-    db.prepare(`
-      CREATE TABLE IF NOT EXISTS journal_entries (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        date        TEXT NOT NULL,
-        reference   TEXT,
-        description TEXT,
-        source_type TEXT,
-        source_id   INTEGER,
-        memo        TEXT,
-        status      TEXT DEFAULT 'Posted',
-        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-        created_by  TEXT
-      )
-    `).run();
+    // Tables may already be created by journal.js — just ensure all needed columns exist.
+    db.prepare(`CREATE TABLE IF NOT EXISTS journal_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT,
+      description TEXT,
+      entered_by TEXT
+    )`).run();
+    db.prepare(`CREATE TABLE IF NOT EXISTS journal_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_id INTEGER,
+      account TEXT,
+      debit REAL DEFAULT 0,
+      credit REAL DEFAULT 0,
+      FOREIGN KEY(entry_id) REFERENCES journal_entries(id)
+    )`).run();
 
-    db.prepare(`
-      CREATE TABLE IF NOT EXISTS journal_lines (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        journal_id  INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
-        account_id  INTEGER NOT NULL REFERENCES chart_of_accounts(id),
-        debit       REAL DEFAULT 0,
-        credit      REAL DEFAULT 0,
-        description TEXT,
-        class       TEXT,
-        location    TEXT,
-        department  TEXT
-      )
-    `).run();
+    // ── Migrate journal_entries: add ALL columns needed by both engines ──
+    try {
+      const jeCols = new Set(db.prepare("PRAGMA table_info('journal_entries')").all().map(c => c.name.toLowerCase()));
+      const addJE = (col, ddl) => { if (!jeCols.has(col.toLowerCase())) db.prepare(`ALTER TABLE journal_entries ADD COLUMN ${col} ${ddl}`).run(); };
+      addJE('reference',    'TEXT');
+      addJE('source_type',  'TEXT');
+      addJE('source_id',    'INTEGER');
+      addJE('memo',         'TEXT');
+      addJE('status',       "TEXT DEFAULT 'Posted'");
+      addJE('created_at',   "DATETIME DEFAULT CURRENT_TIMESTAMP");
+      addJE('created_by',   'TEXT');
+      addJE('entered_by',   'TEXT');
+      addJE('reversal_of',  'INTEGER');
+      addJE('is_template',  'INTEGER DEFAULT 0');
+      addJE('entity_id',    'INTEGER');
+      addJE('class',        'TEXT');
+      addJE('location',     'TEXT');
+      addJE('department',   'TEXT');
+    } catch (e) { console.error('[journalEntries] journal_entries migration:', e.message); }
+
+    // ── Migrate journal_lines: add ALL columns needed by both engines ──
+    try {
+      const jlCols = new Set(db.prepare("PRAGMA table_info('journal_lines')").all().map(c => c.name.toLowerCase()));
+      const addJL = (col, ddl) => { if (!jlCols.has(col.toLowerCase())) db.prepare(`ALTER TABLE journal_lines ADD COLUMN ${col} ${ddl}`).run(); };
+      addJL('journal_id',   'INTEGER REFERENCES journal_entries(id)');
+      addJL('account_id',   'INTEGER');
+      addJL('description',  'TEXT');
+      addJL('class',        'TEXT');
+      addJL('location',     'TEXT');
+      addJL('department',   'TEXT');
+      addJL('entry_id',     'INTEGER');
+      addJL('account',      'TEXT');
+    } catch (e) { console.error('[journalEntries] journal_lines migration:', e.message); }
+
+    // ── Back-fill journal_id ↔ entry_id ──
+    try { db.prepare("UPDATE journal_lines SET journal_id = entry_id WHERE journal_id IS NULL AND entry_id IS NOT NULL").run(); } catch {}
+    try { db.prepare("UPDATE journal_lines SET entry_id = journal_id WHERE entry_id IS NULL AND journal_id IS NOT NULL").run(); } catch {}
+    try { db.prepare("UPDATE journal_entries SET status = 'Posted' WHERE status IS NULL").run(); } catch {}
 
     // Indexes
-    try { db.prepare('CREATE INDEX IF NOT EXISTS idx_jl_account ON journal_lines(account_id)').run(); } catch {}
-    try { db.prepare('CREATE INDEX IF NOT EXISTS idx_je_source  ON journal_entries(source_type, source_id)').run(); } catch {}
-    try { db.prepare('CREATE INDEX IF NOT EXISTS idx_je_date    ON journal_entries(date)').run(); } catch {}
+    try { db.prepare('CREATE INDEX IF NOT EXISTS idx_jl_account    ON journal_lines(account_id)').run(); } catch {}
+    try { db.prepare('CREATE INDEX IF NOT EXISTS idx_je_source     ON journal_entries(source_type, source_id)').run(); } catch {}
+    try { db.prepare('CREATE INDEX IF NOT EXISTS idx_je_date       ON journal_entries(date)').run(); } catch {}
+    try { db.prepare('CREATE INDEX IF NOT EXISTS idx_jl_journal_id ON journal_lines(journal_id)').run(); } catch {}
   },
 
   // ── Post a balanced journal entry ────────────────────────────────────────
@@ -58,9 +85,9 @@ const JournalEntries = {
       const jid = je.lastInsertRowid;
       for (const line of lines) {
         db.prepare(`
-          INSERT INTO journal_lines (journal_id, account_id, debit, credit, description, class, location, department)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(jid, line.account_id, Number(line.debit || 0), Number(line.credit || 0),
+          INSERT INTO journal_lines (journal_id, entry_id, account_id, debit, credit, description, class, location, department)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(jid, jid, line.account_id, Number(line.debit || 0), Number(line.credit || 0),
                line.description || null, line.class || null, line.location || null, line.department || null);
       }
       return { success: true, id: jid };

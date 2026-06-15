@@ -8,7 +8,7 @@ import {
   PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, DownloadOutlined,
   AccountBookOutlined, DollarOutlined, BankOutlined, WalletOutlined, CreditCardOutlined,
   ArrowUpOutlined, ArrowDownOutlined, CopyOutlined, EyeOutlined,
-  ApartmentOutlined, UnorderedListOutlined, ReloadOutlined, PrinterOutlined,
+  ApartmentOutlined, ReloadOutlined, PrinterOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SwapOutlined, LockOutlined,
   SafetyOutlined, BookOutlined, UploadOutlined, ThunderboltOutlined
 } from '@ant-design/icons';
@@ -108,7 +108,7 @@ const ChartOfAccounts = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [activeTab, setActiveTab] = useState('all');
   const handleTabChange = (key) => { setActiveTab(key); setFilterType('all'); };
-  const [treeView, setTreeView] = useState(false);
+  const [treeView] = useState(true);
 
   /* Batch selection */
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
@@ -689,16 +689,6 @@ const ChartOfAccounts = () => {
               <Option value="Active">Active</Option>
               <Option value="Inactive">Inactive</Option>
             </Select>
-          </Col>
-          <Col xs={24} sm={5}>
-            <Space>
-              <Tooltip title="Flat list view">
-                <Button type={!treeView ? 'primary' : 'default'} icon={<UnorderedListOutlined />} onClick={() => setTreeView(false)} />
-              </Tooltip>
-              <Tooltip title="Hierarchy tree view">
-                <Button type={treeView ? 'primary' : 'default'} icon={<ApartmentOutlined />} onClick={() => setTreeView(true)} />
-              </Tooltip>
-            </Space>
           </Col>
           <Col xs={24} sm={4}>
             {selectedRowKeys.length > 0 && (

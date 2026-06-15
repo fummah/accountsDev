@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { useHistory } from "react-router-dom";
-import { Row, Col, Card, Spin, Button, Steps, Modal, Form, Input, Select, message, Table, Tag } from "antd";
+import { Row, Col, Card, Spin, Button, Modal, message, Table, Tag } from "antd";
 import {
   BankOutlined, DollarOutlined, CreditCardOutlined, WalletOutlined,
   FundOutlined, RiseOutlined, FallOutlined, PieChartOutlined,
   FileTextOutlined, CheckSquareOutlined, FormOutlined,
   ReconciliationOutlined, SwapOutlined,
   BarChartOutlined, AppstoreOutlined, CalendarOutlined,
-  ProfileOutlined, RocketOutlined, CheckCircleOutlined
+  ProfileOutlined
 } from "@ant-design/icons";
 import Auxiliary from "util/Auxiliary";
 import { useCurrency } from '../../../../utils/currency';
 
-const { Step } = Steps;
-const { Option } = Select;
 
 /* ──── helpers ──── */
 
@@ -110,9 +108,6 @@ const Flow = () => {
   const [accountNames, setAccountNames] = useState({});
   const [categoryAccounts, setCategoryAccounts] = useState({});
   const [drillDown, setDrillDown] = useState(null); // { key, label, color, icon }
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardStep, setOnboardStep] = useState(0);
-  const [onboardForm] = Form.useForm();
 
   const P = (p) => (process.env.PUBLIC_URL + p);
 
@@ -144,29 +139,8 @@ const Flow = () => {
       setAccountNames(names);
       setCategoryAccounts(catAccounts);
 
-      // Check if onboarding needed
-      const comp = await window.electronAPI?.getCompany?.();
-      const wizStatus = await window.electronAPI?.setupWizardStatus?.();
-      if ((!comp?.name) || (wizStatus && !wizStatus.completed)) {
-        setShowOnboarding(true);
-      }
     } catch (e) { console.error(e); }
     setLoading(false);
-  };
-
-  const handleOnboardFinish = async () => {
-    try {
-      const vals = onboardForm.getFieldsValue(true);
-      if (vals.companyName) {
-        await window.electronAPI?.saveCompany?.({ name: vals.companyName, industry: vals.industry });
-      }
-      if (vals.baseCurrency) {
-        await window.electronAPI?.currencySetBase?.(vals.baseCurrency);
-      }
-      setShowOnboarding(false);
-      message.success('Setup complete! Welcome aboard.');
-      loadData();
-    } catch (e) { message.error(e.message); }
   };
 
   /* ──── Layout constants ──── */
@@ -550,91 +524,6 @@ const Flow = () => {
         );
       })()}
 
-      {/* ──── Guided Onboarding Modal ──── */}
-      <Modal
-        title={<span><RocketOutlined style={{ color: '#1890ff', marginRight: 8 }} />Welcome — Let's Get You Started</span>}
-        visible={showOnboarding}
-        closable={true}
-        maskClosable={false}
-        width={560}
-        footer={null}
-        onCancel={() => setShowOnboarding(false)}
-      >
-        <Steps current={onboardStep} size="small" style={{ marginBottom: 24 }}>
-          <Step title="Company" />
-          <Step title="Settings" />
-          <Step title="Done" />
-        </Steps>
-
-        {onboardStep === 0 && (
-          <Form form={onboardForm} layout="vertical">
-            <Form.Item name="companyName" label="Company Name" rules={[{ required: true, message: 'Required' }]}>
-              <Input placeholder="e.g. My Business Pty Ltd" size="large" />
-            </Form.Item>
-            <Form.Item name="industry" label="Industry">
-              <Select placeholder="Select your industry">
-                <Option value="general">General / Other</Option>
-                <Option value="retail">Retail</Option>
-                <Option value="professional-services">Professional Services</Option>
-                <Option value="construction">Construction</Option>
-                <Option value="manufacturing">Manufacturing</Option>
-                <Option value="non-profit">Non-Profit</Option>
-                <Option value="hospitality">Hospitality</Option>
-                <Option value="healthcare">Healthcare</Option>
-                <Option value="technology">Technology / SaaS</Option>
-              </Select>
-            </Form.Item>
-            <div style={{ textAlign: "right" }}>
-              <Button type="primary" onClick={() => setOnboardStep(1)}>Next</Button>
-            </div>
-          </Form>
-        )}
-
-        {onboardStep === 1 && (
-          <Form form={onboardForm} layout="vertical">
-            <Form.Item name="baseCurrency" label="Base Currency" initialValue="USD">
-              <Select showSearch>
-                <Option value="USD">USD — US Dollar</Option>
-                <Option value="EUR">EUR — Euro</Option>
-                <Option value="GBP">GBP — British Pound</Option>
-                <Option value="ZAR">ZAR — South African Rand</Option>
-                <Option value="CAD">CAD — Canadian Dollar</Option>
-                <Option value="AUD">AUD — Australian Dollar</Option>
-                <Option value="INR">INR — Indian Rupee</Option>
-              </Select>
-            </Form.Item>
-            <Form.Item name="fiscalYear" label="Fiscal Year Start" initialValue="January">
-              <Select>
-                {['January','February','March','April','May','June','July','August','September','October','November','December'].map(m =>
-                  <Option key={m} value={m}>{m}</Option>
-                )}
-              </Select>
-            </Form.Item>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <Button onClick={() => setOnboardStep(0)}>Back</Button>
-              <Button type="primary" onClick={() => setOnboardStep(2)}>Next</Button>
-            </div>
-          </Form>
-        )}
-
-        {onboardStep === 2 && (
-          <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <CheckCircleOutlined style={{ fontSize: 48, color: "#52c41a", marginBottom: 16 }} />
-            <h3>You're All Set!</h3>
-            <p style={{ color: "#666", marginBottom: 24 }}>
-              Your company is ready. You can always adjust settings later from the Settings menu.
-            </p>
-            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 20 }}>
-              <Button onClick={() => history.push("/main/accountant/chart-of-accounts")}>Set Up Accounts</Button>
-              <Button onClick={() => history.push("/inner/sales?tab=2")}>Create First Invoice</Button>
-              <Button onClick={() => history.push("/main/customers/center")}>Add Customers</Button>
-            </div>
-            <Button type="primary" size="large" onClick={handleOnboardFinish}>
-              Go to Dashboard
-            </Button>
-          </div>
-        )}
-      </Modal>
     </Auxiliary>
   );
 };
