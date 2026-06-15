@@ -286,7 +286,7 @@ const CRM = {
     const placeholders = ids.map(() => '?').join(',');
     return db.prepare(`
       SELECT q.id, q.number, q.status, q.start_date, q.last_date, q.customer_email,
-             COALESCE(SUM(ql.amount * ql.quantity), 0) AS amount, q.vat,
+             COALESCE(SUM(ql.amount), 0) AS amount, q.vat,
              c.first_name||' '||c.last_name AS customer_name
       FROM quotes q
       LEFT JOIN quote_lines ql ON ql.quote_id = q.id
@@ -367,7 +367,7 @@ const CRM = {
 
       // Log activity
       db.prepare(`INSERT INTO crm_activities (leadId,type,subject,details,status,createdAt) VALUES (?,?,?,?,?,datetime('now'))`)
-        .run(leadId, 'note', `Quote ${formattedNumber} created`, `Quote created for customer #${customerId} — Amount: R${lines.reduce((s,l)=>s+(l.amount*l.quantity),0).toFixed(2)}`, 'done');
+        .run(leadId, 'note', `Quote ${formattedNumber} created`, `Quote created for customer #${customerId} — Amount: R${lines.reduce((s,l)=>s+(l.amount||0),0).toFixed(2)}`, 'done');
 
       return { success: true, quoteId: Number(quoteId), quoteNumber: formattedNumber, customerId };
     });

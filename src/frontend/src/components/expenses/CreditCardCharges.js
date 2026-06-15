@@ -15,12 +15,24 @@ const CreditCardCharges = () => {
   const [accounts, setAccounts] = useState([]);
   const [creditCardAccounts, setCreditCardAccounts] = useState([]);
   const [splitLines, setSplitLines] = useState([{ key: 1, category: '', description: '', amount: 0 }]);
+  const [addCardModal, setAddCardModal] = useState(false);
+  const [newCardName, setNewCardName] = useState('');
 
   const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
 
   const addSplitLine = () => setSplitLines(prev => [...prev, { key: Date.now(), category: '', description: '', amount: 0 }]);
   const removeSplitLine = (key) => setSplitLines(prev => prev.length > 1 ? prev.filter(l => l.key !== key) : prev);
   const updateSplitLine = (key, field, value) => setSplitLines(prev => prev.map(l => l.key === key ? { ...l, [field]: value } : l));
+
+  const handleAddCardAccount = async () => {
+    if (!newCardName.trim()) return message.warning('Account name required');
+    try {
+      await window.electronAPI.insertChartAccount({ name: newCardName.trim(), type: 'Credit Card', status: 'Active', normalBalance: 'Credit', openingBalance: 0 });
+      setNewCardName(''); setAddCardModal(false);
+      message.success('Credit card account added');
+      await loadData();
+    } catch { message.error('Failed to add account'); }
+  };
 
   const columns = [
     { title: 'Date', dataIndex: 'date', key: 'date', width: 110, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
@@ -135,7 +147,8 @@ const CreditCardCharges = () => {
             </Col>
             <Col span={12}>
               <Form.Item name="creditCardAccount" label="Credit Card Account" rules={[{ required: true, message: 'Select card account' }]}>
-                <Select placeholder="Select credit card account" showSearch optionFilterProp="children">
+                <Select placeholder="Select credit card account" showSearch optionFilterProp="children"
+                  dropdownRender={menu => (<>{menu}<Divider style={{margin:'4px 0'}}/><div style={{padding:'4px 8px'}}><Button type="link" size="small" icon={<PlusOutlined/>} onClick={()=>setAddCardModal(true)}>Add New</Button></div></>)}>
                   {creditCardAccounts.map(a => (
                     <Option key={a.id} value={a.accountName || a.name}>{a.accountName || a.name}</Option>
                   ))}
@@ -180,6 +193,12 @@ const CreditCardCharges = () => {
             <Input placeholder="Optional overall memo" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* Add New Credit Card Account Modal */}
+      <Modal title="Add Credit Card Account" visible={addCardModal} onOk={handleAddCardAccount}
+        onCancel={() => { setAddCardModal(false); setNewCardName(''); }} okText="Add" destroyOnClose>
+        <Input placeholder="Credit card account name (e.g. Chase Visa)" value={newCardName} onChange={e => setNewCardName(e.target.value)} onPressEnter={handleAddCardAccount} />
       </Modal>
     </div>
   );

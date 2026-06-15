@@ -65,7 +65,7 @@ async function register() {
 			const isMonth = q.includes('month');
 			const dateFilter = isMonth ? "date('now','start of month')" : "date('now','start of year')";
 			const row = safeGet(`
-				SELECT COALESCE(SUM(l.amount * l.quantity * (1 + IFNULL(i.vat,0)/100)),0) as total
+				SELECT COALESCE(SUM(l.amount * (1 + IFNULL(i.vat,0)/100)),0) as total
 				FROM invoices i INNER JOIN invoice_lines l ON l.invoice_id = i.id
 				WHERE i.start_date >= ${dateFilter}
 			`);
@@ -90,7 +90,7 @@ async function register() {
 		if (matchIntent(q, ['best month', 'highest revenue month', 'top month', 'best performing'])) {
 			const rows = safeQuery(`
 				SELECT strftime('%Y-%m', i.start_date) AS ym,
-					SUM(l.amount * l.quantity * (1 + IFNULL(i.vat,0)/100)) as revenue
+					SUM(l.amount * (1 + IFNULL(i.vat,0)/100)) as revenue
 				FROM invoices i INNER JOIN invoice_lines l ON l.invoice_id = i.id
 				GROUP BY ym ORDER BY revenue DESC LIMIT 5
 			`);
@@ -103,7 +103,7 @@ async function register() {
 		// 6. Top customers
 		if (matchIntent(q, ['top customer', 'biggest customer', 'best customer', 'highest paying'])) {
 			const rows = safeQuery(`
-				SELECT i.customer as name, SUM(l.amount * l.quantity) as total
+				SELECT i.customer as name, SUM(l.amount) as total
 				FROM invoices i INNER JOIN invoice_lines l ON l.invoice_id = i.id
 				GROUP BY i.customer ORDER BY total DESC LIMIT 10
 			`);
@@ -146,7 +146,7 @@ async function register() {
 
 		// 11. Profit margin
 		if (matchIntent(q, ['profit margin', 'margin'])) {
-			const rev = safeGet(`SELECT COALESCE(SUM(l.amount * l.quantity * (1 + IFNULL(i.vat,0)/100)),0) as total FROM invoices i INNER JOIN invoice_lines l ON l.invoice_id = i.id WHERE i.start_date >= date('now','start of year')`);
+			const rev = safeGet(`SELECT COALESCE(SUM(l.amount * (1 + IFNULL(i.vat,0)/100)),0) as total FROM invoices i INNER JOIN invoice_lines l ON l.invoice_id = i.id WHERE i.start_date >= date('now','start of year')`);
 			const exp = safeGet(`SELECT COALESCE(SUM(el.amount),0) as total FROM expense_lines el INNER JOIN expenses e ON e.id=el.expense_id WHERE e.payment_date >= date('now','start of year')`);
 			const revenue = Number(rev?.total || 0);
 			const expenses = Number(exp?.total || 0);

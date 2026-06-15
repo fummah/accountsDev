@@ -1092,7 +1092,9 @@ const ChartOfAccounts = () => {
       <Drawer
         title={drawerAccount ? `${drawerAccount.accountCode || ''} ${drawerAccount.accountName}` : 'Account Details'}
         visible={drawerVisible}
-        onClose={() => { setDrawerVisible(false); setDrawerAccount(null); setDrawerTxns([]); }}
+        onClose={() => setDrawerVisible(false)}
+        afterVisibleChange={(vis) => { if (!vis) { setDrawerAccount(null); setDrawerTxns([]); } }}
+        destroyOnClose
         width={560}
         footer={drawerAccount && (
           <Space>

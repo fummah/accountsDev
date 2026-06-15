@@ -205,14 +205,14 @@ const InvoiceTable = ({item, setLines,products, onSubtotalChange, initialLines=[
     };
   });
 
-  const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
+  const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(number); 
 };
 
   useEffect(() => {
-    const subtotal = dataSource.reduce((total, item) => total + (item.amount || 0) * (item.quantity || 0), 0);
+    const subtotal = dataSource.reduce((total, item) => total + (item.amount || 0), 0);
     console.log(vatRate);
     const calculatedVat = subtotal * (vatRate / 100);
     const calculatedTotal = formattedNumber(subtotal + calculatedVat);

@@ -14,7 +14,7 @@ import {CategoryContext} from "appContext/TypeContext.js";
 const PAGE_SIZE = 25;
 
 
-const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
+const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 }).format(number); 

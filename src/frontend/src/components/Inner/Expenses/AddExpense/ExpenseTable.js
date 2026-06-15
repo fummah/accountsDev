@@ -58,7 +58,7 @@ const ExpenseTable = ({expense, setLines,cats,onSubtotalChange, initialLines=[]}
     setLines(populatedLines);    
   }, [dataSource, setLines]);
 
-  const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
+  const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(number); 

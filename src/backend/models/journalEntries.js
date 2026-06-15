@@ -73,6 +73,18 @@ const JournalEntries = {
     if (Math.abs(totalDebit - totalCredit) > 0.005) {
       throw new Error(`Entry out of balance: debit ${totalDebit.toFixed(2)} ≠ credit ${totalCredit.toFixed(2)}`);
     }
+    // Safety: ensure required columns exist (in case migration was skipped)
+    try {
+      const cols = new Set(db.prepare("PRAGMA table_info('journal_entries')").all().map(c => c.name.toLowerCase()));
+      if (!cols.has('created_by')) db.prepare("ALTER TABLE journal_entries ADD COLUMN created_by TEXT").run();
+      if (!cols.has('created_at')) db.prepare("ALTER TABLE journal_entries ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP").run();
+      if (!cols.has('reference')) db.prepare("ALTER TABLE journal_entries ADD COLUMN reference TEXT").run();
+      if (!cols.has('source_type')) db.prepare("ALTER TABLE journal_entries ADD COLUMN source_type TEXT").run();
+      if (!cols.has('source_id')) db.prepare("ALTER TABLE journal_entries ADD COLUMN source_id INTEGER").run();
+      if (!cols.has('memo')) db.prepare("ALTER TABLE journal_entries ADD COLUMN memo TEXT").run();
+      if (!cols.has('status')) db.prepare("ALTER TABLE journal_entries ADD COLUMN status TEXT DEFAULT 'Posted'").run();
+    } catch (migErr) { console.error('[journalEntries.post] column check:', migErr.message); }
+
     const postEntry = db.transaction(() => {
       const je = db.prepare(`
         INSERT INTO journal_entries (date, reference, description, source_type, source_id, memo, status, created_by, created_at)
@@ -90,7 +102,7 @@ const JournalEntries = {
         `).run(jid, jid, line.account_id, Number(line.debit || 0), Number(line.credit || 0),
                line.description || null, line.class || null, line.location || null, line.department || null);
       }
-      return { success: true, id: jid };
+      return { success: true, id: Number(jid) };
     });
     return postEntry();
   },
@@ -200,7 +212,7 @@ const JournalEntries = {
     const creditLines = [];
     let totalCredit = 0;
     for (const line of invoiceLines) {
-      const lineAmt = (Number(line.amount) || 0) * (Number(line.quantity) || 1) * (1 + vat / 100);
+      const lineAmt = (Number(line.amount) || 0) * (1 + vat / 100);
       if (lineAmt <= 0) continue;
 
       let incomeAcctId = null;

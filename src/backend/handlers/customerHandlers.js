@@ -67,7 +67,7 @@ function registerCustomerHandlers() {
                        COALESCE(lt.lineTotal, 0) * (1 + COALESCE(i.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0) AS balance
                 FROM invoices i
                 JOIN customers c ON i.customer = c.id
-                LEFT JOIN (SELECT invoice_id, SUM(amount * quantity) AS lineTotal FROM invoice_lines GROUP BY invoice_id) lt ON lt.invoice_id = i.id
+                LEFT JOIN (SELECT invoice_id, SUM(amount) AS lineTotal FROM invoice_lines GROUP BY invoice_id) lt ON lt.invoice_id = i.id
                 LEFT JOIN (SELECT invoiceId, SUM(amount) AS totalPaid FROM payments GROUP BY invoiceId) pt ON pt.invoiceId = i.id
                 WHERE LOWER(IFNULL(i.status, '')) NOT IN ('paid', 'cancelled', 'void')`;
 
@@ -95,7 +95,7 @@ function registerCustomerHandlers() {
 
             // Compute total from invoice_lines (with VAT)
             const lineTotal = await db.get(
-                `SELECT COALESCE(SUM(l.amount * l.quantity), 0) AS total, COALESCE(i.vat, 0) AS vat
+                `SELECT COALESCE(SUM(l.amount), 0) AS total, COALESCE(i.vat, 0) AS vat
                  FROM invoice_lines l
                  JOIN invoices i ON i.id = l.invoice_id
                  WHERE l.invoice_id = ?`,

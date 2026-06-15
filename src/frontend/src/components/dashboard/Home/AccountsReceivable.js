@@ -7,7 +7,7 @@ import {PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer} from "rechart
 const COLORS = ['#0088FE', '#00C49F','yellow','purple','red','green','grey'];
 
 
-const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
+const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 }).format(number); 

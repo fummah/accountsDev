@@ -42,7 +42,7 @@ const Invoices = {
         try {
           const invoicesRows = db.prepare('SELECT id FROM invoices').all();
           for (const row of invoicesRows) {
-            const sumLines = db.prepare('SELECT COALESCE(SUM(amount * quantity),0) as total FROM invoice_lines WHERE invoice_id = ?').get(row.id).total;
+            const sumLines = db.prepare('SELECT COALESCE(SUM(amount),0) as total FROM invoice_lines WHERE invoice_id = ?').get(row.id).total;
             const sumPayments = db.prepare('SELECT COALESCE(SUM(amount),0) as total FROM payments WHERE invoiceId = ?').get(row.id).total;
             const bal = (sumLines || 0) - (sumPayments || 0);
             db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(bal, row.id);
@@ -124,7 +124,7 @@ const Invoices = {
         db.prepare('UPDATE invoices SET number = ? WHERE id = ?').run(formattedNumber, invoiceId);
       }
       // Compute and set balance (line totals + VAT)
-      const lineSum = linesArr.reduce((s, l) => s + (Number(l.amount) || 0) * (Number(l.quantity) || 1), 0);
+      const lineSum = linesArr.reduce((s, l) => s + (Number(l.amount) || 0), 0);
       const balance = lineSum * (1 + (Number(vat) || 0) / 100);
       db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(balance, invoiceId);
 
@@ -145,7 +145,7 @@ const Invoices = {
 
   // Retrieve all Invoices
   getAllInvoices: function () {
-    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount * invoice_lines.quantity), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id GROUP BY invoices.id ORDER BY invoices.id DESC");
+    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id GROUP BY invoices.id ORDER BY invoices.id DESC");
     const report = this.getInvoiceReport();
     return {all:stmt.all(), report:report};
   },
@@ -153,7 +153,7 @@ const Invoices = {
   getPaginated: function (page = 1, pageSize = 25, search = '', status = '') {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
-    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount * invoice_lines.quantity), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id`;
+    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id`;
     const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
     const statusParam = status && status.trim() ? status.trim() : null;
     const whereParts = [];
@@ -182,8 +182,8 @@ const Invoices = {
     return { data, total };
   },
   getInvoiceSummary: () => {
-    const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') ");
-    const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date < ?");
+    const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') ");
+    const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date < ?");
     const stmt_open_expense = db.prepare("SELECT COUNT(DISTINCT e.id) AS open_expense,SUM(l.amount) AS open_total_amount_expense FROM expense_lines AS l INNER JOIN expenses AS e ON l.expense_id = e.id WHERE e.approval_status = 'Pending' ");
     const stmt_due_expense = db.prepare("SELECT COUNT(DISTINCT e.id) AS due_expense,SUM(l.amount) AS due_total_amount_expense FROM expense_lines AS l INNER JOIN expenses AS e ON l.expense_id = e.id WHERE e.approval_status = 'Pending' AND e.payment_date < ?");
  
@@ -199,14 +199,14 @@ const Invoices = {
   return {open_invoice,due_invoice,open_expense,due_expense};
   },
   getInvoiceReport: function (){
-    const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') ");
-    const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date < ?");
-    const stmt_paid = db.prepare("SELECT COUNT(DISTINCT i.id) AS paid_invoice,SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)) AS paid_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Paid' ");
+    const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') ");
+    const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date < ?");
+    const stmt_paid = db.prepare("SELECT COUNT(DISTINCT i.id) AS paid_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS paid_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Paid' ");
 
     // Recently paid invoices (last 30 days) — based on payment date
     const stmt_recently_paid = db.prepare(`
       SELECT COUNT(DISTINCT i.id) AS recently_paid_count,
-             COALESCE(SUM(l.amount * l.quantity + ((l.amount * l.quantity)*i.vat/100)), 0) AS recently_paid_amount
+             COALESCE(SUM(l.amount + (l.amount*i.vat/100)), 0) AS recently_paid_amount
       FROM invoice_lines AS l
       INNER JOIN invoices AS i ON l.invoice_id = i.id
       WHERE i.status = 'Paid' AND i.start_date >= date('now', '-30 days')
@@ -252,7 +252,7 @@ const Invoices = {
     // Not due invoices (pending but not overdue)
     const stmt_not_due = db.prepare(`
       SELECT COUNT(DISTINCT i.id) AS due_invoice,
-             SUM(l.amount * l.quantity * (1 + i.vat/100)) AS not_due_total_amount 
+             SUM(l.amount * (1 + i.vat/100)) AS not_due_total_amount 
       FROM invoice_lines AS l 
       INNER JOIN invoices AS i ON l.invoice_id = i.id 
       WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date > ?`);
@@ -276,7 +276,7 @@ const Invoices = {
     // Due quotes
     const stmt_quote = db.prepare(`
       SELECT COUNT(DISTINCT i.id) AS due_quote,
-             SUM(l.amount * l.quantity * (1 + i.vat/100)) AS due_total_amount 
+             SUM(l.amount * (1 + i.vat/100)) AS due_total_amount 
       FROM quote_lines AS l 
       INNER JOIN quotes AS i ON l.quote_id = i.id 
       WHERE i.status = 'Pending' AND i.last_date < ?`);
@@ -286,12 +286,12 @@ const Invoices = {
       SELECT 
         strftime('%Y-%m', i.start_date) AS name,
         COUNT(DISTINCT i.id) AS number,
-        SUM(l.amount * l.quantity * (1 + i.vat/100)) as revenue_total_amount,
-        SUM(CASE WHEN i.status = 'Paid' THEN l.amount * l.quantity * (1 + i.vat/100) ELSE 0 END) as paid_amount,
-        SUM(CASE WHEN i.status IN ('Pending','Partially Paid','Sent','Unpaid') THEN l.amount * l.quantity * (1 + i.vat/100) ELSE 0 END) as pending_amount,
+        SUM(l.amount * (1 + i.vat/100)) as revenue_total_amount,
+        SUM(CASE WHEN i.status = 'Paid' THEN l.amount * (1 + i.vat/100) ELSE 0 END) as paid_amount,
+        SUM(CASE WHEN i.status IN ('Pending','Partially Paid','Sent','Unpaid') THEN l.amount * (1 + i.vat/100) ELSE 0 END) as pending_amount,
         COUNT(DISTINCT CASE WHEN i.status = 'Paid' THEN i.id END) as paid_count,
         COUNT(DISTINCT CASE WHEN i.status IN ('Pending','Partially Paid','Sent','Unpaid') THEN i.id END) as pending_count,
-        AVG(l.amount * l.quantity * (1 + i.vat/100)) as avg_invoice_value
+        AVG(l.amount * (1 + i.vat/100)) as avg_invoice_value
       FROM invoices i
       INNER JOIN invoice_lines l ON l.invoice_id = i.id
       WHERE i.start_date >= date('now', '-12 months') 
@@ -303,7 +303,7 @@ const Invoices = {
       WITH monthly_stats AS (
         SELECT 
           strftime('%Y-%m', i.start_date) as month,
-          SUM(l.amount * l.quantity * (1 + i.vat/100)) as revenue,
+          SUM(l.amount * (1 + i.vat/100)) as revenue,
           COUNT(DISTINCT i.id) as invoice_count,
           COUNT(DISTINCT i.customer) as unique_customers
         FROM invoices i
@@ -331,7 +331,7 @@ const Invoices = {
         SUM(CASE WHEN status = 'Paid' THEN 1 ELSE 0 END) as paying_customers,
         ROUND(AVG(CASE 
           WHEN status = 'Paid' 
-          THEN (SELECT SUM(amount * quantity * (1 + vat/100)) 
+          THEN (SELECT SUM(amount * (1 + vat/100)) 
                 FROM invoice_lines 
                 WHERE invoice_id = invoices.id)
         END), 2) as avg_customer_value
@@ -841,7 +841,7 @@ const Invoices = {
           COALESCE(i.vat, 0) AS vatRate
         FROM invoices i
         LEFT JOIN customers c ON c.id = i.customer
-        LEFT JOIN (SELECT invoice_id, SUM(amount * quantity) AS totalAmount FROM invoice_lines GROUP BY invoice_id) lt ON lt.invoice_id = i.id
+        LEFT JOIN (SELECT invoice_id, SUM(amount) AS totalAmount FROM invoice_lines GROUP BY invoice_id) lt ON lt.invoice_id = i.id
         LEFT JOIN (SELECT invoiceId, SUM(amount) AS totalPaid FROM payments GROUP BY invoiceId) pt ON pt.invoiceId = i.id
         WHERE i.status IS NULL OR i.status NOT IN ('Paid')
       `).all();

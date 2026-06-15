@@ -229,6 +229,58 @@ safeHandle('budget-periods', async () => {
     catch (e) { return { error: e.message }; }
   });
 
+  // Blockchain anchoring (stub — stores timestamp on the journal entry)
+  safeHandle('journal-anchor', async (_e, entryId) => {
+    try {
+      const entry = db.prepare('SELECT id, status FROM journal_entries WHERE id = ?').get(entryId);
+      if (!entry) return { error: 'Entry not found' };
+      if (entry.status === 'Void') return { error: 'Cannot anchor a voided entry' };
+      // Mark as anchored by storing a timestamp in memo or a dedicated flag
+      db.prepare("UPDATE journal_entries SET memo = COALESCE(memo,'') || ' [Anchored: ' || datetime('now') || ']' WHERE id = ?").run(entryId);
+      return { success: true, anchoredAt: new Date().toISOString() };
+    } catch (e) { return { error: e.message }; }
+  });
+
+  // Retroactively post journal entries for all unposted invoices & expenses
+  safeHandle('journal-repost-all', async () => {
+    try {
+      let posted = 0, skipped = 0, errors = 0;
+      // Post all non-Draft invoices that don't have journal entries yet
+      const invoices = db.prepare("SELECT * FROM invoices WHERE status IS NULL OR status NOT IN ('Draft')").all();
+      for (const inv of invoices) {
+        try {
+          const res = JournalEntries.postInvoice(inv);
+          if (res?.success) posted++;
+          else if (res?.skipped) skipped++;
+          else errors++;
+        } catch { errors++; }
+      }
+      // Post all approved expenses
+      let expenses = [];
+      try { expenses = db.prepare("SELECT * FROM expenses WHERE approval_status IN ('Approved','Unpaid','Pending') OR approval_status IS NULL").all(); } catch {}
+      for (const exp of expenses) {
+        try {
+          const res = JournalEntries.postExpense(exp);
+          if (res?.success) posted++;
+          else if (res?.skipped) skipped++;
+          else errors++;
+        } catch { errors++; }
+      }
+      // Post all payments
+      let payments = [];
+      try { payments = db.prepare("SELECT * FROM payments").all(); } catch {}
+      for (const pmt of payments) {
+        try {
+          const res = JournalEntries.postPayment(pmt);
+          if (res?.success) posted++;
+          else if (res?.skipped) skipped++;
+          else errors++;
+        } catch { errors++; }
+      }
+      return { success: true, posted, skipped, errors };
+    } catch (e) { return { error: e.message }; }
+  });
+
   // Cashflow Projections handlers
   safeHandle('get-cashflow-projections', async (_, year) => {
     try {

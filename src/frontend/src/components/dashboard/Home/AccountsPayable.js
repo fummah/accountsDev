@@ -8,7 +8,7 @@ import { useRedirectToItem } from 'util/navigation';
 
 // Colors for each section of the pie chart
 const COLORS = ['#0088FE', '#00C49F','yellow','purple','red','green','grey'];
-const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
+const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 }).format(number); 

@@ -8,7 +8,7 @@ const { RangePicker } = DatePicker;
 
 
   const formattedNumber = (number) => { 
-    const num = new Intl.NumberFormat('fr-FR', {
+    const num = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(number); 

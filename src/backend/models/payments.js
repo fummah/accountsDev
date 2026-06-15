@@ -69,7 +69,7 @@ const Payments = {
       SELECT p.*,
              i.number  AS invoiceNumber,
              i.status  AS invoiceStatus,
-             (SELECT COALESCE(SUM(il.amount * il.quantity * (1 + i2.vat/100)),0)
+             (SELECT COALESCE(SUM(il.amount * (1 + i2.vat/100)),0)
               FROM invoice_lines il JOIN invoices i2 ON il.invoice_id = i2.id WHERE i2.id = p.invoiceId)
                AS invoiceTotal,
              c.display_name AS customerName
@@ -84,7 +84,7 @@ const Payments = {
   getCustomerBalance: (customerId) => {
     // Total invoiced
     const invoiced = db.prepare(`
-      SELECT COALESCE(SUM(il.amount * il.quantity * (1 + i.vat/100)), 0) AS total
+      SELECT COALESCE(SUM(il.amount * (1 + i.vat/100)), 0) AS total
       FROM invoice_lines il
       JOIN invoices i ON il.invoice_id = i.id
       WHERE i.customer = ? AND i.status != 'Void'

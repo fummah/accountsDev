@@ -7,7 +7,7 @@ import Money from "assets/img/money.png";
 import MoneyOut from "assets/img/money-out.png";
 import Toast from "components/AppNotification/toast.js";
 
-const formattedNumber = (number) => { return new Intl.NumberFormat('fr-FR', {
+const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 }).format(number); 

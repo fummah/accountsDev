@@ -76,7 +76,7 @@ const Vat = {
   },
   getVatReport: function (start_date, last_date) {
     try {
-    const stmt_revenue = db.prepare("SELECT i.vat, SUM(l.amount * l.quantity) AS pure_amount, SUM((l.amount * l.quantity) * i.vat / 100) AS total_vat_sum, SUM(l.amount * l.quantity + ((l.amount * l.quantity) * i.vat / 100)) AS revenue_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Paid', 'Partially Paid') AND i.start_date BETWEEN ? AND ? GROUP BY i.vat");
+    const stmt_revenue = db.prepare("SELECT i.vat, SUM(l.amount) AS pure_amount, SUM(l.amount * i.vat / 100) AS total_vat_sum, SUM(l.amount + (l.amount * i.vat / 100)) AS revenue_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Paid', 'Partially Paid') AND i.start_date BETWEEN ? AND ? GROUP BY i.vat");
     
     return stmt_revenue.all(start_date, last_date);
 

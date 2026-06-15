@@ -73,7 +73,7 @@ function registerAnalyticsHandlers() {
       const rows = db.prepare(`
         SELECT 
           strftime('%Y-%m', i.start_date) AS ym,
-          SUM(l.amount * l.quantity * (1 + IFNULL(i.vat,0)/100)) as revenue
+          SUM(l.amount * (1 + IFNULL(i.vat,0)/100)) as revenue
         FROM invoices i
         INNER JOIN invoice_lines l ON l.invoice_id = i.id
         WHERE i.start_date >= date('now', '-12 months') 
@@ -196,7 +196,7 @@ function registerAnalyticsHandlers() {
     try {
       // Base on last 6 months averages
       const revRows = db.prepare(`
-        SELECT strftime('%Y-%m', i.start_date) AS ym, SUM(l.amount * l.quantity * (1 + IFNULL(i.vat,0)/100)) as revenue
+        SELECT strftime('%Y-%m', i.start_date) AS ym, SUM(l.amount * (1 + IFNULL(i.vat,0)/100)) as revenue
         FROM invoices i INNER JOIN invoice_lines l ON l.invoice_id = i.id
         WHERE i.start_date >= date('now','-12 months') GROUP BY ym ORDER BY ym ASC`).all();
       const expRows = db.prepare(`
@@ -242,7 +242,7 @@ function registerAnalyticsHandlers() {
   // Helper: monthly series builders
   function buildRevenueSeries(limitMonths = 24) {
     const rows = db.prepare(`
-      SELECT strftime('%Y-%m', i.start_date) AS ym, SUM(l.amount * l.quantity * (1 + IFNULL(i.vat,0)/100)) as revenue
+      SELECT strftime('%Y-%m', i.start_date) AS ym, SUM(l.amount * (1 + IFNULL(i.vat,0)/100)) as revenue
       FROM invoices i INNER JOIN invoice_lines l ON l.invoice_id = i.id
       WHERE i.start_date >= date('now', '-' || ? || ' months') GROUP BY ym ORDER BY ym ASC`).all(limitMonths);
     return rows.map(r => Number(r.revenue)||0);

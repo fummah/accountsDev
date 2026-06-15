@@ -37,6 +37,45 @@ const JournalEntries = () => {
   // Live balance tracking for the form
   const [formLines, setFormLines] = useState([]);
 
+  // Add-new dimension modals
+  const [newLocModal, setNewLocModal] = useState(false);
+  const [newLocName, setNewLocName] = useState('');
+  const [newDeptModal, setNewDeptModal] = useState(false);
+  const [newDeptName, setNewDeptName] = useState('');
+  const [newClassModal, setNewClassModal] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
+
+  const addNewLocation = async () => {
+    if (!newLocName.trim()) return message.warning('Name required');
+    try {
+      await window.electronAPI.createLocation({ name: newLocName.trim() });
+      const locs = await window.electronAPI.listLocations?.() || [];
+      setLocations(Array.isArray(locs) ? locs : []);
+      setNewLocName(''); setNewLocModal(false);
+      message.success('Location added');
+    } catch { message.error('Failed to add location'); }
+  };
+  const addNewDepartment = async () => {
+    if (!newDeptName.trim()) return message.warning('Name required');
+    try {
+      await window.electronAPI.createDepartment({ name: newDeptName.trim() });
+      const deps = await window.electronAPI.listDepartments?.() || [];
+      setDepartments(Array.isArray(deps) ? deps : []);
+      setNewDeptName(''); setNewDeptModal(false);
+      message.success('Department added');
+    } catch { message.error('Failed to add department'); }
+  };
+  const addNewClass = async () => {
+    if (!newClassName.trim()) return message.warning('Name required');
+    try {
+      await window.electronAPI.createClass({ name: newClassName.trim() });
+      const cls = await window.electronAPI.listClasses?.() || [];
+      setClasses(Array.isArray(cls) ? cls : []);
+      setNewClassName(''); setNewClassModal(false);
+      message.success('Class added');
+    } catch { message.error('Failed to add class'); }
+  };
+
   useEffect(() => { loadData(); }, []);
 
   const loadData = useCallback(async () => {
@@ -437,21 +476,24 @@ const JournalEntries = () => {
           <Row gutter={12}>
             <Col span={8}>
               <Form.Item name="class" label="Class">
-                <Select allowClear placeholder="Select class" showSearch optionFilterProp="children">
+                <Select allowClear placeholder="Select class" showSearch optionFilterProp="children"
+                  dropdownRender={menu => (<>{menu}<Divider style={{margin:'4px 0'}}/><div style={{padding:'4px 8px'}}><Button type="link" size="small" icon={<PlusOutlined/>} onClick={()=>setNewClassModal(true)}>Add New</Button></div></>)}>
                   {classes.map(c => <Option key={c.id} value={c.name}>{c.name}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="location" label="Location">
-                <Select allowClear placeholder="Select location" showSearch optionFilterProp="children">
+                <Select allowClear placeholder="Select location" showSearch optionFilterProp="children"
+                  dropdownRender={menu => (<>{menu}<Divider style={{margin:'4px 0'}}/><div style={{padding:'4px 8px'}}><Button type="link" size="small" icon={<PlusOutlined/>} onClick={()=>setNewLocModal(true)}>Add New</Button></div></>)}>
                   {locations.map(l => <Option key={l.id} value={l.name}>{l.name}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="department" label="Department">
-                <Select allowClear placeholder="Select department" showSearch optionFilterProp="children">
+                <Select allowClear placeholder="Select department" showSearch optionFilterProp="children"
+                  dropdownRender={menu => (<>{menu}<Divider style={{margin:'4px 0'}}/><div style={{padding:'4px 8px'}}><Button type="link" size="small" icon={<PlusOutlined/>} onClick={()=>setNewDeptModal(true)}>Add New</Button></div></>)}>
                   {departments.map(d => <Option key={d.id} value={d.name}>{d.name}</Option>)}
                 </Select>
               </Form.Item>
@@ -517,6 +559,24 @@ const JournalEntries = () => {
               type="warning" showIcon style={{ marginTop: 12, borderRadius: 8 }} />
           )}
         </Form>
+      </Modal>
+
+      {/* Add New Location Modal */}
+      <Modal title="Add New Location" visible={newLocModal} onOk={addNewLocation}
+        onCancel={() => { setNewLocModal(false); setNewLocName(''); }} okText="Add" destroyOnClose>
+        <Input placeholder="Location name" value={newLocName} onChange={e => setNewLocName(e.target.value)} onPressEnter={addNewLocation} />
+      </Modal>
+
+      {/* Add New Department Modal */}
+      <Modal title="Add New Department" visible={newDeptModal} onOk={addNewDepartment}
+        onCancel={() => { setNewDeptModal(false); setNewDeptName(''); }} okText="Add" destroyOnClose>
+        <Input placeholder="Department name" value={newDeptName} onChange={e => setNewDeptName(e.target.value)} onPressEnter={addNewDepartment} />
+      </Modal>
+
+      {/* Add New Class Modal */}
+      <Modal title="Add New Class" visible={newClassModal} onOk={addNewClass}
+        onCancel={() => { setNewClassModal(false); setNewClassName(''); }} okText="Add" destroyOnClose>
+        <Input placeholder="Class name" value={newClassName} onChange={e => setNewClassName(e.target.value)} onPressEnter={addNewClass} />
       </Modal>
     </div>
   );

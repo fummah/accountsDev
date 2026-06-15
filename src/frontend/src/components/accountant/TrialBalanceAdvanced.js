@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Card, Form, Select, DatePicker, Button, Table, message, Row, Col, Space, Input, Tag, Typography, Statistic, Alert, Tooltip } from 'antd';
-import { PrinterOutlined, DownloadOutlined, SyncOutlined, SearchOutlined, FilterOutlined, CheckCircleOutlined, WarningOutlined, ApartmentOutlined } from '@ant-design/icons';
+import { Card, Form, Select, DatePicker, Button, Table, message, Row, Col, Space, Input, Tag, Typography, Statistic, Alert, Tooltip, Modal, Divider } from 'antd';
+import { PrinterOutlined, DownloadOutlined, SyncOutlined, SearchOutlined, FilterOutlined, CheckCircleOutlined, WarningOutlined, ApartmentOutlined, PlusOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
@@ -21,6 +21,43 @@ const TrialBalanceAdvanced = () => {
   const [searchText, setSearchText] = useState('');
   const [form] = Form.useForm();
   const [lastFilters, setLastFilters] = useState(null);
+  const [newLocModal, setNewLocModal] = useState(false);
+  const [newLocName, setNewLocName] = useState('');
+  const [newDeptModal, setNewDeptModal] = useState(false);
+  const [newDeptName, setNewDeptName] = useState('');
+  const [newClassModal, setNewClassModal] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
+
+  const addNewLocation = async () => {
+    if (!newLocName.trim()) return message.warning('Name required');
+    try {
+      await window.electronAPI.createLocation({ name: newLocName.trim() });
+      const locs = await window.electronAPI.listLocations?.() || [];
+      setLocations(Array.isArray(locs) ? locs : []);
+      setNewLocName(''); setNewLocModal(false);
+      message.success('Location added');
+    } catch { message.error('Failed to add location'); }
+  };
+  const addNewDepartment = async () => {
+    if (!newDeptName.trim()) return message.warning('Name required');
+    try {
+      await window.electronAPI.createDepartment({ name: newDeptName.trim() });
+      const deps = await window.electronAPI.listDepartments?.() || [];
+      setDepartments(Array.isArray(deps) ? deps : []);
+      setNewDeptName(''); setNewDeptModal(false);
+      message.success('Department added');
+    } catch { message.error('Failed to add department'); }
+  };
+  const addNewClass = async () => {
+    if (!newClassName.trim()) return message.warning('Name required');
+    try {
+      await window.electronAPI.createClass({ name: newClassName.trim() });
+      const cls = await window.electronAPI.listClasses?.() || [];
+      setClasses(Array.isArray(cls) ? cls : []);
+      setNewClassName(''); setNewClassModal(false);
+      message.success('Class added');
+    } catch { message.error('Failed to add class'); }
+  };
 
   useEffect(() => {
     (async () => {
@@ -150,21 +187,24 @@ const TrialBalanceAdvanced = () => {
             </Col>
             <Col xs={24} sm={12} md={4}>
               <Form.Item name="class" label="Class" style={{ marginBottom: 8 }}>
-                <Select allowClear style={{ width: '100%' }} placeholder="All">
+                <Select allowClear style={{ width: '100%' }} placeholder="All"
+                  dropdownRender={menu => (<>{menu}<Divider style={{margin:'4px 0'}}/><div style={{padding:'4px 8px'}}><Button type="link" size="small" icon={<PlusOutlined/>} onClick={()=>setNewClassModal(true)}>Add New</Button></div></>)}>
                   {classes.map(c => <Option key={c.id} value={c.name}>{c.name}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={4}>
               <Form.Item name="location" label="Location" style={{ marginBottom: 8 }}>
-                <Select allowClear style={{ width: '100%' }} placeholder="All">
+                <Select allowClear style={{ width: '100%' }} placeholder="All"
+                  dropdownRender={menu => (<>{menu}<Divider style={{margin:'4px 0'}}/><div style={{padding:'4px 8px'}}><Button type="link" size="small" icon={<PlusOutlined/>} onClick={()=>setNewLocModal(true)}>Add New</Button></div></>)}>
                   {locations.map(l => <Option key={l.id} value={l.name}>{l.name}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={4}>
               <Form.Item name="department" label="Department" style={{ marginBottom: 8 }}>
-                <Select allowClear style={{ width: '100%' }} placeholder="All">
+                <Select allowClear style={{ width: '100%' }} placeholder="All"
+                  dropdownRender={menu => (<>{menu}<Divider style={{margin:'4px 0'}}/><div style={{padding:'4px 8px'}}><Button type="link" size="small" icon={<PlusOutlined/>} onClick={()=>setNewDeptModal(true)}>Add New</Button></div></>)}>
                   {departments.map(d => <Option key={d.id} value={d.name}>{d.name}</Option>)}
                 </Select>
               </Form.Item>
@@ -259,6 +299,16 @@ const TrialBalanceAdvanced = () => {
           }}
         />
       </Card>
+      {/* Add New Modals */}
+      <Modal title="Add New Location" visible={newLocModal} onOk={addNewLocation} onCancel={()=>{setNewLocModal(false);setNewLocName('');}} okText="Add" destroyOnClose>
+        <Input placeholder="Location name" value={newLocName} onChange={e=>setNewLocName(e.target.value)} onPressEnter={addNewLocation}/>
+      </Modal>
+      <Modal title="Add New Department" visible={newDeptModal} onOk={addNewDepartment} onCancel={()=>{setNewDeptModal(false);setNewDeptName('');}} okText="Add" destroyOnClose>
+        <Input placeholder="Department name" value={newDeptName} onChange={e=>setNewDeptName(e.target.value)} onPressEnter={addNewDepartment}/>
+      </Modal>
+      <Modal title="Add New Class" visible={newClassModal} onOk={addNewClass} onCancel={()=>{setNewClassModal(false);setNewClassName('');}} okText="Add" destroyOnClose>
+        <Input placeholder="Class name" value={newClassName} onChange={e=>setNewClassName(e.target.value)} onPressEnter={addNewClass}/>
+      </Modal>
     </div>
   );
 };

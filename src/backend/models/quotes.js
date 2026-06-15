@@ -107,7 +107,7 @@ const Quotes = {
           quotes.status, 
           quotes.start_date, 
           quotes.last_date, 
-          COALESCE(SUM(quote_lines.amount * quote_lines.quantity), 0) AS amount, 
+          COALESCE(SUM(quote_lines.amount), 0) AS amount, 
           quotes.vat,
           quotes.customer_email, 
           quotes.message, 
@@ -135,7 +135,7 @@ const Quotes = {
   getPaginated: (page = 1, pageSize = 25, search = '', status = '') => {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
-    const baseSql = `SELECT quotes.id, quotes.number, quotes.customer, customers.first_name || ' ' || customers.last_name AS customer_name, quotes.status, quotes.start_date, quotes.last_date, COALESCE(SUM(quote_lines.amount * quote_lines.quantity), 0) AS amount, quotes.vat, quotes.customer_email, quotes.message, quotes.statement_message, quotes.billing_address FROM quotes LEFT JOIN quote_lines ON quote_lines.quote_id = quotes.id LEFT JOIN customers ON quotes.customer = customers.id`;
+    const baseSql = `SELECT quotes.id, quotes.number, quotes.customer, customers.first_name || ' ' || customers.last_name AS customer_name, quotes.status, quotes.start_date, quotes.last_date, COALESCE(SUM(quote_lines.amount), 0) AS amount, quotes.vat, quotes.customer_email, quotes.message, quotes.statement_message, quotes.billing_address FROM quotes LEFT JOIN quote_lines ON quote_lines.quote_id = quotes.id LEFT JOIN customers ON quotes.customer = customers.id`;
     const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
     const statusParam = status && status.trim() ? status.trim() : null;
     const whereParts = [];

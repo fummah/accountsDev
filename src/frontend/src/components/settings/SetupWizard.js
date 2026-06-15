@@ -166,6 +166,28 @@ const SetupWizard = ({ onComplete, modal = false }) => {
       const vals = companyForm.getFieldsValue();
       try { await window.electronAPI?.saveCompany?.({ ...vals, logo }); } catch {}
     }
+    if (step === 2) {
+      // Save branding (logo + accent colour) to company record
+      try {
+        const vals = companyForm.getFieldsValue();
+        await window.electronAPI?.saveCompany?.({ ...vals, logo });
+        await window.electronAPI?.settingsSet?.('accent_color', accentColor);
+      } catch {}
+    }
+    if (step === 3) {
+      // Save industry to company record
+      try {
+        const vals = companyForm.getFieldsValue();
+        await window.electronAPI?.saveCompany?.({ ...vals, industry, logo });
+      } catch {}
+    }
+    if (step === 4) {
+      // Seed Chart of Accounts based on selected template
+      try {
+        await window.electronAPI?.coaSeedSystemAccounts?.();
+        await window.electronAPI?.settingsSet?.('coa_template', coaTemplate);
+      } catch {}
+    }
     if (step === 5) {
       const vals = currencyForm.getFieldsValue();
       try {
@@ -173,6 +195,11 @@ const SetupWizard = ({ onComplete, modal = false }) => {
         await window.electronAPI?.settingsSet?.('date_format', vals.date_format || 'MM/DD/YYYY');
         await window.electronAPI?.settingsSet?.('tax_jurisdiction', vals.jurisdiction || 'US');
         await window.electronAPI?.settingsSet?.('fiscal_year_start', vals.fiscal_year_start || 'january');
+        // Also save VAT rate to company
+        if (vals.vat_rate != null) {
+          const compVals = companyForm.getFieldsValue();
+          await window.electronAPI?.saveCompany?.({ ...compVals, industry, logo, vat_rate: vals.vat_rate });
+        }
       } catch {}
     }
     if (step === 6) {
@@ -188,6 +215,14 @@ const SetupWizard = ({ onComplete, modal = false }) => {
             description: vals.bank_name || '',
           });
         }
+        // Save bank details to company record
+        const compVals = companyForm.getFieldsValue();
+        await window.electronAPI?.saveCompany?.({
+          ...compVals, industry, logo,
+          bank_name: vals.bank_name || '',
+          account_number: vals.account_number || '',
+          branch_code: vals.branch_code || '',
+        });
       } catch {}
     }
     setStep(s => Math.min(s + 1, totalSteps - 1));
@@ -199,12 +234,27 @@ const SetupWizard = ({ onComplete, modal = false }) => {
   const finish = async () => {
     setSaving(true);
     try {
+      // Final comprehensive save of all company data
+      const compVals = companyForm.getFieldsValue();
+      const currVals = currencyForm.getFieldsValue();
+      const bankVals = bankForm.getFieldsValue();
+      await window.electronAPI?.saveCompany?.({
+        ...compVals,
+        industry,
+        logo,
+        currency: currVals.base_currency || '',
+        vat_rate: currVals.vat_rate || 0,
+        fy_start: currVals.fiscal_year_start || '',
+        bank_name: bankVals.bank_name || '',
+        account_number: bankVals.account_number || '',
+        branch_code: bankVals.branch_code || '',
+      });
       await window.electronAPI?.setupWizardComplete?.({
-        company: companyForm.getFieldsValue(),
+        company: compVals,
         industry,
         coaTemplate,
-        currency: currencyForm.getFieldsValue(),
-        bank: bankForm.getFieldsValue(),
+        currency: currVals,
+        bank: bankVals,
         logo,
         accentColor,
       });

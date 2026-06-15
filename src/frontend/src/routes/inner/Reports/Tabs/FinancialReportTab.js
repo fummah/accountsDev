@@ -1,5 +1,6 @@
 import React, {useState, useEffect} from "react";
-import {Col, Row, DatePicker, message} from "antd";
+import {Col, Row, DatePicker, message, Button, Space} from "antd";
+import { SyncOutlined } from '@ant-design/icons';
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
 import ProfitAndLossSection from "./Sections/ProfitAndLossSection";
@@ -11,11 +12,26 @@ const { RangePicker } = DatePicker;
 
 const FinancialReportTab = () => {
   const [dummyData, setDummyData] = useState(null);
+  const [syncing, setSyncing] = useState(false);
   
 const currentMonthStart = moment().startOf("month");
 const currentMonthEnd = moment().endOf("month");
 
 const [dateRange, setDateRange] = useState([currentMonthStart, currentMonthEnd]);
+
+  const handleSyncJournal = async () => {
+    setSyncing(true);
+    try {
+      const res = await window.electronAPI.journalRepostAll?.();
+      if (res?.success) {
+        message.success(`Synced: ${res.posted} posted, ${res.skipped} already existed`);
+        fetchFinancialReports(dateRange[0].format("YYYY-MM-DD"), dateRange[1].format("YYYY-MM-DD"));
+      } else {
+        message.error(res?.error || 'Sync failed');
+      }
+    } catch (e) { message.error('Sync error: ' + (e?.message || '')); }
+    setSyncing(false);
+  };
 
    const fetchFinancialReports = async (start_date,last_date) => {
         try {
@@ -37,8 +53,12 @@ const [dateRange, setDateRange] = useState([currentMonthStart, currentMonthEnd])
         }
     };
 
-    useEffect(() => {     
-      fetchFinancialReports(currentMonthStart.format("YYYY-MM-DD"), currentMonthEnd.format("YYYY-MM-DD"));
+    useEffect(() => {
+      // Auto-sync journal entries from existing invoices/expenses then load reports
+      (async () => {
+        try { await window.electronAPI.journalRepostAll?.(); } catch {}
+        fetchFinancialReports(currentMonthStart.format("YYYY-MM-DD"), currentMonthEnd.format("YYYY-MM-DD"));
+      })();
   }, []);
 
   const onDateChange = (dates) => {
@@ -58,12 +78,15 @@ const [dateRange, setDateRange] = useState([currentMonthStart, currentMonthEnd])
        Financial Reports</h2>
    }
    extra={
-    <RangePicker
-    value={dateRange} // Set the default date range
-    onChange={onDateChange} // Update state when the range changes
-    format="YYYY-MM-DD" // Format for the displayed dates
-    allowClear={true}
-  />
+    <Space>
+      <Button icon={<SyncOutlined spin={syncing} />} onClick={handleSyncJournal} loading={syncing} size="small">Sync Journal</Button>
+      <RangePicker
+        value={dateRange}
+        onChange={onDateChange}
+        format="YYYY-MM-DD"
+        allowClear={true}
+      />
+    </Space>
    }
    >  
    <Row>
