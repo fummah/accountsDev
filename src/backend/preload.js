@@ -440,6 +440,7 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   // Blockchain anchoring
   journalAnchor: (entryId) => ipcRenderer.invoke('journal-anchor', entryId),
   journalRepostAll: () => ipcRenderer.invoke('journal-repost-all'),
+  billPay: (payload) => ipcRenderer.invoke('bill-pay', payload),
   // AI Assistant
   assistantAsk: (question) => ipcRenderer.invoke('assistant-ask', question),
 

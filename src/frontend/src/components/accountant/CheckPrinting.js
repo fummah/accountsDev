@@ -140,123 +140,186 @@ const CheckPrinting = () => {
   }, [watchAccountId, accounts]);
 
   const generateCheckHtml = (vals, forPrint) => {
-    const dateStr = vals.date ? (vals.date.format ? vals.date.format('MM/DD/YYYY') : vals.date) : '';
+    const co     = vals._company || company || {};
+    const coName = co.name || co.companyName || '';
+    const coAddr = [co.address || co.address1, co.city && co.state ? `${co.city}, ${co.state}` : (co.city || co.state || ''), co.phone || co.phone_number || ''].filter(Boolean);
+
+    const dateStr   = vals.date ? (vals.date.format ? vals.date.format('M/D/YYYY') : vals.date) : '';
     const payeeName = vals.payeeName || '';
     const payeeAddr = vals.payeeAddress || '';
-    const amt = Number(vals.amount || 0);
-    const amtStr = amt.toFixed(2);
-    const checkNum = vals.checkNumber || '';
-    const memoLine = vals.memo || '';
-    const splitLns = (vals.splitLines || []).filter(l => Number(l.amount) > 0);
+    const amt       = Number(vals.amount || 0);
+    const amtStr    = amt.toFixed(2);
+    const checkNum  = vals.checkNumber || '';
+    const memoLine  = vals.memo || '';
+    const splitLns  = (vals.splitLines || []).filter(l => Number(l.amount) > 0);
 
     const words = (() => {
       const dollars = Math.floor(amt);
-      const cents = Math.round((amt - dollars) * 100);
+      const cents   = Math.round((amt - dollars) * 100);
       return `${toWords(dollars)} and ${String(cents).padStart(2, '0')}/100`;
     })();
 
-    // Dot-fill for written amount line
-    const dotFill = words + ' ' + '*'.repeat(Math.max(0, 72 - words.length));
+    // Dot-fill: words + asterisks to ~72 chars
+    const dotFill = words + ' ' + '*'.repeat(Math.max(0, 68 - words.length));
 
-    // Remittance rows for stubs
-    const stubDetailRows = splitLns.length > 0
+    // ── Stub detail rows ──────────────────────────────────────────────
+    const detailRows = splitLns.length > 0
       ? splitLns.map(l => `
           <tr>
-            <td colspan="2" style="padding:2px 0; font-size:11px; color:#333;">${l.description || l.account || ''}</td>
-            <td></td>
-            <td style="padding:2px 0; font-size:11px; text-align:right; color:#333;">${Number(l.amount||0).toFixed(2)}</td>
+            <td style="padding:1px 0; font-size:11px;">${l.description || l.account || ''}</td>
+            <td style="padding:1px 0; font-size:11px; text-align:right;">${Number(l.amount||0).toFixed(2)}</td>
           </tr>`).join('')
-      : memoLine ? `<tr>
-          <td colspan="2" style="padding:2px 0; font-size:11px; color:#333;">${memoLine}</td>
-          <td></td>
-          <td style="padding:2px 0; font-size:11px; text-align:right; color:#333;">${amtStr}</td>
-        </tr>` : '';
+      : memoLine
+        ? `<tr>
+            <td style="padding:1px 0; font-size:11px;">${memoLine}</td>
+            <td style="padding:1px 0; font-size:11px; text-align:right;">${amtStr}</td>
+          </tr>`
+        : '';
 
-    // Stub section — only dynamic data (payee, date, amounts, detail lines)
+    // ── Remittance stub (two copies rendered below check) ────────────
     const stub = () => `
-      <div style="height:185px; padding:10px 28px 8px 28px; box-sizing:border-box; font-family:Arial,sans-serif; position:relative;">
-        <table style="width:100%; border-collapse:collapse;">
-          <tbody>
-            <tr>
-              <td style="font-size:11px; color:#444; padding:0 0 2px 0; width:45%;">${payeeName}</td>
-              <td style="width:20%;"></td>
-              <td style="font-size:11px; text-align:center; padding:0 0 2px 0; width:18%;">${dateStr}</td>
-              <td style="font-size:12px; font-weight:600; text-align:right; padding:0 0 2px 0; width:17%;">${amtStr}</td>
-            </tr>
-            ${stubDetailRows}
-          </tbody>
+      <div style="padding:8px 28px 6px; font-family:Arial,sans-serif; min-height:155px; box-sizing:border-box;">
+        <!-- Stub header row: company | date | check# -->
+        <table style="width:100%; border-collapse:collapse; margin-bottom:3px;">
+          <tr>
+            <td style="font-size:12px; font-weight:700; width:50%;">${coName}</td>
+            <td style="font-size:11px; text-align:center; width:25%;">${dateStr}</td>
+            <td style="font-size:12px; font-weight:700; text-align:right; width:25%;">${checkNum}</td>
+          </tr>
         </table>
-        <div style="position:absolute; bottom:8px; left:28px; right:28px; display:flex; justify-content:space-between;">
-          <span style="font-size:10px; color:#555;">${memoLine}</span>
-          <span style="font-size:11px; font-weight:600;">${amtStr}</span>
-        </div>
+        <!-- Payee + amount -->
+        <table style="width:100%; border-collapse:collapse; margin-bottom:2px;">
+          <tr>
+            <td style="font-size:11px; width:70%;">${payeeName}</td>
+            <td style="font-size:12px; font-weight:700; text-align:right; width:30%;">${amtStr}</td>
+          </tr>
+        </table>
+        <!-- Detail lines -->
+        <table style="width:100%; border-collapse:collapse;">
+          ${detailRows}
+        </table>
+        <!-- Spacer + total row -->
+        <div style="height:30px;"></div>
+        <table style="width:100%; border-collapse:collapse; border-top:1px solid #bbb; padding-top:3px;">
+          <tr>
+            <td style="font-size:11px; padding-top:3px;">${memoLine}</td>
+            <td style="font-size:12px; font-weight:700; text-align:right; padding-top:3px;">${amtStr}</td>
+          </tr>
+        </table>
       </div>`;
 
     /* ═══════════════════════════════════════════════════════════════════
-       PRINT LAYOUT for preprinted check stock.
-       Only dynamic data is printed. Everything preprinted on the check
-       stock (company name, check number, MICR line, DATE label, DOLLARS
-       text, signature line, horizontal lines) is NOT printed.
-       Positions are absolute within a fixed check-body height to align
-       with standard preprinted check stock.
+       CHECK BODY — matches standard US 3-part check stock layout
+       Top section: company top-left, check# top-right, date, payee,
+       amount box, written amount, address window, memo, signature line.
+       Two identical remittance stubs follow below.
        ═══════════════════════════════════════════════════════════════════ */
     return `<!doctype html><html><head><title>Check #${checkNum}</title>
     <style>
-      @page { margin: 0.2in 0.35in; size: letter portrait; }
-      * { box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #1a1a1a; }
-      .check-body { position: relative; height: 330px; }
-      .check-content { position: relative; height: 100%; padding: 0 28px; }
-      .stub-wrap { position: relative; border-top: 1px dashed #ccc; }
+      @page { margin: 0.25in 0.4in; size: letter portrait; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; background: #fff; color: #1a1a1a; }
+
+      .check-wrap { position: relative; height: 310px; border-bottom: 1px dashed #999; overflow: hidden; }
+      .check-inner { position: absolute; inset: 0; padding: 0 28px; }
+
+      /* ---------- check header ---------- */
+      .chk-header { display: flex; justify-content: space-between; align-items: flex-start; padding-top: 14px; }
+      .co-block    { font-size: 12px; line-height: 1.55; }
+      .co-name     { font-size: 13px; font-weight: 700; }
+      .chk-num-box { font-size: 20px; font-weight: 700; border: 2px solid #555; border-radius: 6px; padding: 3px 14px; letter-spacing: 1px; }
+
+      /* ---------- DATE row ---------- */
+      .date-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 6px; gap: 8px; }
+      .date-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; background: #eee; padding: 1px 6px; border: 1px solid #bbb; }
+      .date-val   { font-size: 12px; font-weight: 700; min-width: 90px; border-bottom: 1px solid #555; text-align: center; }
+
+      /* ---------- PAY TO row ---------- */
+      .payto-row { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
+      .payto-label { font-size: 9px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+      .payto-name  { font-size: 13px; font-weight: 700; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
+      .amt-box     { font-size: 13px; font-weight: 700; border: 2px solid #555; padding: 2px 10px; white-space: nowrap; min-width: 90px; text-align: center; }
+
+      /* ---------- written amount row ---------- */
+      .words-row { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; }
+      .words-text { font-size: 12px; letter-spacing: 0.02em; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
+      .dollars-vert { font-size: 9px; font-weight: 700; letter-spacing: 2px; writing-mode: vertical-rl; text-orientation: upright; border: 1px solid #555; padding: 3px 1px; line-height: 1; }
+
+      /* ---------- address window ---------- */
+      .addr-window { margin-top: 12px; margin-left: 4px; font-size: 11px; line-height: 1.65; min-height: 44px; }
+
+      /* ---------- memo + signature ---------- */
+      .memo-sig-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px; }
+      .memo-block   { display: flex; align-items: baseline; gap: 6px; }
+      .memo-label   { font-size: 9px; font-weight: 700; letter-spacing: 1px; }
+      .memo-val     { font-size: 10px; min-width: 180px; border-bottom: 1px solid #555; }
+      .sig-block    { font-size: 9px; font-weight: 700; letter-spacing: 1px; min-width: 180px; border-top: 1px solid #555; text-align: center; padding-top: 2px; }
+
+      /* ---------- MICR stub line ---------- */
+      .micr-line { text-align: center; font-size: 13px; letter-spacing: 3px; color: #555; margin-top: 6px; font-family: 'Courier New', monospace; }
+
+      /* ---------- stubs ---------- */
+      .stub-wrap { border-bottom: 1px dashed #999; }
     </style></head><body>
 
       <!-- ═══════════════ CHECK BODY ═══════════════ -->
-      <div class="check-body">
-        <div class="check-content">
+      <div class="check-wrap">
+        <div class="check-inner">
 
-          <!-- Date value (positioned to align with preprinted DATE label) -->
-          <div style="position:absolute; top:58px; right:28px;">
-            <span style="font-size:12px; font-weight:600; min-width:100px; display:inline-block; text-align:center;">${dateStr}</span>
+          <!-- Header: company block left | check# right -->
+          <div class="chk-header">
+            <div class="co-block">
+              <div class="co-name">${coName}</div>
+              ${coAddr.map(l => `<div>${l}</div>`).join('')}
+            </div>
+            <div class="chk-num-box">${checkNum}</div>
           </div>
 
-          <!-- PAY TO payee name (positioned next to preprinted PAY TO THE ORDER OF) -->
-          <div style="position:absolute; top:88px; left:120px; right:120px;">
-            <span style="font-size:13px; font-weight:700;">${payeeName}</span>
+          <!-- DATE -->
+          <div class="date-row">
+            <span class="date-label">DATE</span>
+            <span class="date-val">${dateStr}</span>
           </div>
 
-          <!-- Numeric amount (positioned in the preprinted amount box) -->
-          <div style="position:absolute; top:84px; right:28px;">
-            <span style="font-size:12px; font-weight:700;">**${amtStr}</span>
+          <!-- PAY TO THE ORDER OF | Payee Name | **Amount Box -->
+          <div class="payto-row">
+            <span class="payto-label">PAY TO THE<br>ORDER OF</span>
+            <span class="payto-name">${payeeName}</span>
+            <span class="amt-box">**${amtStr}</span>
           </div>
 
-          <!-- Written amount text (positioned on the preprinted amount line) -->
-          <div style="position:absolute; top:116px; left:28px; right:70px;">
-            <span style="font-size:12px; font-weight:600; letter-spacing:0.02em;">${dotFill}</span>
+          <!-- Written amount + DOLLARS -->
+          <div class="words-row">
+            <span class="words-text">${dotFill}</span>
+            <span class="dollars-vert">DOLLARS</span>
           </div>
 
-          <!-- Payee address (positioned in the address window area) -->
-          <div style="position:absolute; top:148px; left:32px; font-size:11px; line-height:1.6;">
+          <!-- Address window -->
+          <div class="addr-window">
             ${payeeName ? `<div style="font-weight:700;">${payeeName}</div>` : ''}
             ${payeeAddr ? payeeAddr.split('\n').map(l => `<div>${l}</div>`).join('') : ''}
           </div>
 
-          <!-- Memo text (positioned next to preprinted MEMO label) -->
-          <div style="position:absolute; bottom:26px; left:80px;">
-            <span style="font-size:10px;">${memoLine}</span>
+          <!-- Memo + Authorized Signature -->
+          <div class="memo-sig-row">
+            <div class="memo-block">
+              <span class="memo-label">MEMO</span>
+              <span class="memo-val">${memoLine}</span>
+            </div>
+            <div class="sig-block">AUTHORIZED SIGNATURE</div>
           </div>
+
+          <!-- MICR-style line -->
+          <div class="micr-line">&#8904;C${String(checkNum).padStart(9,'0')}&#8904; &#8904;${String(checkNum).padStart(9,'0')}&#8904;&#174; ${checkNum}</div>
 
         </div>
       </div>
 
       <!-- ═══════════════ STUB 1 ═══════════════ -->
-      <div class="stub-wrap">
-        ${stub()}
-      </div>
+      <div class="stub-wrap">${stub()}</div>
 
       <!-- ═══════════════ STUB 2 ═══════════════ -->
-      <div class="stub-wrap">
-        ${stub()}
-      </div>
+      <div class="stub-wrap">${stub()}</div>
 
     </body></html>`;
   };

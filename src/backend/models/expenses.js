@@ -20,17 +20,15 @@ const Expenses = {
       )
     `;
     db.prepare(stmt).run();
-    // Migration for multi-currency support
+    // Migration for multi-currency support and bills fields
     try {
       const colInfo = db.prepare("PRAGMA table_info(expenses)").all();
-      const hasCurrency = colInfo.some(c => c.name === 'currency');
-      const hasFx = colInfo.some(c => c.name === 'fxRate');
-      if (!hasCurrency) {
-        db.prepare('ALTER TABLE expenses ADD COLUMN currency TEXT').run();
-      }
-      if (!hasFx) {
-        db.prepare('ALTER TABLE expenses ADD COLUMN fxRate REAL DEFAULT 1.0').run();
-      }
+      const cols = new Set(colInfo.map(c => c.name));
+      if (!cols.has('currency'))  db.prepare('ALTER TABLE expenses ADD COLUMN currency TEXT').run();
+      if (!cols.has('fxRate'))    db.prepare('ALTER TABLE expenses ADD COLUMN fxRate REAL DEFAULT 1.0').run();
+      if (!cols.has('due_date'))  db.prepare('ALTER TABLE expenses ADD COLUMN due_date TEXT').run();
+      if (!cols.has('memo'))      db.prepare('ALTER TABLE expenses ADD COLUMN memo TEXT').run();
+      if (!cols.has('terms'))     db.prepare('ALTER TABLE expenses ADD COLUMN terms INTEGER DEFAULT 30').run();
     } catch (e) {
       console.error('[expenses] migration failed:', e);
     }
@@ -138,7 +136,24 @@ const Expenses = {
 
   // Retrieve all Expenses
   getAllExpenses: () => {
-    const stmt = db.prepare("SELECT e.id, e.category, e.payment_date,e.payment_method, e.ref_no, e.payment_account, e.approval_status,e.payee,COALESCE(SUM(el.amount), 0) AS amount, CASE WHEN e.category = 'customer' THEN c.first_name WHEN e.category = 'supplier' THEN s.first_name WHEN e.category = 'employee' THEN emp.first_name ELSE NULL END AS payee_name  FROM expenses e LEFT JOIN customers c ON e.payee = c.id AND e.category = 'customer' LEFT JOIN suppliers s ON e.payee = s.id AND e.category = 'supplier' LEFT JOIN employees emp ON e.payee = emp.id AND e.category = 'employee' LEFT JOIN expense_lines el ON e.id = el.expense_id GROUP BY e.id, e.category, e.payment_date, e.payment_method, e.payment_account, e.ref_no, e.approval_status, c.first_name,payee, s.first_name, emp.first_name ORDER BY e.id DESC");
+    const stmt = db.prepare(`
+      SELECT e.id, e.category, e.payment_date, e.payment_method, e.ref_no, e.payment_account,
+             e.approval_status, e.payee, e.due_date, e.memo, e.terms,
+             COALESCE(SUM(el.amount), 0) AS amount,
+             CASE
+               WHEN e.category = 'customer'  THEN COALESCE(c.first_name || ' ' || c.last_name, c.first_name)
+               WHEN e.category IN ('supplier','bill') THEN COALESCE(s.display_name, s.first_name || ' ' || s.last_name, s.first_name)
+               WHEN e.category = 'employee'  THEN COALESCE(emp.first_name || ' ' || emp.last_name, emp.first_name)
+               ELSE NULL
+             END AS payee_name
+      FROM expenses e
+      LEFT JOIN customers  c   ON e.payee = c.id   AND e.category = 'customer'
+      LEFT JOIN suppliers  s   ON e.payee = s.id   AND e.category IN ('supplier','bill')
+      LEFT JOIN employees  emp ON e.payee = emp.id AND e.category = 'employee'
+      LEFT JOIN expense_lines el ON e.id = el.expense_id
+      GROUP BY e.id
+      ORDER BY e.id DESC
+    `);
     return stmt.all();
   },
 
@@ -164,7 +179,8 @@ const Expenses = {
       await db.prepare(
         `UPDATE expenses
          SET payee = ?, payment_account = ?, payment_date = ?, payment_method = ?, 
-             ref_no = ?, category = ?, approval_status = ?
+             ref_no = ?, category = ?, approval_status = ?,
+             due_date = ?, memo = ?, terms = ?
          WHERE id = ?`).run(
         [
           expenseDetails.payee,
@@ -174,6 +190,9 @@ const Expenses = {
           expenseDetails.ref_no,
           expenseDetails.category,
           expenseDetails.approval_status,
+          expenseDetails.due_date || null,
+          expenseDetails.memo || null,
+          expenseDetails.terms || null,
           id,
         ]
       );

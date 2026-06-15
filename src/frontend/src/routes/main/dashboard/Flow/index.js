@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { useHistory } from "react-router-dom";
 import { Row, Col, Card, Spin, Button, Modal, message, Table, Tag } from "antd";
 import {
@@ -104,6 +104,9 @@ const Flow = () => {
   const history = useHistory();
   const { fmt } = useCurrency();
   const [loading, setLoading] = useState(true);
+  const [rowWidth, setRowWidth] = useState(0);
+  const [rowHeight, setRowHeight] = useState(0);
+  const rowRef = useRef(null);
   const [balances, setBalances] = useState({});
   const [accountNames, setAccountNames] = useState({});
   const [categoryAccounts, setCategoryAccounts] = useState({});
@@ -114,6 +117,20 @@ const Flow = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      if (rowRef.current) {
+        setRowWidth(rowRef.current.offsetWidth);
+        setRowHeight(rowRef.current.offsetHeight);
+      }
+    };
+    measure();
+    // Re-measure after a tick to capture final painted height
+    const t = setTimeout(measure, 100);
+    window.addEventListener('resize', measure);
+    return () => { window.removeEventListener('resize', measure); clearTimeout(t); };
+  }, [loading]);
 
   const loadData = async () => {
     setLoading(true);
@@ -249,16 +266,11 @@ const Flow = () => {
     return { x1, y1, x2, y2, key: i, dashed: false };
   }).filter(Boolean);
 
-  // Connector arrow: Reports (row 1, col 3) → right edge of grid (toward quick panel)
-  const rightConnectors = [
-    { row: 1, key: "rc-reports" },
-  ].map(nc => ({
-    x1: NODE_CX(3) + 40,
-    y1: NODE_CY(nc.row),
-    x2: totalW - 4,
-    y2: NODE_CY(nc.row),
-    key: nc.key,
-  }));
+  // The curved connector is rendered in a full-row overlay SVG below — not as a rightConnectors line
+  const rightConnectors = [];
+  // Reports node start point (right edge of node)
+  const curveStartX = NODE_CX(3) + 40;  // right side of Reports node
+  const curveStartY = NODE_CY(1);        // row 1 vertical centre
 
   /* ──── Quick action lists (QB right panel) ──── */
   const quickTop = [
@@ -333,7 +345,7 @@ const Flow = () => {
       </div>
 
       {/* ──── Workflow Diagram + Quick Actions ──── */}
-      <Row gutter={16}>
+      <Row ref={rowRef} gutter={16} style={{ position: 'relative' }}>
         {/* Left: QB-style workflow diagram */}
         <Col xl={17} lg={16} md={24} sm={24} xs={24}>
           <Card bodyStyle={{ padding: 16, overflowX: "auto" }} style={{ borderRadius: 8 }}>
@@ -359,20 +371,83 @@ const Flow = () => {
                     markerEnd="url(#ah-solid)"
                   />
                 ))}
-                {/* Right-edge connectors → quick panel */}
-                {rightConnectors.map(a => (
-                  <line key={a.key}
-                    x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2}
-                    stroke={ARROW_DASH_COLOR} strokeWidth={1.8}
-                    strokeDasharray="6 4"
-                    markerEnd="url(#ah-dashed)"
-                  />
-                ))}
+                {/* Right-edge connectors — now replaced by full-row overlay SVG below */}
               </svg>
             </div>
           </Card>
         </Col>
 
+
+        {/* ── Overlay SVG: long animated curved connector from Reports → Quick Panel ── */}
+        <style>{`
+          @keyframes marchDash {
+            from { stroke-dashoffset: 40; }
+            to   { stroke-dashoffset: 0; }
+          }
+          .flow-curve-line {
+            animation: marchDash 1.2s linear infinite;
+          }
+        `}</style>
+        <svg
+          style={{
+            position: 'absolute',
+            top: 0, left: 0,
+            width: '100%', height: '100%',
+            pointerEvents: 'none',
+            overflow: 'visible',
+            zIndex: 10,
+          }}
+          preserveAspectRatio="none"
+        >
+          <defs>
+            <marker id="ah-curve" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+              <path d="M0,0 L0,7 L7,3.5 z" fill={ARROW_DASH_COLOR} />
+            </marker>
+          </defs>
+          {/*
+            Cubic bezier: starts at Reports node right edge (inside left col, ~74% width),
+            sweeps down-right in a long S-curve, ends at the left edge of the quick panel
+            (~76% x, mid-panel y). Control points create the swooping curve.
+          */}
+          {rowWidth > 0 && (() => {
+            // Gutter half = 8px (antd gutter={16} → 8px per side)
+            const GUTTER_HALF = 8;
+            const CARD_PAD = 16; // card bodyStyle padding
+
+            // sx: gutter half + card body pad + Reports node right edge inside card div
+            const sx = GUTTER_HALF + CARD_PAD + curveStartX;
+            // sy: card top padding offset + node vertical centre
+            const sy = CARD_PAD + curveStartY;
+
+            // ex: where right col starts (left edge of quick panel)
+            // Right col left edge = left col pixel width + gutter between cols
+            const leftColPx = rowWidth * (17 / 24);
+            const ex = leftColPx + GUTTER_HALF + 4;
+            // ey: aim at ~45% down the right panel (middle of the Banking card)
+            // fallback to 260px if rowHeight not yet measured
+            const ey = (rowHeight > 0 ? rowHeight : 580) * 0.45;
+
+            // Cubic bezier control points — long S-curve sweeping down-right
+            // CP1: extend horizontally right from start
+            // CP2: arrive vertically from above at the end
+            const cp1x = sx + (ex - sx) * 0.5;
+            const cp1y = sy;
+            const cp2x = sx + (ex - sx) * 0.6;
+            const cp2y = ey;
+
+            return (
+              <path
+                className="flow-curve-line"
+                d={`M ${sx} ${sy} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${ex} ${ey}`}
+                stroke={ARROW_DASH_COLOR}
+                strokeWidth={2.2}
+                strokeDasharray="10 6"
+                fill="none"
+                markerEnd="url(#ah-curve)"
+              />
+            );
+          })()}
+        </svg>
 
         {/* Right: QB-style quick access panel */}
         <Col xl={7} lg={8} md={24} sm={24} xs={24}>

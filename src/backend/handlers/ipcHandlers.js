@@ -321,7 +321,9 @@ safeHandle('insert-expense', async (event, payee,payment_account,payment_date, p
       } catch {}
     }
     // ── Auto-post to COA: DR Expense / CR Accounts Payable ────────────────
-    if (res && res.success && statusToUse !== 'Pending') {
+    // Always post bills (category='bill') + any non-Pending expenses
+    const isBill = (category || '').toLowerCase() === 'bill';
+    if (res && res.success && (isBill || statusToUse !== 'Pending')) {
       try {
         JournalEntries.postExpense({
           id: res.expenseId,
@@ -343,14 +345,55 @@ safeHandle('insert-expense', async (event, payee,payment_account,payment_date, p
 // Mark an expense as paid (simple status update)
 safeHandle('mark-expense-paid', async (event, id) => {
   try {
-    const stmt = require('./../models').Expenses ? require('./../models').Expenses : require('../models').Expenses;
-    // Use direct DB update for status to avoid changing lines
-  const db = require('../models/dbmgr');
+    const db = require('../models/dbmgr');
     const res = db.prepare('UPDATE expenses SET approval_status = ? WHERE id = ?').run('Paid', id);
     return { success: res.changes > 0 };
   } catch (error) {
     console.error('Error marking expense paid:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// Pay a bill: DR Accounts Payable / CR Bank account, then mark as Paid
+safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccount }) => {
+  try {
+    const db = require('../models/dbmgr');
+    const COA = require('../models/chartOfAccounts');
+    const JournalEntries = require('../models/journalEntries');
+
+    const ap = COA.getSystemAccount('Accounts Payable');
+    if (!ap) return { success: false, error: 'Accounts Payable account not in COA' };
+
+    // Resolve bank account by name or fallback to first bank
+    let bank = null;
+    if (bankAccount) {
+      bank = db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status='Active' LIMIT 1").get(bankAccount);
+    }
+    if (!bank) bank = db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(type) IN ('bank','cash') AND status='Active' LIMIT 1").get();
+    if (!bank) return { success: false, error: 'No bank/cash account found in COA' };
+
+    const billAmt = Number(amount) || 0;
+    if (billAmt <= 0) return { success: false, error: 'Invalid bill amount' };
+
+    // Post DR AP / CR Bank
+    JournalEntries.post({
+      date: paymentDate || new Date().toISOString().slice(0, 10),
+      description: `Bill payment — expense #${expenseId}`,
+      source_type: 'bill_payment',
+      source_id: expenseId,
+      lines: [
+        { account_id: ap.id,   debit: billAmt, credit: 0,       description: 'Accounts Payable cleared' },
+        { account_id: bank.id, debit: 0,       credit: billAmt, description: 'Bank / Cash payment' },
+      ],
+    });
+
+    // Mark expense as Paid
+    db.prepare('UPDATE expenses SET approval_status = ? WHERE id = ?').run('Paid', expenseId);
+
+    return { success: true };
+  } catch (e) {
+    console.error('Error paying bill:', e);
+    return { success: false, error: e.message };
   }
 });
 
