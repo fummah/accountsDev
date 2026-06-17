@@ -163,7 +163,7 @@ const BankReconciliation = () => {
       dataIndex: 'date',
       key: 'date',
       width: 100,
-      render: (date) => date ? moment(date).format('DD MMM YY') : '-',
+      render: (date) => date ? moment(date).format('MM/DD/YYYY') : '-',
       sorter: (a, b) => new Date(a.date || 0) - new Date(b.date || 0),
     },
     {
@@ -291,7 +291,7 @@ const BankReconciliation = () => {
       {selectedAccountInfo && (
         <Alert
           message={`Reconciling: ${selectedAccountInfo.accountName || selectedAccountInfo.name}`}
-          description={`Statement as of ${statementDate.format('DD MMM YYYY')} with balance $${fmt(statementBalance)}`}
+          description={`Statement as of ${statementDate.format('MM/DD/YYYY')} with balance $${fmt(statementBalance)}`}
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
@@ -384,7 +384,7 @@ const BankReconciliation = () => {
             size="small"
             pagination={false}
             columns={[
-              { title: 'Date', dataIndex: 'date', render: v => moment(v).format('DD MMM YY'), width: 100 },
+              { title: 'Date', dataIndex: 'date', render: v => moment(v).format('MM/DD/YYYY'), width: 100 },
               { title: 'Statement Balance', dataIndex: 'statementBalance', render: v => `${cSym} ${fmt(v)}`, align: 'right', width: 120 },
               { title: 'Notes', dataIndex: 'description', ellipsis: true },
             ]}

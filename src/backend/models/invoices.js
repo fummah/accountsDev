@@ -150,7 +150,7 @@ const Invoices = {
     return {all:stmt.all(), report:report};
   },
 
-  getPaginated: function (page = 1, pageSize = 25, search = '', status = '') {
+  getPaginated: function (page = 1, pageSize = 25, search = '', status = '', dueFrom = '', dueTo = '') {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
     const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id`;
@@ -165,6 +165,14 @@ const Invoices = {
     if (statusParam) {
       whereParts.push(`invoices.status = ?`);
       params.push(statusParam);
+    }
+    if (dueFrom) {
+      whereParts.push(`invoices.last_date >= ?`);
+      params.push(dueFrom);
+    }
+    if (dueTo) {
+      whereParts.push(`invoices.last_date <= ?`);
+      params.push(dueTo);
     }
     const whereClause = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
     const groupOrder = ` GROUP BY invoices.id, customers.first_name, customers.last_name, invoices.status, invoices.start_date, invoices.last_date ORDER BY invoices.id DESC`;
@@ -212,10 +220,10 @@ const Invoices = {
       WHERE i.status = 'Paid' AND i.start_date >= date('now', '-30 days')
     `);
 
-    // Deposited: total payments that have been recorded (from payments table)
+    // Deposited: payments that have been deposited (status = 'Deposited')
     let deposited = [{ deposited_amount: 0 }];
     try {
-      deposited = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS deposited_amount FROM payments`).all();
+      deposited = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS deposited_amount FROM payments WHERE status = 'Deposited'`).all();
     } catch (_) {}
 
     // Credit notes summary (Draft + Issued = available credits)
@@ -234,8 +242,14 @@ const Invoices = {
     const due_invoice = stmt_due.all(due_date);
     const recently_paid = stmt_recently_paid.all();
 
-    // Deposited amount = total payments recorded
+    // Deposited amount = total payments with deposited status
     const deposited_amount = Number(deposited?.[0]?.deposited_amount) || 0;
+    // Pending deposit amount = payments awaiting deposit
+    let pendingDeposit = [{ pending_deposit_amount: 0 }];
+    try {
+      pendingDeposit = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS pending_deposit_amount FROM payments WHERE status = 'Pending Deposit' OR status IS NULL`).all();
+    } catch (_) {}
+    const pending_deposit_amount = Number(pendingDeposit?.[0]?.pending_deposit_amount) || 0;
     // Paid total from invoices
     const paid_total = Number(paid_invoice?.[0]?.paid_total_amount) || 0;
     // Not deposited = paid invoice total minus actual deposited payments
@@ -257,21 +271,21 @@ const Invoices = {
       INNER JOIN invoices AS i ON l.invoice_id = i.id 
       WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date > ?`);
 
-    // Open expenses (pending approval)
+    // Open expenses (unpaid bills, approved expenses, pending approval)
     const stmt_open_expense = db.prepare(`
       SELECT COUNT(DISTINCT e.id) AS open_expense,
              SUM(l.amount) AS open_total_amount_expense 
       FROM expense_lines AS l 
       INNER JOIN expenses AS e ON l.expense_id = e.id 
-      WHERE e.approval_status = 'Pending'`);
+      WHERE e.approval_status IN ('Unpaid','Partially Paid','Approved','Pending')`);
 
-    // Due expenses (pending and overdue)
+    // Due expenses (overdue bills and expenses)
     const stmt_due_expense = db.prepare(`
       SELECT COUNT(DISTINCT e.id) AS due_expense,
              SUM(l.amount) AS due_total_amount_expense 
       FROM expense_lines AS l 
       INNER JOIN expenses AS e ON l.expense_id = e.id 
-      WHERE e.approval_status = 'Pending' AND e.payment_date < ?`);
+      WHERE e.approval_status IN ('Unpaid','Partially Paid','Approved','Pending') AND e.payment_date < ?`);
 
     // Due quotes
     const stmt_quote = db.prepare(`
@@ -751,17 +765,90 @@ const Invoices = {
       const grossProfit = totalIncome - totalCOGS;
       const netProfit = grossProfit - totalExpenses;
 
+      // ── Fallback: if no journal data found, aggregate from invoices/expenses directly ──
+      if (totalIncome === 0 && totalExpenses === 0) {
+        try {
+          const invIncome = db.prepare(`
+            SELECT COALESCE(SUM(il.amount * (1 + COALESCE(i.vat,0)/100)), 0) AS total
+            FROM invoice_lines il
+            JOIN invoices i ON i.id = il.invoice_id
+            WHERE i.status NOT IN ('Draft') AND i.start_date BETWEEN ? AND ?
+          `).get(dateFrom, dateTo);
+          if (invIncome && Number(invIncome.total) > 0) {
+            totalIncome = Number(invIncome.total);
+            incomeAccts.push({ name: 'Invoices Revenue', amount: totalIncome });
+          }
+
+          const expTotal = db.prepare(`
+            SELECT COALESCE(SUM(el.amount), 0) AS total
+            FROM expense_lines el
+            JOIN expenses e ON e.id = el.expense_id
+            WHERE e.approval_status IN ('Approved','Unpaid','Paid') AND e.payment_date BETWEEN ? AND ?
+          `).get(dateFrom, dateTo);
+          if (expTotal && Number(expTotal.total) > 0) {
+            totalExpenses = Number(expTotal.total);
+            expenseAccts.push({ name: 'Expenses Total', amount: totalExpenses });
+          }
+
+          const cogsTotal = db.prepare(`
+            SELECT COALESCE(SUM(el.amount), 0) AS total
+            FROM expense_lines el
+            JOIN expenses e ON e.id = el.expense_id
+            WHERE e.category = 'Cost of Goods Sold' AND e.payment_date BETWEEN ? AND ?
+          `).get(dateFrom, dateTo);
+          if (cogsTotal) totalCOGS = Number(cogsTotal.total);
+        } catch (fbErr) {
+          console.error('[getFinancialReport] fallback error:', fbErr);
+        }
+      }
+
+      // Recompute after fallback
+      const grossProfitFinal = totalIncome - totalCOGS;
+      const netProfitFinal = grossProfitFinal - totalExpenses;
+
       // Add net income to equity for BS balancing
       const retainedEarnings = totalEquity;
-      const totalEquityFull = retainedEarnings + netProfit;
+      const totalEquityFull = retainedEarnings + netProfitFinal;
+
+      // Compute opening/closing cash balances from bank/cash accounts
+      let openingCash = 0, closingCash = 0;
+      for (const a of assetAccts) {
+        const t = (a.type || '').toLowerCase();
+        if (t === 'bank' || t === 'cash') {
+          openingCash += Number(a.amount || 0) - netProfitFinal;
+          closingCash += Number(a.amount || 0);
+        }
+      }
+      if (openingCash < 0 && closingCash > 0) openingCash = closingCash - netProfitFinal;
+
+      // Build period-by-period details from income/expense accounts
+      const allAccts = [...incomeAccts, ...expenseAccts];
+      const details = allAccts.length ? [{
+        period: `${dateFrom} to ${dateTo}`,
+        revenue: totalIncome,
+        investments: 0,
+        otherInflows: 0,
+        operatingExpenses: totalExpenses,
+        capex: 0,
+        otherOutflows: 0,
+        netCashFlow: netProfitFinal,
+        closingBalance: closingCash || netProfitFinal,
+      }] : [];
+
+      // Build trend data for chart
+      const trends = [
+        { period: dateFrom, value: openingCash || 0, type: 'Opening Balance' },
+        { period: dateTo, value: closingCash || netProfitFinal, type: 'Closing Balance' },
+        { period: dateTo, value: netProfitFinal, type: 'Net Cash Flow' },
+      ];
 
       return {
         profitLoss: {
           revenue: totalIncome,
           cogs: totalCOGS,
           operatingExpenses: totalExpenses,
-          grossProfit: grossProfit,
-          netProfit: netProfit,
+          grossProfit: grossProfitFinal,
+          netProfit: netProfitFinal,
           incomeAccounts: incomeAccts,
           expenseAccounts: expenseAccts,
         },
@@ -776,10 +863,16 @@ const Invoices = {
           },
         },
         cashFlow: {
-          operating: netProfit,
-          investing: 0,
-          financing: 0,
-          netCashFlow: netProfit,
+          summary: {
+            operatingCashFlow: netProfitFinal,
+            investingCashFlow: 0,
+            financingCashFlow: 0,
+            netCashFlow: netProfitFinal,
+            openingBalance: openingCash || 0,
+            closingBalance: closingCash || netProfitFinal,
+          },
+          details,
+          trends,
         },
       };
     } catch (error) {

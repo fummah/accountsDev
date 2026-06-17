@@ -144,7 +144,7 @@ const CheckPrinting = () => {
     const coName = co.name || co.companyName || '';
     const coAddr = [co.address || co.address1, co.city && co.state ? `${co.city}, ${co.state}` : (co.city || co.state || ''), co.phone || co.phone_number || ''].filter(Boolean);
 
-    const dateStr   = vals.date ? (vals.date.format ? vals.date.format('M/D/YYYY') : vals.date) : '';
+    const dateStr   = vals.date ? (vals.date.format ? vals.date.format('MM/DD/YYYY') : vals.date) : '';
     const payeeName = vals.payeeName || '';
     const payeeAddr = vals.payeeAddress || '';
     const amt       = Number(vals.amount || 0);
@@ -318,9 +318,6 @@ const CheckPrinting = () => {
       <!-- ═══════════════ STUB 1 ═══════════════ -->
       <div class="stub-wrap">${stub()}</div>
 
-      <!-- ═══════════════ STUB 2 ═══════════════ -->
-      <div class="stub-wrap">${stub()}</div>
-
     </body></html>`;
   };
 
@@ -431,7 +428,7 @@ const CheckPrinting = () => {
 
   const historyColumns = [
     { title: '#', dataIndex: 'reference', key: 'reference', width: 80, render: v => <Text strong>{v || '-'}</Text> },
-    { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('DD MMM YY') : '-' },
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: (v, r) => <Text strong>${fmt(v || r.debit || 0)}</Text> },
     { title: 'Status', key: 'status', width: 80, render: (_, r) => {
@@ -554,7 +551,7 @@ const CheckPrinting = () => {
               {/* Row 4: Payee Address | Memo */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
                 <Form.Item name="payeeAddress" label="Payee Address" style={{ flex: 1 }}>
-                  <TextArea rows={2} placeholder={"P.O. Box 399\nGratz Pa 17030"} style={{ fontFamily: 'inherit' }} />
+                  <TextArea rows={2} placeholder={"P.O Box 123 Test Address 5678"} style={{ fontFamily: 'inherit' }} />
                 </Form.Item>
                 <Form.Item name="memo" label="Memo" style={{ flex: 1 }}>
                   <TextArea rows={2} placeholder="What is this check for?" maxLength={200} showCount onChange={(e) => setWatchMemo(e.target.value)} />

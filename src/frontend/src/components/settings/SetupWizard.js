@@ -195,11 +195,15 @@ const SetupWizard = ({ onComplete, modal = false }) => {
         await window.electronAPI?.settingsSet?.('date_format', vals.date_format || 'MM/DD/YYYY');
         await window.electronAPI?.settingsSet?.('tax_jurisdiction', vals.jurisdiction || 'US');
         await window.electronAPI?.settingsSet?.('fiscal_year_start', vals.fiscal_year_start || 'january');
-        // Also save VAT rate to company
-        if (vals.vat_rate != null) {
-          const compVals = companyForm.getFieldsValue();
-          await window.electronAPI?.saveCompany?.({ ...compVals, industry, logo, vat_rate: vals.vat_rate });
-        }
+        // Save currency, tax rate, and tax name to company record
+        const compVals = companyForm.getFieldsValue();
+        await window.electronAPI?.saveCompany?.({
+          ...compVals, industry, logo, currency: vals.base_currency || '',
+          vat_rate: vals.tax_rate != null ? vals.tax_rate : 0,
+          tax_name: vals.tax_name || 'VAT',
+          fy_start: vals.fiscal_year_start || '',
+          terms: vals.terms != null ? vals.terms : 30,
+        });
       } catch {}
     }
     if (step === 6) {
@@ -222,6 +226,9 @@ const SetupWizard = ({ onComplete, modal = false }) => {
           bank_name: vals.bank_name || '',
           account_number: vals.account_number || '',
           branch_code: vals.branch_code || '',
+          routing_number: vals.routing_number || '',
+          account_type: vals.account_type || 'Checking',
+          opening_balance: Number(vals.opening_balance) || 0,
         });
       } catch {}
     }
@@ -243,11 +250,16 @@ const SetupWizard = ({ onComplete, modal = false }) => {
         industry,
         logo,
         currency: currVals.base_currency || '',
-        vat_rate: currVals.vat_rate || 0,
+        vat_rate: currVals.tax_rate || 0,
+        tax_name: currVals.tax_name || 'VAT',
         fy_start: currVals.fiscal_year_start || '',
+        terms: currVals.terms != null ? currVals.terms : 30,
         bank_name: bankVals.bank_name || '',
         account_number: bankVals.account_number || '',
         branch_code: bankVals.branch_code || '',
+        routing_number: bankVals.routing_number || '',
+        account_type: bankVals.account_type || 'Checking',
+        opening_balance: Number(bankVals.opening_balance) || 0,
       });
       await window.electronAPI?.setupWizardComplete?.({
         company: compVals,
@@ -349,6 +361,17 @@ const SetupWizard = ({ onComplete, modal = false }) => {
               <Col span={12}>
                 <Form.Item name="reg_number" label="Registration Number">
                   <Input placeholder="Company registration #" />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="business_type" label="Business Type">
+                  <Select placeholder="Select business type">
+                    <Option value="pty">Pty Ltd</Option>
+                    <Option value="sole">Sole Proprietor</Option>
+                    <Option value="ngo">Non-Profit</Option>
+                  </Select>
                 </Form.Item>
               </Col>
             </Row>
@@ -522,14 +545,19 @@ const SetupWizard = ({ onComplete, modal = false }) => {
               </Col>
             </Row>
             <Row gutter={16}>
-              <Col span={12}>
+              <Col span={8}>
                 <Form.Item name="tax_rate" label="Default Tax Rate (%)">
                   <InputNumber min={0} max={100} step={0.5} style={{ width: '100%' }} formatter={v => `${v}%`} parser={v => v.replace('%', '')} />
                 </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col span={8}>
                 <Form.Item name="tax_name" label="Tax Name (e.g. VAT, GST, Sales Tax)">
                   <Input placeholder="VAT" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="terms" label="Default Invoice Terms (Days)" initialValue={30}>
+                  <InputNumber min={0} max={365} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
             </Row>

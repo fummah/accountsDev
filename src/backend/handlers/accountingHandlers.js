@@ -16,6 +16,7 @@ const {Budgets, Customers,
 const Entities = require('../models/entities');
 const CashflowProjections = require('../models/cashflowProjections');
 const AuditLog = require('../models/auditLog');
+const db = require('../models/dbmgr');
 const { authorize } = require('../security/authz');
 const Settings = require('../models/settings');
 const Anchors = require('../models/auditAnchors');
@@ -34,6 +35,46 @@ function registerAccountingHandlers() {
       }
     }
   };
+
+  // Auto-repost all unposted transactions to general ledger on startup
+  try {
+    const repostAll = async () => {
+      console.log('[accountingHandlers] Running startup auto-repost check...');
+      // Invoices
+      const invoices = db.prepare("SELECT * FROM invoices WHERE status IS NULL OR status NOT IN ('Draft')").all();
+      let invCount = 0;
+      for (const inv of invoices) {
+        try {
+          const res = JournalEntries.postInvoice(inv);
+          if (res?.success) invCount++;
+        } catch {}
+      }
+      // Expenses
+      let expenses = [];
+      try { expenses = db.prepare("SELECT * FROM expenses").all(); } catch {}
+      let expCount = 0;
+      for (const exp of expenses) {
+        try {
+          const res = JournalEntries.postExpense(exp);
+          if (res?.success) expCount++;
+        } catch {}
+      }
+      // Payments
+      let payments = [];
+      try { payments = db.prepare("SELECT * FROM payments").all(); } catch {}
+      let pmtCount = 0;
+      for (const pmt of payments) {
+        try {
+          const res = JournalEntries.postPayment(pmt);
+          if (res?.success) pmtCount++;
+        } catch {}
+      }
+      console.log(`[accountingHandlers] Auto-repost completed. Invoices posted: ${invCount}, Expenses: ${expCount}, Payments: ${pmtCount}`);
+    };
+    setTimeout(repostAll, 1000);
+  } catch (repostErr) {
+    console.error('[accountingHandlers] Auto-repost failed:', repostErr);
+  }
 
   // Chart of Accounts handlers
   safeHandle('get-chart-of-accounts', async () => {
@@ -452,8 +493,11 @@ safeHandle('budget-periods', async () => {
           COALESCE(SUM(jl.debit),  0) AS totalDebit,
           COALESCE(SUM(jl.credit), 0) AS totalCredit
         FROM chart_of_accounts coa
-        LEFT JOIN journal_lines jl   ON jl.account_id = coa.id
-        LEFT JOIN journal_entries je ON je.id = jl.journal_id AND je.status = 'Posted'
+        LEFT JOIN (
+          SELECT jl.*
+          FROM journal_lines jl
+          JOIN journal_entries je ON jl.journal_id = je.id AND je.status = 'Posted'
+        ) jl ON jl.account_id = coa.id
         WHERE coa.status = 'Active'
         GROUP BY coa.id
       `).all();

@@ -168,13 +168,13 @@ const Flow = () => {
   const nodes = [
     // Row 0
     { id: "n-products",      icon: P("/assets/icons/products.svg"),  label: "Products",         col: 0, row: 0, route: "/inner/sales?tab=10" },
-    { id: "n-expenses",      icon: P("/assets/icons/expenses.svg"),  label: "Enter\nBills",     col: 1, row: 0, route: "/inner/expenses" },
-    { id: "n-paybills",      icon: P("/assets/icons/pay.svg"),       label: "Pay Bills",        col: 2, row: 0, route: "/inner/expenses" },
-    { id: "n-analysis",      icon: P("/assets/icons/analysis.svg"),  label: "Analysis",         col: 3, row: 0, route: "/main/accountant/reports" },
+    { id: "n-expenses",      icon: P("/assets/icons/expenses.svg"),  label: "Enter\nBills",     col: 1, row: 0, route: "/main/vendors/bills/expenses" },
+    { id: "n-paybills",      icon: P("/assets/icons/pay.svg"),       label: "Pay Bills",        col: 2, row: 0, route: "/main/vendors/bills/expenses" },
+    { id: "n-analysis",      icon: P("/assets/icons/analysis.svg"),  label: "Analysis",         col: 3, row: 0, route: "/main/analytics" },
     // Row 1
     { id: "n-createsales",   icon: P("/assets/icons/track.svg"),     label: "Create\nSales",    col: 1, row: 1, route: "/inner/sales?tab=1" },
     { id: "n-cashreceipts",  icon: P("/assets/icons/cash.svg"),      label: "Cash\nReceipts",   col: 2, row: 1, route: "/inner/sales?tab=6" },
-    { id: "n-reports",       icon: P("/assets/icons/statement.svg"), label: "Reports",          col: 3, row: 1, route: "/main/accountant/reports" },
+    { id: "n-reports",       icon: P("/assets/icons/statement.svg"), label: "Reports",          col: 3, row: 1, route: "/inner/reports" },
     // Row 2
     { id: "n-quotes",        icon: P("/assets/icons/quotes.svg"),    label: "Quotes",           col: 0, row: 2, route: "/inner/sales?tab=3" },
     { id: "n-createinvoice", icon: P("/assets/icons/invoices.svg"),  label: "Create\nInvoice",  col: 1, row: 2, route: "/inner/sales?tab=2" },
@@ -244,7 +244,7 @@ const Flow = () => {
 
   // Build arrow path data for SVG
   const ARROW_COLOR = "#4096ff";
-  const ARROW_DASH_COLOR = "#91caff";
+  const ARROW_DASH_COLOR = "#1677ff";
   const HEAD = 7; // arrowhead size
 
   // Returns SVG marker id suffix and <marker> element
@@ -381,11 +381,15 @@ const Flow = () => {
         {/* ── Overlay SVG: long animated curved connector from Reports → Quick Panel ── */}
         <style>{`
           @keyframes marchDash {
-            from { stroke-dashoffset: 40; }
+            from { stroke-dashoffset: 80; }
             to   { stroke-dashoffset: 0; }
           }
+          @keyframes glowPulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.5; }
+          }
           .flow-curve-line {
-            animation: marchDash 1.2s linear infinite;
+            animation: marchDash 2s linear infinite, glowPulse 3s ease-in-out infinite;
           }
         `}</style>
         <svg
@@ -427,24 +431,37 @@ const Flow = () => {
             // fallback to 260px if rowHeight not yet measured
             const ey = (rowHeight > 0 ? rowHeight : 580) * 0.45;
 
-            // Cubic bezier control points — long S-curve sweeping down-right
-            // CP1: extend horizontally right from start
-            // CP2: arrive vertically from above at the end
-            const cp1x = sx + (ex - sx) * 0.5;
-            const cp1y = sy;
-            const cp2x = sx + (ex - sx) * 0.6;
-            const cp2y = ey;
+            // Long sweeping S-curve with dramatic arc
+            // CP1: extend far right horizontally from start
+            // CP2: swing down in a wide arc, arriving from above
+            const midX = (sx + ex) / 2;
+            const cp1x = sx + (ex - sx) * 0.7;
+            const cp1y = sy + (ey - sy) * 0.1;
+            const cp2x = sx + (ex - sx) * 0.3;
+            const cp2y = ey - (ey - sy) * 0.3;
 
             return (
-              <path
-                className="flow-curve-line"
-                d={`M ${sx} ${sy} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${ex} ${ey}`}
-                stroke={ARROW_DASH_COLOR}
-                strokeWidth={2.2}
-                strokeDasharray="10 6"
-                fill="none"
-                markerEnd="url(#ah-curve)"
-              />
+              <g>
+                {/* Glow / shadow behind the dashed line */}
+                <path
+                  d={`M ${sx} ${sy} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${ex} ${ey}`}
+                  stroke={ARROW_DASH_COLOR}
+                  strokeWidth={5}
+                  strokeDasharray="10 6"
+                  fill="none"
+                  opacity={0.25}
+                />
+                {/* Main animated dashed curve — longer, slower, dramatic sweep */}
+                <path
+                  className="flow-curve-line"
+                  d={`M ${sx} ${sy} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${ex} ${ey}`}
+                  stroke={ARROW_DASH_COLOR}
+                  strokeWidth={2.5}
+                  strokeDasharray="16 10"
+                  fill="none"
+                  markerEnd="url(#ah-curve)"
+                />
+              </g>
             );
           })()}
         </svg>

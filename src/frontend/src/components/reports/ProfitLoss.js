@@ -107,7 +107,7 @@ const ProfitLoss = () => {
       ['NET INCOME', fmt(s.netIncome), pct(s.netIncome, s.totalIncome)],
     ];
     const rowsHtml = rows.map(r => `<tr><td style="padding:4px 8px">${r[0]}</td><td style="text-align:right;padding:4px 8px">${r[1]}</td><td style="text-align:right;padding:4px 8px">${r[2]}</td></tr>`).join('');
-    const html = `<!doctype html><html><head><title>Profit & Loss</title><style>body{font-family:Arial,sans-serif}table{width:100%;border-collapse:collapse}td{border-bottom:1px solid #eee}tr:last-child td{border-bottom:2px solid #333;font-weight:bold}</style></head><body><h2>Profit & Loss Statement</h2><p>${dateRange[0].format('DD MMM YYYY')} — ${dateRange[1].format('DD MMM YYYY')}</p><table><thead><tr><th style="text-align:left">Account</th><th style="text-align:right">Amount</th><th style="text-align:right">% of Revenue</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
+    const html = `<!doctype html><html><head><title>Profit & Loss</title><style>body{font-family:Arial,sans-serif}table{width:100%;border-collapse:collapse}td{border-bottom:1px solid #eee}tr:last-child td{border-bottom:2px solid #333;font-weight:bold}</style></head><body><h2>Profit & Loss Statement</h2><p>${dateRange[0].format('MM/DD/YYYY')} — ${dateRange[1].format('MM/DD/YYYY')}</p><table><thead><tr><th style="text-align:left">Account</th><th style="text-align:right">Amount</th><th style="text-align:right">% of Revenue</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
     const w = window.open('', '_blank'); w.document.open(); w.document.write(html); w.document.close(); setTimeout(() => w.print(), 300);
   };
 
@@ -144,7 +144,7 @@ const ProfitLoss = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <Title level={3} style={{ margin: 0 }}>Profit & Loss Statement</Title>
-          <Text type="secondary">{dateRange[0]?.format('DD MMM YYYY')} — {dateRange[1]?.format('DD MMM YYYY')}</Text>
+          <Text type="secondary">{dateRange[0]?.format('MM/DD/YYYY')} — {dateRange[1]?.format('MM/DD/YYYY')}</Text>
         </div>
         <Space wrap>
           <Select defaultValue="thisYear" style={{ width: 140 }} onChange={setPreset} suffixIcon={<CalendarOutlined />}>

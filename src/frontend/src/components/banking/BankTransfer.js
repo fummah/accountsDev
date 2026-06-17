@@ -155,7 +155,7 @@ const BankTransfer = () => {
   }, [transferHistory, historySearch, allAccounts]);
 
   const historyColumns = [
-    { title: 'Date', dataIndex: 'date', key: 'date', width: 110, sorter: (a, b) => (a.date || '').localeCompare(b.date || ''), render: v => v ? moment(v).format('DD MMM YYYY') : '-' },
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 110, sorter: (a, b) => (a.date || '').localeCompare(b.date || ''), render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Account', dataIndex: 'accountId', key: 'accountId', width: 160, render: v => getAccountName(v) },
     { title: 'Type', dataIndex: 'type', key: 'type', width: 100, render: v => (v || '').toLowerCase() === 'transfer_out' ? <Tag color="red">Out</Tag> : <Tag color="green">In</Tag> },
     { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 140, ellipsis: true },

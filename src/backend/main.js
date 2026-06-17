@@ -12,6 +12,7 @@ const registerInventoryHandlers = require('./handlers/inventoryHandlers');
 const registerProjectHandlers = require('./handlers/projectHandlers');
 const registerPosHandlers = require('./handlers/posHandlers');
 const registerCrmHandlers = require('./handlers/crmHandlers');
+const registerVendorCreditHandlers = require('./handlers/vendorCreditHandlers');
 const registerBankStatementHandlers = require('./handlers/bankStatementHandlers');
 const registerSettingsHandlers = require('./handlers/settingsHandlers');
 const registerAnalyticsHandlers = require('./handlers/analyticsHandlers');
@@ -461,6 +462,7 @@ const registerAllHandlers = async () => {
     { name: 'Project', register: registerProjectHandlers },
     { name: 'POS', register: registerPosHandlers },
     { name: 'CRM', register: registerCrmHandlers },
+    { name: 'VendorCredits', register: registerVendorCreditHandlers },
     { name: 'BankStatements', register: registerBankStatementHandlers },
     { name: 'BankFeeds', register: require('./handlers/bankFeedHandlers') },
     { name: 'Payments', register: require('./handlers/paymentGatewayHandlers') },
@@ -482,6 +484,7 @@ const registerAllHandlers = async () => {
     { name: 'Webhooks', register: require('./handlers/webhookHandlers') },
     { name: 'ExpenseCategories', register: require('./handlers/expenseCategoryHandlers') },
     { name: 'GapFeatures', register: require('./handlers/gapHandlers') },
+    { name: 'Deposits', register: require('./handlers/depositHandlers').register },
     { name: 'IPC', register: registerIpcHandlers }              // Keep IPC handlers last
   ];
 

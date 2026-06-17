@@ -2,16 +2,7 @@ const { ipcMain } = require('electron');
 const Transactions = require('../models/transactions');
 
 const registerBankingHandlers = () => {
-  // Dedicated deposit & transfer list handlers
-  ipcMain.handle('get-deposits', async () => {
-    try {
-      return Transactions.getDeposits();
-    } catch (error) {
-      console.error('Error fetching deposits:', error);
-      return { error: error.message };
-    }
-  });
-
+  // Deposits now handled by depositHandlers.js
   ipcMain.handle('get-transfers', async () => {
     try {
       return Transactions.getTransfers();
@@ -40,14 +31,6 @@ const registerBankingHandlers = () => {
     }
   });
 
-  ipcMain.handle('create-deposit', async (event, data) => {
-    try {
-      return await Transactions.createDeposit(data);
-    } catch (error) {
-      console.error('Error creating deposit:', error);
-      return { error: error.message };
-    }
-  });
 };
 
 module.exports = registerBankingHandlers;

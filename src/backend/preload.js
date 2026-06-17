@@ -59,7 +59,7 @@ insertQuote: (status,customer,customer_email, islater, billing_address,start_dat
 convertToInvoice: (quote_id) => ipcRenderer.invoke('convertquote', quote_id),
 //Invoices 
 getAllInvoices: () => ipcRenderer.invoke('get-invoices'),
-getInvoicesPaginated: (page, pageSize, search, status) => ipcRenderer.invoke('get-invoices-paginated', page, pageSize, search, status),
+  getInvoicesPaginated: (page, pageSize, search, status, dueFrom, dueTo) => ipcRenderer.invoke('get-invoices-paginated', page, pageSize, search, status, dueFrom, dueTo),
 getInvoiceReport: () => ipcRenderer.invoke('get-invoice-report'),
 getFinancialReport: (start_date, last_date) => ipcRenderer.invoke('get-financial', start_date, last_date),
 getManagementReport: (start_date, last_date) => ipcRenderer.invoke('get-management', start_date, last_date),
@@ -83,6 +83,7 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   // Chart of accounts and fixed assets
   getChartOfAccounts: () => ipcRenderer.invoke('get-chart-of-accounts'),
   getDashboardBalances: () => ipcRenderer.invoke('get-dashboard-balances'),
+  deleteProduct: (id) => ipcRenderer.invoke('delete-product', id),
   insertChartAccount: (payload, type, number, entered_by, openingBalance, status, parentId, description) =>
     ipcRenderer.invoke('insert-chart-account', payload, type, number, entered_by, openingBalance, status, parentId, description),
   updateChartAccount: (accountData) => ipcRenderer.invoke('update-chart-account', accountData),
@@ -123,14 +124,21 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
 
   // Transactions
   getTransactions: () => ipcRenderer.invoke('get-transactions'),
+  getTransaction: (id) => ipcRenderer.invoke('get-transaction', id),
   insertTransaction: (tx) => ipcRenderer.invoke('insert-transaction', tx),
+  updateTransaction: (id, data) => ipcRenderer.invoke('update-transaction', id, data),
+  deleteTransaction: (id) => ipcRenderer.invoke('delete-transaction', id),
   voidTransaction: (id) => ipcRenderer.invoke('void-transaction', id),
   getTrialBalance: (startDate, endDate) => ipcRenderer.invoke('get-trial-balance', startDate, endDate),
   getTrialBalanceConsolidated: (payload) => ipcRenderer.invoke('get-trial-balance-consolidated', payload),
   getTrialBalanceAdvanced: (filters) => ipcRenderer.invoke('get-trial-balance-advanced', filters),
   getDeposits: () => ipcRenderer.invoke('get-deposits'),
+  getDeposit: (id) => ipcRenderer.invoke('get-deposit', id),
   getTransfers: () => ipcRenderer.invoke('get-transfers'),
   createDeposit: (data) => ipcRenderer.invoke('create-deposit', data),
+  updateDeposit: (id, data) => ipcRenderer.invoke('update-deposit', id, data),
+  voidDeposit: (id) => ipcRenderer.invoke('void-deposit', id),
+  getPendingPayments: () => ipcRenderer.invoke('get-pending-payments'),
   createBankTransfer: (data) => ipcRenderer.invoke('create-bank-transfer', data),
   reconcileTransactions: (data) => ipcRenderer.invoke('reconcile-transactions', data),
   createIntercompanyTransfer: (data) => ipcRenderer.invoke('create-intercompany-transfer', data),
@@ -441,6 +449,13 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   journalAnchor: (entryId) => ipcRenderer.invoke('journal-anchor', entryId),
   journalRepostAll: () => ipcRenderer.invoke('journal-repost-all'),
   billPay: (payload) => ipcRenderer.invoke('bill-pay', payload),
+
+  // Vendor Credits
+  vendorCreditsList: (supplierId) => ipcRenderer.invoke('vendor-credits-list', supplierId),
+  vendorCreditsAvailable: (supplierId) => ipcRenderer.invoke('vendor-credits-available', supplierId),
+  vendorCreditsCreate: (data) => ipcRenderer.invoke('vendor-credits-create', data),
+  vendorCreditsApply: (creditId, expenseId, amount) => ipcRenderer.invoke('vendor-credits-apply', { creditId, expenseId, amount }),
+  vendorCreditsVoid: (id) => ipcRenderer.invoke('vendor-credits-void', id),
   // AI Assistant
   assistantAsk: (question) => ipcRenderer.invoke('assistant-ask', question),
 

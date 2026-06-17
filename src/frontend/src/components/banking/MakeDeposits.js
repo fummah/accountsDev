@@ -125,7 +125,7 @@ const MakeDeposits = () => {
   };
 
   const historyColumns = [
-    { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('DD MMM YY') : '-', sorter: (a, b) => new Date(a.date || 0) - new Date(b.date || 0) },
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-', sorter: (a, b) => new Date(a.date || 0) - new Date(b.date || 0) },
     { title: 'Bank Account', dataIndex: 'accountId', key: 'accountId', width: 150, render: v => getAccName(v) },
     { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },

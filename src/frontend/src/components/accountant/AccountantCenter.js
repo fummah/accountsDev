@@ -302,7 +302,7 @@ const AccountantCenter = () => {
   ];
 
   const txnColumns = [
-    { title: 'Date', dataIndex: 'date', key: 'date', width: 90, render: v => v ? moment(v).format('DD MMM') : '-' },
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 90, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
     { title: 'Ref', dataIndex: 'reference', key: 'reference', width: 80, ellipsis: true, render: v => v ? <Tag style={{ fontSize: 11 }}>{v}</Tag> : '-' },
     { title: 'Debit', dataIndex: 'debit', key: 'debit', width: 100, align: 'right', render: v => Number(v) ? <Text style={{ color: '#3f8600', fontWeight: 500 }}>{fmtC(v)}</Text> : <Text type="secondary">-</Text> },
@@ -321,7 +321,7 @@ const AccountantCenter = () => {
             <div>
               <Title level={3} style={{ margin: 0, lineHeight: 1.2 }}>Accountant Center</Title>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                {periodLabel} &middot; {dateRange[0]?.format('DD MMM YYYY')} to {dateRange[1]?.format('DD MMM YYYY')}
+                {periodLabel} &middot; {dateRange[0]?.format('MM/DD/YYYY')} to {dateRange[1]?.format('MM/DD/YYYY')}
               </Text>
             </div>
           </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, Table, Button, Modal, Form, Input, InputNumber, Select, Space, message, Tag, Row, Col, Tooltip, Popconfirm, Drawer } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, FilterOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, FilterOutlined, CopyOutlined } from '@ant-design/icons';
 import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
@@ -45,6 +45,32 @@ const UnifiedItemList = () => {
       console.error('Failed to load income accounts:', e);
     }
   }, []);
+
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [accountForm] = Form.useForm();
+
+  const handleAddAccount = async () => {
+    try {
+      const vals = await accountForm.validateFields();
+      const payload = {
+        name: vals.name,
+        type: 'Income',
+        number: vals.code || '',
+        description: vals.description || '',
+        status: 'Active',
+        entered_by: 'system',
+      };
+      const res = await window.electronAPI.insertChartAccount(payload);
+      if (res?.success) {
+        message.success('Income account created');
+        setAccountModalOpen(false);
+        accountForm.resetFields();
+        fetchIncomeAccounts();
+      } else {
+        message.error(res?.error || 'Failed to create account');
+      }
+    } catch (e) { if (!e?.errorFields) message.error('Failed to create account'); }
+  };
 
   useEffect(() => { fetchItems(); fetchIncomeAccounts(); }, [fetchItems, fetchIncomeAccounts]);
 
@@ -222,7 +248,8 @@ const UnifiedItemList = () => {
             <Col span={12}><Form.Item name="stock" label="Stock / Quantity"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item></Col>
             <Col span={12}>
               <Form.Item name="income_account" label="Income Account" rules={[{ required: true, message: 'Select Income Account' }]}>
-                <Select placeholder="Select Income account" showSearch optionFilterProp="children" allowClear>
+                <Select placeholder="Select Income account" showSearch optionFilterProp="children" allowClear
+                  dropdownRender={(menu) => (<>{menu}<div style={{ padding: '4px 8px', borderTop: '1px solid #e8e8e8' }}><Button type="link" icon={<PlusOutlined />} onClick={() => setAccountModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Income Account</Button></div></>)}>
                   {incomeAccounts.map(acc => (
                     <Option key={acc.id} value={acc.accountName || acc.name}>
                       {acc.accountName || acc.name}{acc.accountNumber ? ` (${acc.accountNumber})` : ''}
@@ -234,6 +261,21 @@ const UnifiedItemList = () => {
           </Row>
         </Form>
       </Drawer>
+
+      {/* Add Income Account Modal */}
+      <Modal title="New Income Account" visible={accountModalOpen} onOk={handleAddAccount} onCancel={() => setAccountModalOpen(false)} okText="Create" destroyOnClose>
+        <Form form={accountForm} layout="vertical" preserve={false}>
+          <Form.Item name="name" label="Account Name" rules={[{ required: true, message: 'Enter account name' }]}>
+            <Input placeholder="e.g. Service Revenue" />
+          </Form.Item>
+          <Form.Item name="code" label="Account Code">
+            <Input placeholder="e.g. 4000" />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea rows={2} placeholder="Optional description" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

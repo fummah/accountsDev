@@ -136,7 +136,7 @@ const BalanceSheet = () => {
     const liabilities = balanceSheet.liabilities;
     const equity = balanceSheet.equity;
     const section = (title, rows, total) => `<h3>${title}</h3><table><thead><tr><th style="text-align:left">Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.isSubcategory ? '&nbsp;&nbsp;&nbsp;&nbsp;' : ''}${r.category}</td><td style="text-align:right">${fmt(r.amount)}</td></tr>`).join('')}</tbody><tfoot><tr><td><strong>Total ${title}</strong></td><td style="text-align:right"><strong>${fmt(total)}</strong></td></tr></tfoot></table>`;
-    const html = `<!doctype html><html><head><title>Balance Sheet</title><style>body{font-family:Arial,sans-serif;font-size:12px}table{width:100%;border-collapse:collapse;margin-bottom:16px}td,th{border:1px solid #ddd;padding:6px}th{background:#f5f5f5}tfoot td{border-top:2px solid #333;font-weight:bold}</style></head><body><h2>Balance Sheet</h2><p>As at ${date.format('DD MMM YYYY')}</p>${section('Assets', assets, s.totalAssets)}${section('Liabilities', liabilities, s.totalLiabilities)}${section('Equity', equity, s.totalEquity)}<h3>Accounting Equation</h3><p>Assets (${fmt(s.totalAssets)}) = Liabilities (${fmt(s.totalLiabilities)}) + Equity (${fmt(s.totalEquity)}) = ${fmt(liabPlusEquity)}</p><p style="color:${isBalanced ? 'green' : 'red'}"><strong>${isBalanced ? 'BALANCED' : 'NOT BALANCED — Difference: ' + fmt(Math.abs(s.totalAssets - liabPlusEquity))}</strong></p></body></html>`;
+    const html = `<!doctype html><html><head><title>Balance Sheet</title><style>body{font-family:Arial,sans-serif;font-size:12px}table{width:100%;border-collapse:collapse;margin-bottom:16px}td,th{border:1px solid #ddd;padding:6px}th{background:#f5f5f5}tfoot td{border-top:2px solid #333;font-weight:bold}</style></head><body><h2>Balance Sheet</h2><p>As at ${date.format('MM/DD/YYYY')}</p>${section('Assets', assets, s.totalAssets)}${section('Liabilities', liabilities, s.totalLiabilities)}${section('Equity', equity, s.totalEquity)}<h3>Accounting Equation</h3><p>Assets (${fmt(s.totalAssets)}) = Liabilities (${fmt(s.totalLiabilities)}) + Equity (${fmt(s.totalEquity)}) = ${fmt(liabPlusEquity)}</p><p style="color:${isBalanced ? 'green' : 'red'}"><strong>${isBalanced ? 'BALANCED' : 'NOT BALANCED — Difference: ' + fmt(Math.abs(s.totalAssets - liabPlusEquity))}</strong></p></body></html>`;
     const w = window.open('', '_blank'); w.document.open(); w.document.write(html); w.document.close(); setTimeout(() => w.print(), 300);
   };
 
@@ -158,7 +158,7 @@ const BalanceSheet = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <Title level={3} style={{ margin: 0 }}><BankOutlined style={{ marginRight: 8 }} />Balance Sheet</Title>
-          <Text type="secondary">As at {date.format('DD MMM YYYY')}</Text>
+          <Text type="secondary">As at {date.format('MM/DD/YYYY')}</Text>
         </div>
         <Space wrap>
           <Select defaultValue="today" style={{ width: 150 }} onChange={setPreset} suffixIcon={<CalendarOutlined />}>

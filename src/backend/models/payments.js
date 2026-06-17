@@ -24,6 +24,8 @@ const Payments = {
       add('customerId', 'INTEGER');
       add('memo',       'TEXT');
       add('reference',  'TEXT');
+      add('status',     "TEXT DEFAULT 'Pending Deposit'");
+      add('deposit_id', 'INTEGER');
     } catch (e) { console.error('payments migration:', e); }
   },
 

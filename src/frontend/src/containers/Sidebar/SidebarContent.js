@@ -103,6 +103,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <span>CRM / Leads</span>
                   </Link>
                 </Menu.Item>
+                <Menu.Item key="main/inventory/items">
+                  <Link to="/main/inventory/items">
+                    <i className="icon icon-apps"/>
+                    <span>Products &amp; Services</span>
+                  </Link>
+                </Menu.Item>
               </SubMenu>
 
               {/* Expenses sub-group */}
@@ -187,12 +193,40 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
               <SubMenu key="sub-more" popupClassName="gx-menu-horizontal" title={
                 <span><i className="icon icon-widgets"/><span>More</span></span>
               }>
-                <Menu.Item key="main/inventory/stock">
-                  <Link to="/main/inventory/stock">
-                    <i className="icon icon-shopping-cart"/>
-                    <span>Inventory</span>
-                  </Link>
-                </Menu.Item>
+                <SubMenu key="sub-inventory" popupClassName="gx-menu-horizontal" title={
+                  <span><i className="icon icon-shopping-cart"/><span>Inventory</span></span>
+                }>
+                  <Menu.Item key="main/inventory/items">
+                    <Link to="/main/inventory/items"><i className="icon icon-apps"/><span>Products &amp; Services</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/stock">
+                    <Link to="/main/inventory/stock"><i className="icon icon-data"/><span>Stock Levels</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/warehouses">
+                    <Link to="/main/inventory/warehouses"><i className="icon icon-building"/><span>Warehouses</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/bom">
+                    <Link to="/main/inventory/bom"><i className="icon icon-widgets"/><span>Bill of Materials</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/serials">
+                    <Link to="/main/inventory/serials"><i className="icon icon-barcode"/><span>Serial Numbers</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/barcodes">
+                    <Link to="/main/inventory/barcodes"><i className="icon icon-tag"/><span>Barcodes</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/adjustments">
+                    <Link to="/main/inventory/adjustments"><i className="icon icon-adjust"/><span>Adjustments</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/pricing-rules">
+                    <Link to="/main/inventory/pricing-rules"><i className="icon icon-calculator"/><span>Pricing Rules</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/pick-pack-ship">
+                    <Link to="/main/inventory/pick-pack-ship"><i className="icon icon-orders"/><span>Pick &#38; Pack &#38; Ship</span></Link>
+                  </Menu.Item>
+                  <Menu.Item key="main/inventory/alerts">
+                    <Link to="/main/inventory/alerts"><i className="icon icon-alert"/><span>Low Stock Alerts</span></Link>
+                  </Menu.Item>
+                </SubMenu>
                 <Menu.Item key="main/employees/center">
                   <Link to="/main/employees/center">
                     <i className="icon icon-profile2"/>

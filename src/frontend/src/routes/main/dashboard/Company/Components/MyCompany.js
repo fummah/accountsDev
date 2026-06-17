@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Card, Tabs, Form, Input, Button, Upload, message, Row, Col, Select } from "antd";
+import { Card, Tabs, Form, Input, Button, Upload, message, Row, Col, Select, InputNumber } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 
 const { TabPane } = Tabs;
@@ -24,13 +24,19 @@ const MyCompany = () => {
             address: data.address,
             email: data.email,
             phone: data.phone,
+            website: data.website,
+            taxId: data.tax_id,
             currency: data.currency,
             fyStart: data.fy_start,
             vat: data.vat_rate,
+            taxName: data.tax_name,
             terms: data.terms,
             bank: data.bank_name,
             accountNumber: data.account_number,
             branchCode: data.branch_code,
+            routingNumber: data.routing_number,
+            accountType: data.account_type,
+            openingBalance: data.opening_balance,
             payments: data.payments ? data.payments.split(',') : [],
           });
           if (data.logo) setLogoBase64(data.logo);
@@ -120,6 +126,16 @@ const MyCompany = () => {
                   <Input placeholder="e.g. +27 81 234 5678" />
                 </Form.Item>
               </Col>
+              <Col span={12}>
+                <Form.Item label="Website" name="website">
+                  <Input placeholder="www.yourbusiness.com" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Tax ID / EIN" name="taxId">
+                  <Input placeholder="XX-XXXXXXX" />
+                </Form.Item>
+              </Col>
               <Col span={24}>
                 <div style={{ marginBottom: 16 }}>
                   <label style={{ display: 'block', marginBottom: 4 }}>Company Logo</label>
@@ -147,14 +163,20 @@ const MyCompany = () => {
                     address: values.address || '',
                     email: values.email || '',
                     phone: values.phone || '',
+                    website: values.website || '',
+                    tax_id: values.taxId || '',
                     logo: typeof logoBase64 === 'string' ? logoBase64 : '',
                     currency: values.currency || '',
                     fy_start: values.fyStart || '',
                     vat_rate: values.vat || 0,
+                    tax_name: values.taxName || '',
                     terms: values.terms || 0,
                     bank_name: values.bank || '',
                     account_number: values.accountNumber || '',
                     branch_code: values.branchCode || '',
+                    routing_number: values.routingNumber || '',
+                    account_type: values.accountType || '',
+                    opening_balance: values.openingBalance || 0,
                     payments: Array.isArray(values.payments) ? values.payments.join(',') : (values.payments || ''),
                   };
                   const res = await window.electronAPI.saveCompany(payload);
@@ -200,6 +222,11 @@ const MyCompany = () => {
                   <Input placeholder="e.g. 30" type="number" />
                 </Form.Item>
               </Col>
+              <Col span={12}>
+                <Form.Item label="Tax Name" name="taxName">
+                  <Input placeholder="e.g. VAT, GST, Sales Tax" />
+                </Form.Item>
+              </Col>
             </Row>
             <Form.Item>
               <Button type="primary" onClick={async () => {
@@ -213,14 +240,20 @@ const MyCompany = () => {
                     address: values.address || '',
                     email: values.email || '',
                     phone: values.phone || '',
+                    website: values.website || '',
+                    tax_id: values.taxId || '',
                     logo: typeof logoBase64 === 'string' ? logoBase64 : '',
                     currency: values.currency || '',
                     fy_start: values.fyStart || '',
                     vat_rate: values.vat || 0,
+                    tax_name: values.taxName || '',
                     terms: values.terms || 0,
                     bank_name: values.bank || '',
                     account_number: values.accountNumber || '',
                     branch_code: values.branchCode || '',
+                    routing_number: values.routingNumber || '',
+                    account_type: values.accountType || '',
+                    opening_balance: values.openingBalance || 0,
                     payments: Array.isArray(values.payments) ? values.payments.join(',') : (values.payments || ''),
                   };
                   const res = await window.electronAPI.saveCompany(payload);
@@ -253,6 +286,26 @@ const MyCompany = () => {
                 </Form.Item>
               </Col>
               <Col span={12}>
+                <Form.Item label="Routing Number" name="routingNumber">
+                  <Input placeholder="XXXXXXXXX" maxLength={9} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Account Type" name="accountType">
+                  <Select placeholder="Select account type">
+                    <Option value="Checking">Checking</Option>
+                    <Option value="Savings">Savings</Option>
+                    <Option value="Money Market">Money Market</Option>
+                    <Option value="Other">Other</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item label="Opening Balance" name="openingBalance">
+                  <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
                 <Form.Item label="Payment Methods Enabled" name="payments">
                   <Select mode="multiple" placeholder="Select methods">
                     <Option value="EFT">EFT</Option>
@@ -274,14 +327,20 @@ const MyCompany = () => {
                     address: values.address || '',
                     email: values.email || '',
                     phone: values.phone || '',
+                    website: values.website || '',
+                    tax_id: values.taxId || '',
                     logo: typeof logoBase64 === 'string' ? logoBase64 : '',
                     currency: values.currency || '',
                     fy_start: values.fyStart || '',
                     vat_rate: values.vat || 0,
+                    tax_name: values.taxName || '',
                     terms: values.terms || 0,
                     bank_name: values.bank || '',
                     account_number: values.accountNumber || '',
                     branch_code: values.branchCode || '',
+                    routing_number: values.routingNumber || '',
+                    account_type: values.accountType || '',
+                    opening_balance: values.openingBalance || 0,
                     payments: Array.isArray(values.payments) ? values.payments.join(',') : (values.payments || ''),
                   };
                   const res = await window.electronAPI.saveCompany(payload);

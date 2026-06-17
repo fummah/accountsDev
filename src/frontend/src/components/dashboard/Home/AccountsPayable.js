@@ -30,7 +30,7 @@ const AccountsPayable = ({ Expensed, ExpenseList }) => {
           <div className="ant-row-flex">
             <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">${formattedNumber(Expensed)}</h2>
           </div>
-          <p className="gx-text-grey">Total A/R Amount</p>
+          <p className="gx-text-grey">Total A/P Amount</p>
          
         </Col>
         <Col lg={12} md={12} sm={12} xs={24}>

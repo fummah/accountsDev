@@ -32,6 +32,7 @@ const Suppliers = {
     account_number	TEXT,
     expense_category	TEXT,
     opening_balance REAL DEFAULT 0.0,
+    balance REAL DEFAULT 0.0,
     as_of	TEXT,
 	entered_by	TEXT,
 	date_entered DATETIME DEFAULT CURRENT_TIMESTAMP,

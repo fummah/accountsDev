@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Button, Input, Card, Space, Tag, Select, message, Popconfirm, Row, Col, Statistic } from 'antd';
-import { PlusOutlined, ReloadOutlined, DeleteOutlined, EyeOutlined, PrinterOutlined } from '@ant-design/icons';
+import { Table, Button, Input, Card, Space, Tag, Select, DatePicker, message, Popconfirm, Row, Col, Statistic } from 'antd';
+import { PlusOutlined, ReloadOutlined, DeleteOutlined, EyeOutlined, PrinterOutlined, CalendarOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
@@ -13,13 +13,14 @@ const InvoiceList = () => {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [dueDateRange, setDueDateRange] = useState(null);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 25, total: 0 });
   const history = useHistory();
 
-  const load = useCallback(async (page, pageSize, searchTerm, status) => {
+  const load = useCallback(async (page, pageSize, searchTerm, status, dueFrom, dueTo) => {
     setLoading(true);
     try {
-      const res = await window.electronAPI.getInvoicesPaginated?.(page || 1, pageSize || 25, searchTerm || '', status || '');
+      const res = await window.electronAPI.getInvoicesPaginated?.(page || 1, pageSize || 25, searchTerm || '', status || '', dueFrom || '', dueTo || '');
       if (res && Array.isArray(res.data)) {
         setInvoices(res.data);
         setPagination(p => ({ ...p, current: page || 1, total: res.total || res.data.length }));
@@ -38,17 +39,43 @@ const InvoiceList = () => {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(1, pagination.pageSize, search, statusFilter); }, []);
+  const getDueParams = () => {
+    if (dueDateRange && dueDateRange[0] && dueDateRange[1]) {
+      return [dueDateRange[0].format('YYYY-MM-DD'), dueDateRange[1].format('YYYY-MM-DD')];
+    }
+    return ['', ''];
+  };
 
-  const handleTableChange = (pag) => load(pag.current, pag.pageSize, search, statusFilter);
-  const handleSearch = () => load(1, pagination.pageSize, search, statusFilter);
-  const handleStatusChange = (v) => { setStatusFilter(v || ''); load(1, pagination.pageSize, search, v || ''); };
+  useEffect(() => {
+    const [df, dt] = getDueParams();
+    load(1, pagination.pageSize, search, statusFilter, df, dt);
+  }, []);
+
+  const handleTableChange = (pag) => {
+    const [df, dt] = getDueParams();
+    load(pag.current, pag.pageSize, search, statusFilter, df, dt);
+  };
+  const handleSearch = () => {
+    const [df, dt] = getDueParams();
+    load(1, pagination.pageSize, search, statusFilter, df, dt);
+  };
+  const handleStatusChange = (v) => {
+    setStatusFilter(v || '');
+    const [df, dt] = getDueParams();
+    load(1, pagination.pageSize, search, v || '', df, dt);
+  };
+  const handleDueDateChange = (dates) => {
+    setDueDateRange(dates);
+    const [df, dt] = dates ? [dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD')] : ['', ''];
+    load(1, pagination.pageSize, search, statusFilter, df, dt);
+  };
 
   const handleDelete = async (id) => {
     try {
       await window.electronAPI.deleteRecord?.(id, 'invoices');
       message.success('Invoice deleted');
-      load(pagination.current, pagination.pageSize, search, statusFilter);
+      const [df, dt] = getDueParams();
+      load(pagination.current, pagination.pageSize, search, statusFilter, df, dt);
     } catch { message.error('Delete failed'); }
   };
 
@@ -108,7 +135,14 @@ const InvoiceList = () => {
             <Select placeholder="Status" allowClear style={{ width: 120 }} value={statusFilter || undefined} onChange={handleStatusChange}>
               {Object.keys(statusColors).map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
-            <Button icon={<ReloadOutlined />} onClick={() => load(1, pagination.pageSize, search, statusFilter)} />
+            <DatePicker.RangePicker
+              value={dueDateRange}
+              onChange={handleDueDateChange}
+              placeholder={['Due from', 'Due to']}
+              style={{ width: 220 }}
+              allowClear
+            />
+            <Button icon={<ReloadOutlined />} onClick={() => { const [df, dt] = getDueParams(); load(1, pagination.pageSize, search, statusFilter, df, dt); }} />
             <Button type="primary" icon={<PlusOutlined />} onClick={() => history.push('/main/customers/invoices/new')}>
               New Invoice
             </Button>

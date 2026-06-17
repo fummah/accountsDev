@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Card, Table, Button, Modal, Form, Input, DatePicker, Select, message, Space, Divider, Row, Col, InputNumber, Tag, Drawer, Statistic } from 'antd';
-import { PlusOutlined, DownloadOutlined, ReloadOutlined, SearchOutlined, EditOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Modal, Form, Input, DatePicker, Select, message, Space, Divider, Row, Col, InputNumber, Tag, Drawer, Statistic, Tooltip, Typography } from 'antd';
+import { PlusOutlined, DownloadOutlined, ReloadOutlined, SearchOutlined, EditOutlined, EyeOutlined, DeleteOutlined, MinusCircleOutlined, FileTextOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
+const { Text } = Typography;
 
 const ExpenseTracking = () => {
   const { symbol: cSym } = useCurrency();
@@ -23,6 +24,7 @@ const ExpenseTracking = () => {
   const [editingExpense, setEditingExpense] = useState(null);
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [viewExpense, setViewExpense] = useState(null);
+  const [expenseLines, setExpenseLines] = useState([{ key: Date.now(), category: '', description: '', amount: 0 }]);
 
   const loadExpenses = useCallback(async () => {
     setLoading(true);
@@ -66,6 +68,11 @@ const ExpenseTracking = () => {
     loadCategories();
   }, [loadExpenses, loadSuppliers, loadAccounts, loadCategories]);
 
+  const addExpLine = () => setExpenseLines([...expenseLines, { key: Date.now(), category: '', description: '', amount: 0 }]);
+  const removeExpLine = (key) => { if (expenseLines.length > 1) setExpenseLines(expenseLines.filter(l => l.key !== key)); };
+  const updateExpLine = (key, field, value) => setExpenseLines(expenseLines.map(l => l.key === key ? { ...l, [field]: value } : l));
+  const expenseTotal = expenseLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+
   const filtered = useMemo(() => {
     let list = expenses || [];
     const [start, end] = filters.dateRange;
@@ -107,10 +114,10 @@ const ExpenseTracking = () => {
     }
   ];
 
-  const showDrawer = () => { setEditingExpense(null); form.resetFields(); form.setFieldsValue({ payment_date: moment(), payment_method: 'cash' }); setDrawerOpen(true); };
+  const showDrawer = () => { setEditingExpense(null); form.resetFields(); setExpenseLines([{ key: Date.now(), category: '', description: '', amount: 0 }]); form.setFieldsValue({ payment_date: moment(), payment_method: 'cash' }); setDrawerOpen(true); };
   const hideDrawer = () => { setDrawerOpen(false); setEditingExpense(null); form.resetFields(); };
 
-  const openEditExpense = (record) => {
+  const openEditExpense = async (record) => {
     setEditingExpense(record);
     form.setFieldsValue({
       supplierId: record.payee || record.payee_name,
@@ -118,10 +125,17 @@ const ExpenseTracking = () => {
       payment_method: record.payment_method || 'cash',
       accountId: record.payment_account,
       ref_no: record.ref_no,
-      line_category: record.category || 'Expense',
-      amount: Number(record.amount || 0),
-      description: record.description,
     });
+    try {
+      const full = await window.electronAPI.getSingleExpense(record.id);
+      if (full && full.lines && full.lines.length > 0) {
+        setExpenseLines(full.lines.map((l, i) => ({ key: i, category: l.category || l.accountName || '', description: l.description || '', amount: Number(l.amount) || 0 })));
+      } else {
+        setExpenseLines([{ key: 0, category: record.category || 'Expense', description: record.description || '', amount: Number(record.amount || 0) }]);
+      }
+    } catch {
+      setExpenseLines([{ key: 0, category: record.category || 'Expense', description: record.description || '', amount: Number(record.amount || 0) }]);
+    }
     setDrawerOpen(true);
   };
 
@@ -136,6 +150,10 @@ const ExpenseTracking = () => {
   const handleAddExpense = async () => {
     try {
       const values = await form.validateFields();
+      const validLines = expenseLines.filter(l => Number(l.amount) > 0);
+      if (validLines.length === 0) {
+        return message.warning('Add at least one expense line with an amount');
+      }
       setLoading(true);
       const payee = values.supplierId;
       const payment_account = values.accountId ? String(values.accountId) : 'Accounts Payable';
@@ -145,7 +163,6 @@ const ExpenseTracking = () => {
       const category = 'supplier';
       const entered_by = 'system';
       const approval_status = 'Pending';
-      const expenseLines = [{ category: values.line_category || 'Expense', description: values.description || '', amount: Number(values.amount) || 0 }];
 
       let res;
       if (editingExpense && editingExpense.id) {
@@ -158,7 +175,7 @@ const ExpenseTracking = () => {
           ref_no,
           category,
           approval_status,
-          lines: expenseLines,
+          lines: validLines.map(l => ({ category: l.category || 'Expense', description: l.description || '', amount: Number(l.amount) || 0 })),
         });
         if (res && res.success) {
           message.success('Expense updated');
@@ -168,7 +185,8 @@ const ExpenseTracking = () => {
           throw new Error(res?.error || 'Failed to update expense');
         }
       } else {
-        res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status, expenseLines);
+        res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status,
+          validLines.map(l => ({ category: l.category || 'Expense', description: l.description || '', amount: Number(l.amount) || 0 })));
         if (res && res.success) {
           message.success('Expense created');
           hideDrawer();
@@ -256,16 +274,17 @@ const ExpenseTracking = () => {
           <Input.Search allowClear placeholder="Search description, category, payee" prefix={<SearchOutlined />}
             onSearch={(val) => setFilters(f => ({ ...f, q: val }))} style={{ width: 280 }} />
           <Button type="primary" icon={<PlusOutlined />} onClick={showDrawer}>Add Expense</Button>
+          <Button icon={<FileTextOutlined />} onClick={() => window.location.hash = '#/main/vendors/bills/enter'}>Enter Bill</Button>
         </Space>
         <Table columns={columns} dataSource={filtered} loading={loading} rowKey={(r) => r.id || r.key}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} expenses` }} size="middle" />
       </Card>
 
       {/* Add Expense Drawer */}
-      <Drawer title={editingExpense ? 'Edit Expense' : 'Add Expense'} width={560} visible={drawerOpen} onClose={hideDrawer} destroyOnClose
+      <Drawer title={editingExpense ? 'Edit Expense' : 'Add Expense'} width={600} visible={drawerOpen} onClose={hideDrawer} destroyOnClose
         footer={<div style={{ textAlign: 'right' }}><Button onClick={hideDrawer} style={{ marginRight: 8 }}>Cancel</Button><Button type="primary" onClick={handleAddExpense}>{editingExpense ? 'Update' : 'Save Expense'}</Button></div>}>
         <Form form={form} layout="vertical">
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+          <Row gutter={12}>
             <Col span={24}>
               <Form.Item name="supplierId" label="Supplier / Vendor" rules={[{ required: true, message: 'Select supplier/vendor' }]}>
                 <Select showSearch optionFilterProp="children" placeholder="Select supplier/vendor"
@@ -277,13 +296,13 @@ const ExpenseTracking = () => {
               </Form.Item>
             </Col>
           </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}>
+          <Row gutter={12}>
+            <Col span={8}>
               <Form.Item name="payment_date" label="Date" rules={[{ required: true }]}>
                 <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="payment_method" label="Payment Method" initialValue="cash">
                 <Select>
                   <Option value="cash">Cash</Option>
@@ -294,9 +313,14 @@ const ExpenseTracking = () => {
                 </Select>
               </Form.Item>
             </Col>
+            <Col span={8}>
+              <Form.Item name="ref_no" label="Reference #">
+                <Input placeholder="INV-001, PO-123" />
+              </Form.Item>
+            </Col>
           </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}>
+          <Row gutter={12}>
+            <Col span={24}>
               <Form.Item name="accountId" label="Payment Account">
                 <Select showSearch optionFilterProp="children" placeholder="Account (optional)" allowClear>
                   {accounts.map(a => (
@@ -305,36 +329,65 @@ const ExpenseTracking = () => {
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={12}>
-              <Form.Item name="ref_no" label="Reference #">
-                <Input placeholder="INV-001, PO-123, etc." />
-              </Form.Item>
-            </Col>
           </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}>
-              <Form.Item name="line_category" label="Category" initialValue="Expense">
-                <Select showSearch optionFilterProp="children" placeholder="Select category"
-                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Category</Button></>)}>
+
+          <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0 12px' }}>Expense Lines</Divider>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 6, padding: '0 4px' }}>
+              <Text strong style={{ flex: 2, fontSize: 11 }}>Category</Text>
+              <Text strong style={{ flex: 2, fontSize: 11 }}>Description</Text>
+              <Text strong style={{ flex: 1, fontSize: 11 }}>Amount ({cSym})</Text>
+              <div style={{ width: 32 }} />
+            </div>
+            {expenseLines.map((line) => (
+              <div key={line.key} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                <Select
+                  style={{ flex: 2 }}
+                  value={line.category || undefined}
+                  onChange={(v) => updateExpLine(line.key, 'category', v)}
+                  placeholder="Category"
+                  showSearch
+                  optionFilterProp="children"
+                  allowClear
+                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" size="small" icon={<PlusOutlined />} onClick={() => setCatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>New Category</Button></>)}
+                >
                   {categories.map(c => (
                     <Option key={c.id} value={c.name}>
-                      <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: 3, background: c.color || '#1890ff', marginRight: 6, verticalAlign: 'middle' }} />
                       {c.name}
                     </Option>
                   ))}
                   {categories.length === 0 && <Option value="Expense">Expense</Option>}
                 </Select>
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="amount" label="Amount (R)" rules={[{ required: true, message: 'Enter amount' }]}>
-                <InputNumber style={{ width: '100%' }} min={0} precision={2} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="description" label="Description">
-            <Input.TextArea rows={3} placeholder="Describe the expense..." />
-          </Form.Item>
+                <Input
+                  style={{ flex: 2 }}
+                  value={line.description}
+                  onChange={(e) => updateExpLine(line.key, 'description', e.target.value)}
+                  placeholder="Description"
+                />
+                <InputNumber
+                  style={{ flex: 1 }}
+                  min={0}
+                  step={0.01}
+                  value={line.amount}
+                  onChange={(v) => updateExpLine(line.key, 'amount', v || 0)}
+                  formatter={v => v ? `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                  parser={v => v.replace(/,/g, '')}
+                />
+                <Tooltip title="Remove">
+                  <Button size="small" danger icon={<MinusCircleOutlined />} onClick={() => removeExpLine(line.key)} disabled={expenseLines.length <= 1} />
+                </Tooltip>
+              </div>
+            ))}
+            <Button type="dashed" onClick={addExpLine} block icon={<PlusOutlined />} style={{ borderRadius: 6 }}>
+              Add Line
+            </Button>
+          </div>
+
+          <div style={{ textAlign: 'right', marginBottom: 8, padding: '8px 12px', background: '#f6f8fa', borderRadius: 6 }}>
+            <Text style={{ fontSize: 13, marginRight: 16 }}>Total:</Text>
+            <Text strong style={{ fontSize: 16 }}>{cSym} {expenseTotal.toFixed(2)}</Text>
+          </div>
         </Form>
       </Drawer>
 

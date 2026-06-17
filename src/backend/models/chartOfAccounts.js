@@ -183,9 +183,13 @@ const ChartOfAccounts = {
     return { ...r, accountName: r.name, accountType: r.type, accountCode: r.number, normalBalance: nb, balance };
   },
 
-  // ── Find system account by sub-type ────────────────────────────────────
+  // ── Find system account by sub-type or name ────────────────────────────
   getSystemAccount: (subType) => {
-    return db.prepare("SELECT * FROM chart_of_accounts WHERE subType = ? AND isSystem = 1 LIMIT 1").get(subType);
+    let acct = db.prepare("SELECT * FROM chart_of_accounts WHERE subType = ? AND isSystem = 1 LIMIT 1").get(subType);
+    if (!acct) acct = db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND isSystem = 1 LIMIT 1").get(subType);
+    if (!acct) acct = db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1").get(subType);
+    if (!acct) acct = db.prepare("SELECT * FROM chart_of_accounts WHERE subType = ? LIMIT 1").get(subType);
+    return acct;
   },
 
   // ── Find account by name ──────────────────────────────────────────────

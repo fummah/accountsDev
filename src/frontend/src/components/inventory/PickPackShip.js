@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, Select, Input, InputNumber, DatePicker, message, Tag, Space, Row, Col, Steps, Tabs, Descriptions } from 'antd';
-import { ShoppingOutlined, CheckCircleOutlined, InboxOutlined, CarOutlined, PlusOutlined, EyeOutlined } from '@ant-design/icons';
+import { ShoppingOutlined, CheckCircleOutlined, InboxOutlined, CarOutlined, PlusOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import moment from 'moment';
 
 const { Option } = Select;
@@ -96,6 +96,7 @@ const PickPackShip = () => {
   };
 
   const addLine = () => setOrderLines([...orderLines, { item_id: null, description: '', quantity: 1, unit_price: 0 }]);
+  const removeLine = (idx) => { if (orderLines.length > 1) setOrderLines(orderLines.filter((_, i) => i !== idx)); };
   const updateLine = (idx, field, value) => {
     const lines = [...orderLines];
     lines[idx][field] = value;
@@ -151,19 +152,26 @@ const PickPackShip = () => {
           </Row>
           <Form.Item name="shipping_address" label="Shipping Address"><Input.TextArea rows={2} /></Form.Item>
           <h4>Line Items</h4>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6, padding: '0 4px' }}>
+            <span style={{ flex: 3, fontSize: 11, fontWeight: 600 }}>Item</span>
+            <span style={{ flex: 2, fontSize: 11, fontWeight: 600 }}>Description</span>
+            <span style={{ flex: 1, fontSize: 11, fontWeight: 600 }}>Qty</span>
+            <span style={{ flex: 1, fontSize: 11, fontWeight: 600 }}>Price</span>
+            <span style={{ flex: 1, fontSize: 11, fontWeight: 600 }}>Total</span>
+            <div style={{ width: 24 }} />
+          </div>
           {orderLines.map((line, idx) => (
-            <Row key={idx} gutter={8} style={{ marginBottom: 8 }}>
-              <Col span={8}>
-                <Select placeholder="Item" value={line.item_id} onChange={v => updateLine(idx, 'item_id', v)} showSearch allowClear style={{ width: '100%' }}
-                  filterOption={(i, o) => (o?.children || '').toString().toLowerCase().includes(i.toLowerCase())}>
-                  {items.map(it => <Option key={it.id} value={it.id}>{it.name}</Option>)}
-                </Select>
-              </Col>
-              <Col span={6}><Input placeholder="Description" value={line.description} onChange={e => updateLine(idx, 'description', e.target.value)} /></Col>
-              <Col span={4}><InputNumber placeholder="Qty" min={1} value={line.quantity} onChange={v => updateLine(idx, 'quantity', v)} style={{ width: '100%' }} /></Col>
-              <Col span={4}><InputNumber placeholder="Price" min={0} value={line.unit_price} onChange={v => updateLine(idx, 'unit_price', v)} style={{ width: '100%' }} /></Col>
-              <Col span={2}><span>${((line.quantity || 0) * (line.unit_price || 0)).toFixed(2)}</span></Col>
-            </Row>
+            <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+              <Select placeholder="Item" value={line.item_id} onChange={v => updateLine(idx, 'item_id', v)} showSearch allowClear style={{ flex: 3 }}
+                filterOption={(i, o) => (o?.children || '').toString().toLowerCase().includes(i.toLowerCase())}>
+                {items.map(it => <Option key={it.id} value={it.id}>{it.name}</Option>)}
+              </Select>
+              <Input placeholder="Description" value={line.description} onChange={e => updateLine(idx, 'description', e.target.value)} style={{ flex: 2 }} />
+              <InputNumber placeholder="Qty" min={1} value={line.quantity} onChange={v => updateLine(idx, 'quantity', v)} style={{ flex: 1 }} />
+              <InputNumber placeholder="Price" min={0} value={line.unit_price} onChange={v => updateLine(idx, 'unit_price', v)} style={{ flex: 1 }} />
+              <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>${((line.quantity || 0) * (line.unit_price || 0)).toFixed(2)}</span>
+              {orderLines.length > 1 && <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeLine(idx)} />}
+            </div>
           ))}
           <Button type="dashed" onClick={addLine} style={{ width: '100%' }}>+ Add Line</Button>
         </Form>

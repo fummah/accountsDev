@@ -148,7 +148,7 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
   const columns = [
     {
       title: 'Date', dataIndex: 'date', key: 'date', width: 110,
-      render: (v) => v ? moment(v).format('DD MMM YYYY') : <Text type="secondary">—</Text>,
+      render: (v) => v ? moment(v).format('MM/DD/YYYY') : <Text type="secondary">—</Text>,
       sorter: (a, b) => (a.date || '').localeCompare(b.date || ''),
       defaultSortOrder: 'descend',
     },
@@ -338,10 +338,10 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
               ['Amount Paid', fmt(detailRecord.amount)],
               ['Remaining Balance', detailRecord.invoiceTotal != null ? fmt(Number(detailRecord.invoiceTotal) - Number(detailRecord.amount)) : 'N/A'],
               ['Payment Method', detailRecord.paymentMethod || '—'],
-              ['Payment Date', detailRecord.date ? moment(detailRecord.date).format('DD MMM YYYY') : '—'],
+              ['Payment Date', detailRecord.date ? moment(detailRecord.date).format('MM/DD/YYYY') : '—'],
               ['Reference', detailRecord.reference || '—'],
               ['Memo', detailRecord.memo || '—'],
-              ['Recorded On', detailRecord.createdAt ? moment(detailRecord.createdAt).format('DD MMM YYYY HH:mm') : '—'],
+              ['Recorded On', detailRecord.createdAt ? moment(detailRecord.createdAt).format('MM/DD/YYYY HH:mm') : '—'],
             ].map(([label, value]) => (
               <tr key={label} style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ padding: '8px 12px', fontWeight: 600, color: '#666', width: '40%' }}>{label}</td>

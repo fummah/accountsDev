@@ -170,7 +170,7 @@ const TransferFunds = () => {
   }, [accounts, toAccountId]);
 
   const historyColumns = [
-    { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('DD MMM YY') : '-', sorter: (a, b) => new Date(a.date || 0) - new Date(b.date || 0) },
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-', sorter: (a, b) => new Date(a.date || 0) - new Date(b.date || 0) },
     { title: 'From Account', dataIndex: 'fromAccountId', key: 'fromAccountId', width: 140, render: v => getAccName(v) },
     { title: 'To Account', dataIndex: 'toAccountId', key: 'toAccountId', width: 140, render: v => getAccName(v) },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: v => <Text strong style={{ color: '#1890ff' }}>{cSym} {fmt(v)}</Text> },

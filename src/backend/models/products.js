@@ -102,6 +102,16 @@ const Products = {
       throw error;
     }
   },
+
+  deleteProduct: (id) => {
+    try {
+      const result = db.prepare('DELETE FROM products WHERE id = ?').run(id);
+      return { success: result.changes > 0 };
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      return { success: false, error: error.message };
+    }
+  },
 };
 
 // Ensure the Products table is created

@@ -86,10 +86,10 @@ function registerCustomerHandlers() {
             const invoiceId = paymentData.invoiceId;
             const payAmount = Number(paymentData.amount) || 0;
 
-            // Insert payment record
+            // Insert payment record with Pending Deposit status
             await db.run(
-                `INSERT INTO payments (invoiceId, amount, paymentMethod, date, createdAt) 
-                 VALUES (?, ?, ?, ?, datetime('now'))`,
+                `INSERT INTO payments (invoiceId, amount, paymentMethod, date, createdAt, status) 
+                 VALUES (?, ?, ?, ?, datetime('now'), 'Pending Deposit')`,
                 [invoiceId, payAmount, paymentData.paymentMethod, paymentData.date || paymentData.paymentDate]
             );
 

@@ -52,6 +52,7 @@ const InvoiceCustomization = () => {
   const [form] = Form.useForm();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('1');
 
   useEffect(() => {
     loadSettings();
@@ -164,9 +165,9 @@ const InvoiceCustomization = () => {
         </Space>
       </div>
 
-      <Form form={form} layout="vertical" initialValues={settings}>
-        <Tabs defaultActiveKey="1">
+      <Tabs activeKey={activeTab} onChange={setActiveTab} destroyInactiveTabPane>
           <TabPane tab="Branding & Logo" key="1">
+            <Form form={form} layout="vertical">
             <Card size="small">
               <Row gutter={16}>
                 <Col span={12}>
@@ -200,9 +201,11 @@ const InvoiceCustomization = () => {
                 </Col>
               </Row>
             </Card>
+            </Form>
           </TabPane>
 
           <TabPane tab="Typography" key="2">
+            <Form form={form} layout="vertical">
             <Card size="small">
               <Row gutter={16}>
                 <Col span={8}>
@@ -228,9 +231,11 @@ const InvoiceCustomization = () => {
                 </Col>
               </Row>
             </Card>
+            </Form>
           </TabPane>
 
           <TabPane tab="Layout & Columns" key="3">
+            <Form form={form} layout="vertical">
             <Card size="small">
               <Row gutter={16}>
                 <Col span={8}>
@@ -259,9 +264,11 @@ const InvoiceCustomization = () => {
                 </Col>
               </Row>
             </Card>
+            </Form>
           </TabPane>
 
           <TabPane tab="Labels" key="4">
+            <Form form={form} layout="vertical">
             <Card size="small">
               <Row gutter={16}>
                 <Col span={8}><Form.Item name="invoiceLabel" label="Invoice Title"><Input /></Form.Item></Col>
@@ -277,9 +284,11 @@ const InvoiceCustomization = () => {
                 <Col span={8}><Form.Item name="notesLabel" label="Notes Label"><Input /></Form.Item></Col>
               </Row>
             </Card>
+            </Form>
           </TabPane>
 
           <TabPane tab="Footer & Terms" key="5">
+            <Form form={form} layout="vertical">
             <Card size="small">
               <Form.Item name="footerText" label="Footer Message">
                 <Input placeholder="e.g. Thank you for your business!" />
@@ -291,9 +300,9 @@ const InvoiceCustomization = () => {
                 <TextArea rows={4} placeholder="Your terms and conditions..." />
               </Form.Item>
             </Card>
+            </Form>
           </TabPane>
         </Tabs>
-      </Form>
     </div>
   );
 };

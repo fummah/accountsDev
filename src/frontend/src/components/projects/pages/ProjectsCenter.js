@@ -209,8 +209,8 @@ const ProjectsCenter = () => {
 
   const invoiceColumns = [
     { title: '#', dataIndex: 'number', key: 'number', width: 100, render: (v, r) => <Button type="link" size="small" style={{ padding: 0 }} onClick={() => history.push(`/main/customers/invoices/edit/${r.id}`)}>{v || `INV-${r.id}`}</Button> },
-    { title: 'Date', dataIndex: 'start_date', key: 'start_date', width: 100, render: v => v ? moment(v).format('DD MMM YYYY') : '-' },
-    { title: 'Due', dataIndex: 'last_date', key: 'last_date', width: 100, render: v => v ? moment(v).format('DD MMM YYYY') : '-' },
+    { title: 'Date', dataIndex: 'start_date', key: 'start_date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
+    { title: 'Due', dataIndex: 'last_date', key: 'last_date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: v => {
       const colors = { Paid: 'green', Sent: 'blue', Draft: 'default', Overdue: 'red', Pending: 'orange', Cancelled: 'red', 'Partially Paid': 'orange', Unpaid: 'volcano' };
       return <Tag color={colors[v] || 'default'}>{v || 'Draft'}</Tag>;
@@ -224,8 +224,8 @@ const ProjectsCenter = () => {
 
   const quoteColumns = [
     { title: '#', dataIndex: 'number', key: 'number', width: 100, render: (v, r) => <Button type="link" size="small" style={{ padding: 0 }} onClick={() => history.push(`/main/customers/quotes/edit/${r.id}`)}>{v || `QT-${r.id}`}</Button> },
-    { title: 'Date', dataIndex: 'start_date', key: 'start_date', width: 100, render: v => v ? moment(v).format('DD MMM YYYY') : '-' },
-    { title: 'Expiry', dataIndex: 'last_date', key: 'last_date', width: 100, render: v => v ? moment(v).format('DD MMM YYYY') : '-' },
+    { title: 'Date', dataIndex: 'start_date', key: 'start_date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
+    { title: 'Expiry', dataIndex: 'last_date', key: 'last_date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: v => {
       const colors = { Open: 'blue', Sent: 'blue', Draft: 'default', Accepted: 'green', Declined: 'red', Expired: 'orange', Invoiced: 'cyan', Cancelled: 'red' };
       return <Tag color={colors[v] || 'default'}>{v || 'Open'}</Tag>;

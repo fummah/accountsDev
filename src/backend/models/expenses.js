@@ -29,6 +29,7 @@ const Expenses = {
       if (!cols.has('due_date'))  db.prepare('ALTER TABLE expenses ADD COLUMN due_date TEXT').run();
       if (!cols.has('memo'))      db.prepare('ALTER TABLE expenses ADD COLUMN memo TEXT').run();
       if (!cols.has('terms'))     db.prepare('ALTER TABLE expenses ADD COLUMN terms INTEGER DEFAULT 30').run();
+      if (!cols.has('paid_amount')) db.prepare('ALTER TABLE expenses ADD COLUMN paid_amount REAL DEFAULT 0').run();
     } catch (e) {
       console.error('[expenses] migration failed:', e);
     }
@@ -59,53 +60,83 @@ const Expenses = {
       for (const line of expenseLines) {
         await expenseLineStmt.run(expenseId, line.category, line.description, line.amount);
       }
-      // --- GL Posting: double-entry for each expense line to its COA account ---
-      try {
-        const totalAmount = expenseLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-        const txStmt = db.prepare(`INSERT INTO transactions (date, type, amount, description, status, accountId, reference, debit, credit, entered_by) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?)`);
-
-        // Find the payment (credit) account in COA
-        let payAccountId = null;
-        if (payment_account) {
-          const payAccRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(payment_account, payment_account);
-          if (payAccRow) payAccountId = payAccRow.id;
-        }
-        if (!payAccountId) {
-          const fallbackPay = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%bank%' OR LOWER(type) LIKE '%cash%' OR LOWER(name) LIKE '%cash%' LIMIT 1").get();
-          if (fallbackPay) payAccountId = fallbackPay.id;
-        }
-
-        // Credit the payment account (money leaving)
-        txStmt.run(payment_date, 'Expense', totalAmount, `Expense - ${category || 'Payment'}`, payAccountId, ref_no || '', null, totalAmount, entered_by || null);
-
-        // Debit each expense category account
-        for (const line of expenseLines) {
-          const lineAmt = Number(line.amount) || 0;
-          if (lineAmt === 0) continue;
-          let expAccountId = null;
-          const cat = line.category || category || '';
-          if (cat) {
-            const expAccRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(cat, cat);
-            if (expAccRow) expAccountId = expAccRow.id;
+      // Skip GL and vendor balance for Draft status
+      const isDraft = (approval_status || '').toLowerCase() === 'draft';
+      if (!isDraft) {
+        // Update vendor/supplier balance for bills
+        try {
+          const isBill = (payment_method || '').toLowerCase() === 'bill'
+            || (category || '').toLowerCase() === 'bill'
+            || (approval_status || '').toLowerCase() === 'unpaid'
+            || (approval_status || '').toLowerCase() === 'partially paid';
+          if (isBill && payee) {
+            const totalAmount = expenseLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+            db.prepare('UPDATE suppliers SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(totalAmount, Number(payee));
           }
-          if (!expAccountId) {
-            const fallbackExp = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%expense%' LIMIT 1").get();
-            if (fallbackExp) expAccountId = fallbackExp.id;
-          }
-          if (expAccountId) {
-            txStmt.run(payment_date, 'Expense', lineAmt, `Expense - ${line.description || cat}`, expAccountId, ref_no || '', lineAmt, null, entered_by || null);
-            // Update COA balance
-            db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(lineAmt, expAccountId);
-          }
-        }
+        } catch (balErr) { console.error('[expenses] vendor balance update failed:', balErr); }
 
-        // Update payment account balance (decrease)
-        if (payAccountId) {
-          db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) - ? WHERE id = ?').run(totalAmount, payAccountId);
+        // --- GL Posting: double-entry for each expense line to its COA account ---
+        try {
+          const totalAmount = expenseLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+          const txStmt = db.prepare(`INSERT INTO transactions (date, type, amount, description, status, accountId, reference, debit, credit, entered_by) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?)`);
+
+          // Determine if this is a bill (unpaid expense — creates AP liability)
+          const isBill = (payment_method || '').toLowerCase() === 'bill'
+            || (category || '').toLowerCase() === 'bill'
+            || (approval_status || '').toLowerCase() === 'unpaid'
+            || (approval_status || '').toLowerCase() === 'partially paid';
+
+          // For bills, credit Accounts Payable instead of reducing bank
+          let creditAccountId = null;
+          if (isBill) {
+            const apRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = 'Accounts Payable' OR number = '2000' LIMIT 1").get();
+            if (apRow) creditAccountId = apRow.id;
+          }
+          if (!creditAccountId) {
+            // Find the payment (credit) account in COA
+            if (payment_account) {
+              const payAccRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(payment_account, payment_account);
+              if (payAccRow) creditAccountId = payAccRow.id;
+            }
+            if (!creditAccountId) {
+              const fallbackPay = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%bank%' OR LOWER(type) LIKE '%cash%' OR LOWER(name) LIKE '%cash%' LIMIT 1").get();
+              if (fallbackPay) creditAccountId = fallbackPay.id;
+            }
+          }
+
+          // Credit the liability / payment account (money owed or leaving)
+          txStmt.run(payment_date, 'Expense', totalAmount, isBill ? `Bill AP - ${category || 'Bill'}` : `Expense - ${category || 'Payment'}`, creditAccountId, ref_no || '', null, totalAmount, entered_by || null);
+
+          // Debit each expense category account
+          for (const line of expenseLines) {
+            const lineAmt = Number(line.amount) || 0;
+            if (lineAmt === 0) continue;
+            let expAccountId = null;
+            const cat = line.category || category || '';
+            if (cat) {
+              const expAccRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(cat, cat);
+              if (expAccRow) expAccountId = expAccRow.id;
+            }
+            if (!expAccountId) {
+              const fallbackExp = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%expense%' LIMIT 1").get();
+              if (fallbackExp) expAccountId = fallbackExp.id;
+            }
+            if (expAccountId) {
+              txStmt.run(payment_date, 'Expense', lineAmt, `Expense - ${line.description || cat}`, expAccountId, ref_no || '', lineAmt, null, entered_by || null);
+              // Update COA balance
+              db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(lineAmt, expAccountId);
+            }
+          }
+
+          // Update credit account balance (increase for AP liability, decrease for bank/cash)
+          if (creditAccountId) {
+            const creditDelta = isBill ? totalAmount : -totalAmount;
+            db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(creditDelta, creditAccountId);
+          }
+        } catch (txErr) {
+          console.error('Failed to create GL entries for expense:', txErr);
+          return { success: true, expenseId, warning: 'expense_created_but_gl_posting_failed' };
         }
-      } catch (txErr) {
-        console.error('Failed to create GL entries for expense:', txErr);
-        return { success: true, expenseId, warning: 'expense_created_but_gl_posting_failed' };
       }
 
       return { success: true, expenseId,result };
@@ -139,6 +170,7 @@ const Expenses = {
     const stmt = db.prepare(`
       SELECT e.id, e.category, e.payment_date, e.payment_method, e.ref_no, e.payment_account,
              e.approval_status, e.payee, e.due_date, e.memo, e.terms,
+             COALESCE(e.paid_amount, 0) AS paid_amount,
              COALESCE(SUM(el.amount), 0) AS amount,
              CASE
                WHEN e.category = 'customer'  THEN COALESCE(c.first_name || ' ' || c.last_name, c.first_name)

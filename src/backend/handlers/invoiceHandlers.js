@@ -17,9 +17,9 @@ const registerInvoiceHandlers = () => {
   });
 
   // Get Invoices (server-side pagination)
-  ipcMain.handle('get-invoices-paginated', async (event, page, pageSize, search, status) => {
+  ipcMain.handle('get-invoices-paginated', async (event, page, pageSize, search, status, dueFrom, dueTo) => {
     try {
-      return await Invoices.getPaginated(page, pageSize, search || '', status || '');
+      return await Invoices.getPaginated(page, pageSize, search || '', status || '', dueFrom || '', dueTo || '');
     } catch (error) {
       console.error('Error fetching invoices (paginated):', error);
       return { error: error.message };

@@ -5,7 +5,7 @@ const Ledger = {
     // Combine transactions and journal lines for a simple ledger view
     let txs = [];
     try {
-      txs = db.prepare("SELECT date, type as account, description, amount as debit, 0 as credit FROM transactions WHERE type='Income' AND status='Active' UNION ALL SELECT date, type as account, description, 0 as debit, amount as credit FROM transactions WHERE type='Expense' AND status='Active' ORDER BY date DESC").all();
+      txs = db.prepare("SELECT date, type as account, description, amount as debit, 0 as credit, accountId FROM transactions WHERE type='Income' AND status='Active' UNION ALL SELECT date, type as account, description, 0 as debit, amount as credit, accountId FROM transactions WHERE type='Expense' AND status='Active' ORDER BY date DESC").all();
     } catch {}
     let journal = [];
     try {
@@ -18,7 +18,9 @@ const Ledger = {
                je.reference,
                je.source_type,
                je.source_id,
-               je.status
+               je.status,
+               c.id AS accountId,
+               COALESCE(je.source_type, 'Journal') AS type
         FROM journal_entries je
         JOIN journal_lines jl ON je.id = COALESCE(jl.journal_id, jl.entry_id)
         LEFT JOIN chart_of_accounts c ON jl.account_id = c.id

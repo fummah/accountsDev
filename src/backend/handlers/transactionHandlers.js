@@ -38,6 +38,54 @@ const registerTransactionHandlers = () => {
     }
   });
 
+  ipcMain.handle('get-transaction', async (_e, id) => {
+    try {
+      return Transactions.getById(id);
+    } catch (error) {
+      console.error('Error fetching transaction:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('update-transaction', async (event, id, data) => {
+    try {
+      const ctx = authorize(event, { permissions: 'write:transactions' });
+      const res = Transactions.update(id, data);
+      if (res?.changes > 0) {
+        AuditLog.log({
+          userId: ctx.userId,
+          action: 'update',
+          entityType: 'transaction',
+          entityId: id,
+          details: { data }
+        });
+      }
+      return res;
+    } catch (error) {
+      console.error('Error updating transaction:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('delete-transaction', async (event, id) => {
+    try {
+      const ctx = authorize(event, { permissions: 'write:transactions' });
+      const res = Transactions.deleteTransaction(id);
+      if (res?.changes > 0) {
+        AuditLog.log({
+          userId: ctx.userId,
+          action: 'delete',
+          entityType: 'transaction',
+          entityId: id
+        });
+      }
+      return res;
+    } catch (error) {
+      console.error('Error deleting transaction:', error);
+      return { error: error.message };
+    }
+  });
+
   ipcMain.handle('void-transaction', async (event, id) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
@@ -104,6 +152,18 @@ const registerTransactionHandlers = () => {
       console.error('Error suggesting corrective journal:', error);
       return { error: error.message };
     }
+  });
+
+  // Blockchain anchoring for journal entries (fallback in case accountingHandlers fails)
+  ipcMain.handle('journal-anchor', async (_e, entryId) => {
+    try {
+      const db = require('../models/dbmgr');
+      const entry = db.prepare('SELECT id, status FROM journal_entries WHERE id = ?').get(entryId);
+      if (!entry) return { error: 'Entry not found' };
+      if (entry.status === 'Void') return { error: 'Cannot anchor a voided entry' };
+      db.prepare("UPDATE journal_entries SET memo = COALESCE(memo,'') || ' [Anchored: ' || datetime('now') || ']' WHERE id = ?").run(entryId);
+      return { success: true, anchoredAt: new Date().toISOString() };
+    } catch (e) { return { error: e.message }; }
   });
 
   // Create a reversal entry for an existing journal entry

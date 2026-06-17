@@ -321,9 +321,10 @@ safeHandle('insert-expense', async (event, payee,payment_account,payment_date, p
       } catch {}
     }
     // ── Auto-post to COA: DR Expense / CR Accounts Payable ────────────────
-    // Always post bills (category='bill') + any non-Pending expenses
+    // Skip journal posting for Draft — they'll be posted when moved to Unpaid
+    const isDraft = (statusToUse || '').toLowerCase() === 'draft';
     const isBill = (category || '').toLowerCase() === 'bill';
-    if (res && res.success && (isBill || statusToUse !== 'Pending')) {
+    if (res && res.success && !isDraft && (isBill || statusToUse !== 'Pending')) {
       try {
         JournalEntries.postExpense({
           id: res.expenseId,
@@ -342,11 +343,33 @@ safeHandle('insert-expense', async (event, payee,payment_account,payment_date, p
   }
 });
 
-// Mark an expense as paid (simple status update)
+// Mark an expense as paid — create journal entry if missing
 safeHandle('mark-expense-paid', async (event, id) => {
   try {
     const db = require('../models/dbmgr');
     const res = db.prepare('UPDATE expenses SET approval_status = ? WHERE id = ?').run('Paid', id);
+    if (res.changes > 0) {
+      // Ensure a journal entry exists for this expense
+      try {
+        const JournalEntries = require('../models/journalEntries');
+        if (!JournalEntries.hasPosting('expense', Number(id))) {
+          const exp = db.prepare(`
+            SELECT e.*, COALESCE(SUM(el.amount), 0) AS total
+            FROM expenses e
+            LEFT JOIN expense_lines el ON el.expense_id = e.id
+            WHERE e.id = ?
+            GROUP BY e.id
+          `).get(Number(id));
+          if (exp && Number(exp.total) > 0) {
+            JournalEntries.postExpense({
+              id: Number(id), amount: Number(exp.total),
+              date: exp.payment_date, description: exp.category || '',
+              category: exp.category, reference: exp.ref_no,
+            });
+          }
+        }
+      } catch (jErr) { console.warn('[mark-expense-paid] journal post failed:', jErr.message); }
+    }
     return { success: res.changes > 0 };
   } catch (error) {
     console.error('Error marking expense paid:', error);
@@ -375,7 +398,16 @@ safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccou
     const billAmt = Number(amount) || 0;
     if (billAmt <= 0) return { success: false, error: 'Invalid bill amount' };
 
-    // Post DR AP / CR Bank
+    // Get current expense to check total and already-paid amount
+    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(expenseId);
+    if (!expense) return { success: false, error: 'Expense not found' };
+    const totalLines = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM expense_lines WHERE expense_id = ?').get(expenseId);
+    const totalAmount = Number(totalLines?.total || 0);
+    const currentPaid = Number(expense.paid_amount || 0);
+    const newPaid = currentPaid + billAmt;
+    const remaining = totalAmount - newPaid;
+
+    // Post DR AP / CR Bank (payment amount only)
     JournalEntries.post({
       date: paymentDate || new Date().toISOString().slice(0, 10),
       description: `Bill payment — expense #${expenseId}`,
@@ -387,10 +419,22 @@ safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccou
       ],
     });
 
-    // Mark expense as Paid
-    db.prepare('UPDATE expenses SET approval_status = ? WHERE id = ?').run('Paid', expenseId);
+    // Determine new status
+    let newStatus = 'Partially Paid';
+    if (newPaid >= totalAmount - 0.005) newStatus = 'Paid';
 
-    return { success: true };
+    db.prepare('UPDATE expenses SET paid_amount = ?, approval_status = ? WHERE id = ?')
+      .run(newPaid, newStatus, expenseId);
+
+    // Reduce vendor balance by payment amount
+    try {
+      const exp = db.prepare('SELECT payee FROM expenses WHERE id = ?').get(expenseId);
+      if (exp && exp.payee) {
+        db.prepare('UPDATE suppliers SET balance = COALESCE(balance,0) - ? WHERE id = ?').run(billAmt, Number(exp.payee));
+      }
+    } catch (balErr) { console.error('[bill-pay] vendor balance update failed:', balErr); }
+
+    return { success: true, remainingBalance: Math.max(0, remaining) };
   } catch (e) {
     console.error('Error paying bill:', e);
     return { success: false, error: e.message };
@@ -477,6 +521,15 @@ safeHandle('insert-product', async (event, type,name,sku, category, description,
   } catch (error) {
     console.error('Error inserting product:', error);
     return { error: error.message };
+  }
+});
+
+safeHandle('delete-product', async (event, id) => {
+  try {
+    return Products.deleteProduct(id);
+  } catch (error) {
+    console.error('Error deleting product:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -664,15 +717,6 @@ safeHandle('deletingrecord', async (event,id,table) => {
       return await Transactions.createBankTransfer(data);
     } catch (error) {
       console.error('Error creating bank transfer:', error);
-      return { error: error.message };
-    }
-  });
-
-  safeHandle('create-deposit', async (event, data) => {
-    try {
-      return await Transactions.createDeposit(data);
-    } catch (error) {
-      console.error('Error creating deposit:', error);
       return { error: error.message };
     }
   });

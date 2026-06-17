@@ -1090,13 +1090,14 @@ const ChartOfAccounts = () => {
 
       {/* ─── Detail Drawer ─── */}
       <Drawer
+        key={drawerAccount?.id || 'drawer'}
         title={drawerAccount ? `${drawerAccount.accountCode || ''} ${drawerAccount.accountName}` : 'Account Details'}
         visible={drawerVisible}
-        onClose={() => setDrawerVisible(false)}
+        onClose={() => { setDrawerVisible(false); setDrawerAccount(null); setDrawerTxns([]); }}
         afterVisibleChange={(vis) => { if (!vis) { setDrawerAccount(null); setDrawerTxns([]); } }}
         destroyOnClose
         width={560}
-        footer={drawerAccount && (
+        footer={drawerAccount ? (
           <Space>
             <Button type="primary" icon={<EditOutlined />} onClick={() => {
               setDrawerVisible(false);
@@ -1130,7 +1131,7 @@ const ChartOfAccounts = () => {
               setIsModalVisible(true);
             }}>Add Sub-Account</Button>
           </Space>
-        )}
+        ) : null}
       >
         {drawerAccount && (
           <>

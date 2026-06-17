@@ -140,6 +140,34 @@ const Transactions = {
     `).run(date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id || null, isIntercompany ? 1 : 0, eliminateOnConsolidation ? 1 : 0, pairId || null, classTag || null, location || null, department || null);
   },
 
+  getById(id) {
+    return db.prepare("SELECT * FROM transactions WHERE id = ?").get(id);
+  },
+
+  update(id, { date, type, amount, description, reference }) {
+    const closingDate = Settings.get('closingDate');
+    const existing = this.getById(id);
+    if (!existing) throw new Error(`Transaction ${id} not found`);
+    if (closingDate && date && typeof date === 'string' && date <= closingDate) {
+      throw new Error(`Posting date ${date} is on or before closing date ${closingDate}`);
+    }
+    return db.prepare(`
+      UPDATE transactions SET date=?, type=?, amount=?, description=?, reference=?
+      WHERE id=?
+    `).run(
+      date || existing.date,
+      type || existing.type,
+      amount != null ? amount : existing.amount,
+      description != null ? description : existing.description,
+      reference != null ? reference : existing.reference,
+      id
+    );
+  },
+
+  deleteTransaction(id) {
+    return db.prepare("DELETE FROM transactions WHERE id=?").run(id);
+  },
+
   voidTransaction(id) {
     return db.prepare("UPDATE transactions SET status='Voided' WHERE id=?").run(id);
   },
