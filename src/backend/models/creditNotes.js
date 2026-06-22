@@ -1,4 +1,5 @@
 const db = require('./dbmgr');
+const JournalEntries = require('./journalEntries');
 
 const CreditNotes = {
   createTable() {
@@ -92,6 +93,28 @@ const CreditNotes = {
       for (const line of lines) {
         insertLine.run(cnId, line.description || '', Number(line.quantity) || 1, Number(line.unit_price) || 0, Number(line.amount) || 0, line.account_id || null, Number(line.tax_rate) || 0);
       }
+    }
+
+    // Post reversing journal entry: DR Income / CR Accounts Receivable
+    if (total > 0 && data.status && data.status !== 'Draft') {
+      try {
+        const COA = require('./chartOfAccounts');
+        const ar = COA.getSystemAccount('Accounts Receivable') || COA.getByName('Accounts Receivable');
+        const incomeAccount = COA.getByName('Sales Revenue') || COA.getByName('Service Revenue')
+          || db.prepare("SELECT id FROM chart_of_accounts WHERE type = 'Income' AND status = 'Active' LIMIT 1").get();
+        if (ar && incomeAccount) {
+          JournalEntries.post({
+            date: data.date || new Date().toISOString().slice(0, 10),
+            reference: number,
+            description: `Credit Note ${number} — ${data.reason || ''}`,
+            source_type: 'credit_note', source_id: cnId,
+            lines: [
+              { account_id: incomeAccount.id, debit: total, credit: 0, description: 'Credit note — revenue reversal' },
+              { account_id: ar.id, debit: 0, credit: total, description: 'Accounts Receivable reduction' },
+            ],
+          });
+        }
+      } catch (jErr) { console.warn('[creditNotes] Journal post failed:', jErr.message); }
     }
 
     return { success: true, id: cnId, credit_note_number: number };

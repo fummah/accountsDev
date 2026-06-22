@@ -1,6 +1,7 @@
   // Ensure schema migrations for older DBs: add missing columns if any
 const db = require("./dbmgr");
 const Settings = require('./settings');
+const JournalEntries = require('./journalEntries');
 
 const Transactions = {
   createTable() {
@@ -229,6 +230,26 @@ const Transactions = {
       `).run(toAccount, date, ref, descIn, amount);
 
       db.prepare('COMMIT').run();
+
+      // Post double-entry to general ledger: DR destination / CR source
+      try {
+        const COA = require('./chartOfAccounts');
+        const srcAcct = db.prepare('SELECT id, name FROM chart_of_accounts WHERE id = ?').get(fromAccount);
+        const dstAcct = db.prepare('SELECT id, name FROM chart_of_accounts WHERE id = ?').get(toAccount);
+        if (srcAcct && dstAcct) {
+          JournalEntries.post({
+            date: date || new Date().toISOString().slice(0, 10),
+            reference: ref,
+            description: description || 'Bank Transfer',
+            source_type: 'transfer', source_id: ref,
+            lines: [
+              { account_id: dstAcct.id, debit: amount, credit: 0, description: dstAcct.name },
+              { account_id: srcAcct.id, debit: 0, credit: amount, description: srcAcct.name },
+            ],
+          });
+        }
+      } catch (jErr) { console.warn('[transactions] Journal post (transfer) failed:', jErr.message); }
+
       return { success: true };
     } catch (error) {
       db.prepare('ROLLBACK').run();
@@ -261,6 +282,25 @@ const Transactions = {
       `).run(toAccountId, date, reference || null, description || 'Intercompany Transfer In', amount, toEntityId, eliminateOnConsolidation ? 1 : 0, pairId);
 
       db.prepare('COMMIT').run();
+
+      // Post double-entry to general ledger
+      try {
+        const srcAcct = db.prepare('SELECT id, name FROM chart_of_accounts WHERE id = ?').get(fromAccountId);
+        const dstAcct = db.prepare('SELECT id, name FROM chart_of_accounts WHERE id = ?').get(toAccountId);
+        if (srcAcct && dstAcct) {
+          JournalEntries.post({
+            date: date || new Date().toISOString().slice(0, 10),
+            reference: reference || null,
+            description: description || 'Intercompany Transfer',
+            source_type: 'intercompany_transfer', source_id: reference || pairId,
+            lines: [
+              { account_id: dstAcct.id, debit: amount, credit: 0, description: dstAcct.name },
+              { account_id: srcAcct.id, debit: 0, credit: amount, description: srcAcct.name },
+            ],
+          });
+        }
+      } catch (jErr) { console.warn('[transactions] Journal post (intercompany) failed:', jErr.message); }
+
       return { success: true };
     } catch (error) {
       db.prepare('ROLLBACK').run();

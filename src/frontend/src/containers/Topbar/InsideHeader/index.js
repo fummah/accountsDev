@@ -1,4 +1,4 @@
-import React, {useState} from "react";
+import React, {useEffect, useState} from "react";
 import {Button, Dropdown, Layout, Menu, message, Popover} from 'antd';
 import Icon from '@ant-design/icons';
 import {useDispatch, useSelector} from "react-redux";
@@ -30,10 +30,20 @@ function handleMenuClick(e) {
 
 const InsideHeader = () => {
   const [searchText, setSearchText] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const {locale} = useSelector(({settings}) => settings);
   const navCollapsed = useSelector(({common}) => common.navCollapsed);
   const width = useSelector(({common}) => common.width);
   const dispatch = useDispatch();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const info = await window.electronAPI?.getCompany?.();
+        if (info?.name) setCompanyName(info.name);
+      } catch {}
+    })();
+  }, []);
 
   const languageMenu = () => (
     <CustomScrollbars className="gx-popover-lang-scroll">
@@ -85,6 +95,9 @@ const InsideHeader = () => {
               <img alt="" src={process.env.PUBLIC_URL + "/assets/images/w-logo.png"}/></Link>
             <Link to="/" className="gx-d-none gx-d-lg-block gx-pointer gx-mr-xs-5 gx-logo">
               <img alt="" src={process.env.PUBLIC_URL + "/assets/images/logo.png"}/></Link>
+            <span className="gx-d-none gx-d-lg-inline-block" style={{ fontSize: 16, fontWeight: 600, color: '#fff', marginLeft: -8, marginRight: 24 }}>
+              {companyName}
+            </span>
 
             {width >= TAB_SIZE && (
               <div className="gx-header-horizontal-nav gx-header-horizontal-nav-curve">

@@ -96,20 +96,31 @@ const registerInvoiceHandlers = () => {
         // ── Auto-post to COA: DR Accounts Receivable / CR Income per line ──
         if (status && status !== 'Draft') {
           try {
-            const invoiceId = res.invoice_id || res.id;
-            const inv = await Invoices.getSingleInvoice(invoiceId);
-            if (inv) {
-              const postResult = JournalEntries.postInvoice({
-                id: invoiceId,
-                date: start_date,
-                number,
-                total: inv.total || inv.amount,
-                customerName: inv.customerName || '',
-              });
-              if (postResult && postResult.error) {
-                console.warn('Journal auto-post (invoice) error:', postResult.error);
-                res.glWarning = postResult.error;
+            const invoiceId = res.invoiceId || res.invoice_id || res.id;
+            if (invoiceId) {
+              const inv = await Invoices.getSingleInvoice(invoiceId);
+              if (inv) {
+                const invDate = typeof start_date === 'string' ? start_date
+                  : (start_date && typeof start_date.format === 'function' ? start_date.format('YYYY-MM-DD')
+                  : (inv.start_date || new Date().toISOString().slice(0, 10)));
+                const postResult = JournalEntries.postInvoice({
+                  id: invoiceId,
+                  date: invDate,
+                  number: number || inv.number || '',
+                  total: inv.total || inv.amount || 0,
+                  customerName: inv.first_name ? `${inv.first_name} ${inv.last_name || ''}`.trim() : '',
+                });
+                if (postResult && postResult.error) {
+                  console.warn('Journal auto-post (invoice) error:', postResult.error);
+                  res.glWarning = postResult.error;
+                }
+              } else {
+                console.warn('Journal auto-post (invoice) skipped — invoice not found after insert');
+                res.glWarning = 'Invoice saved but could not retrieve for journal posting';
               }
+            } else {
+              console.warn('Journal auto-post (invoice) skipped — no invoice ID from insert');
+              res.glWarning = 'Invoice saved but no ID returned for journal posting';
             }
           } catch (jErr) {
             console.warn('Journal auto-post (invoice) failed:', jErr.message);

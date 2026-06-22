@@ -149,12 +149,15 @@ const CreditCardCharges = () => {
       const categories = splitLines.filter(l => l.category).map(l => l.category).join(', ');
       const descriptions = splitLines.filter(l => l.description).map(l => l.description).join('; ');
 
+      const cardAccountName = values.creditCardAccount || values.card || '';
+      const cardAccount = creditCardAccounts.find(a => (a.accountName || a.name) === cardAccountName);
       const tx = {
         date,
         type: 'Credit Card',
         amount: totalAmount,
         description: descriptions || values.description || '',
-        reference: values.creditCardAccount || values.card || '',
+        reference: cardAccountName,
+        accountId: cardAccount ? Number(cardAccount.id) : undefined,
         entered_by: 'system',
         categories,
         splitLines: splitLines.filter(l => Number(l.amount) > 0).map(l => ({ account: l.category, description: l.description, amount: Number(l.amount) })),

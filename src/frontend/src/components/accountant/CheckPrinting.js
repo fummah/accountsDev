@@ -227,7 +227,6 @@ const CheckPrinting = () => {
       .chk-header { display: flex; justify-content: space-between; align-items: flex-start; padding-top: 14px; }
       .co-block    { font-size: 12px; line-height: 1.55; }
       .co-name     { font-size: 13px; font-weight: 700; }
-      .chk-num-box { font-size: 20px; font-weight: 700; border: 2px solid #555; border-radius: 6px; padding: 3px 14px; letter-spacing: 1px; }
 
       /* ---------- DATE row ---------- */
       .date-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 6px; gap: 8px; }
@@ -245,18 +244,12 @@ const CheckPrinting = () => {
       .words-text { font-size: 12px; letter-spacing: 0.02em; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
       .dollars-vert { font-size: 9px; font-weight: 700; letter-spacing: 2px; writing-mode: vertical-rl; text-orientation: upright; border: 1px solid #555; padding: 3px 1px; line-height: 1; }
 
-      /* ---------- address window ---------- */
-      .addr-window { margin-top: 12px; margin-left: 4px; font-size: 11px; line-height: 1.65; min-height: 44px; }
-
       /* ---------- memo + signature ---------- */
       .memo-sig-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px; }
       .memo-block   { display: flex; align-items: baseline; gap: 6px; }
       .memo-label   { font-size: 9px; font-weight: 700; letter-spacing: 1px; }
       .memo-val     { font-size: 10px; min-width: 180px; border-bottom: 1px solid #555; }
       .sig-block    { font-size: 9px; font-weight: 700; letter-spacing: 1px; min-width: 180px; border-top: 1px solid #555; text-align: center; padding-top: 2px; }
-
-      /* ---------- MICR stub line ---------- */
-      .micr-line { text-align: center; font-size: 13px; letter-spacing: 3px; color: #555; margin-top: 6px; font-family: 'Courier New', monospace; }
 
       /* ---------- stubs ---------- */
       .stub-wrap { border-bottom: 1px dashed #999; }
@@ -266,13 +259,12 @@ const CheckPrinting = () => {
       <div class="check-wrap">
         <div class="check-inner">
 
-          <!-- Header: company block left | check# right -->
+          <!-- Header: company name + payee name -->
           <div class="chk-header">
             <div class="co-block">
               <div class="co-name">${coName}</div>
-              ${coAddr.map(l => `<div>${l}</div>`).join('')}
             </div>
-            <div class="chk-num-box">${checkNum}</div>
+            <div style="font-size:14px; font-weight:700; text-align:right;">${payeeName}</div>
           </div>
 
           <!-- DATE -->
@@ -281,10 +273,10 @@ const CheckPrinting = () => {
             <span class="date-val">${dateStr}</span>
           </div>
 
-          <!-- PAY TO THE ORDER OF | Payee Name | **Amount Box -->
+          <!-- PAY TO THE ORDER OF | **Amount Box -->
           <div class="payto-row">
             <span class="payto-label">PAY TO THE<br>ORDER OF</span>
-            <span class="payto-name">${payeeName}</span>
+            <span class="payto-name"></span>
             <span class="amt-box">**${amtStr}</span>
           </div>
 
@@ -292,12 +284,6 @@ const CheckPrinting = () => {
           <div class="words-row">
             <span class="words-text">${dotFill}</span>
             <span class="dollars-vert">DOLLARS</span>
-          </div>
-
-          <!-- Address window -->
-          <div class="addr-window">
-            ${payeeName ? `<div style="font-weight:700;">${payeeName}</div>` : ''}
-            ${payeeAddr ? payeeAddr.split('\n').map(l => `<div>${l}</div>`).join('') : ''}
           </div>
 
           <!-- Memo + Authorized Signature -->
@@ -308,9 +294,6 @@ const CheckPrinting = () => {
             </div>
             <div class="sig-block">AUTHORIZED SIGNATURE</div>
           </div>
-
-          <!-- MICR-style line -->
-          <div class="micr-line">&#8904;C${String(checkNum).padStart(9,'0')}&#8904; &#8904;${String(checkNum).padStart(9,'0')}&#8904;&#174; ${checkNum}</div>
 
         </div>
       </div>

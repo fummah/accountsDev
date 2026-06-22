@@ -1,5 +1,6 @@
 const { ipcMain } = require('electron');
 const Transactions = require('../models/transactions');
+const JournalEntries = require('../models/journalEntries');
 const Journal = require('../models/journal');
 const Ledger = require('../models/ledger');
 const AuditLog = require('../models/auditLog');
@@ -30,6 +31,23 @@ const registerTransactionHandlers = () => {
           entityId: res.lastInsertRowid,
           details: { tx }
         });
+        // Post double-entry journal: DR expense accounts per split line / CR bank account
+        const splitLines = Array.isArray(tx.splitLines) ? tx.splitLines : [];
+        if (splitLines.length > 0 || Number(tx.amount) > 0) {
+          try {
+            JournalEntries.postTransaction({
+              id: res.lastInsertRowid,
+              date: tx.date,
+              description: tx.description || '',
+              reference: tx.reference || '',
+              accountId: tx.accountId,
+              amount: tx.amount,
+              splitLines,
+            });
+          } catch (jErr) {
+            console.warn('Journal auto-post (transaction) failed:', jErr.message);
+          }
+        }
       }
       return res;
     } catch (error) {

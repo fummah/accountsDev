@@ -356,6 +356,64 @@ const JournalEntries = {
       });
     } catch (e) { return { error: e.message }; }
   },
+
+  // ── POST FROM TRANSACTION (checks, credit card charges, bank txns) ────
+  // DR each split-line expense account / CR the bank/cash account
+  postTransaction: (tx) => {
+    const COA = require('./chartOfAccounts');
+    if (!tx.accountId) return { error: 'Transaction has no accountId (bank/cash account)' };
+    const bankAcct = db.prepare('SELECT * FROM chart_of_accounts WHERE id = ?').get(tx.accountId);
+    if (!bankAcct) return { error: 'Bank/cash account not found in COA' };
+
+    const splitLines = Array.isArray(tx.splitLines) ? tx.splitLines : [];
+    const fallbackExpAcct = COA.getByName('General Expenses')
+      || db.prepare("SELECT * FROM chart_of_accounts WHERE type = 'Expense' AND status = 'Active' LIMIT 1").get();
+    if (!fallbackExpAcct && !splitLines.length) return { error: 'No expense account found in COA' };
+
+    const debitLines = [];
+    let totalDebit = 0;
+
+    for (const line of splitLines) {
+      const lineAmt = Number(line.amount) || 0;
+      if (lineAmt <= 0) continue;
+      const acctName = line.account || line.category || '';
+      let acctId = null;
+      if (acctName) {
+        const matched = db.prepare(
+          "SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status = 'Active' LIMIT 1"
+        ).get(acctName);
+        if (matched) acctId = matched.id;
+      }
+      if (!acctId && fallbackExpAcct) acctId = fallbackExpAcct.id;
+      if (!acctId) continue;
+
+      debitLines.push({ account_id: acctId, debit: lineAmt, credit: 0, description: line.description || acctName || 'Expense' });
+      totalDebit += lineAmt;
+    }
+
+    // If no split lines, use the full amount against the fallback expense account
+    if (!debitLines.length) {
+      const amount = Number(tx.amount || 0);
+      if (!amount) return { error: 'Transaction has zero amount' };
+      debitLines.push({ account_id: fallbackExpAcct.id, debit: amount, credit: 0, description: tx.description || 'Expense' });
+      totalDebit = amount;
+    }
+
+    if (totalDebit <= 0) return { error: 'Transaction has zero amount' };
+
+    try {
+      return JournalEntries.post({
+        date: tx.date || new Date().toISOString().slice(0, 10),
+        reference: tx.reference || String(tx.id || ''),
+        description: tx.description || 'Transaction',
+        source_type: 'transaction', source_id: tx.id || null,
+        lines: [
+          ...debitLines,
+          { account_id: bankAcct.id, debit: 0, credit: totalDebit, description: bankAcct.name || 'Bank Account' },
+        ],
+      });
+    } catch (e) { return { error: e.message }; }
+  },
 };
 
 // ── Seed sample journal entries for demo ───────────────────────────────
@@ -372,7 +430,7 @@ JournalEntries.seedSampleData = () => {
       VALUES (?, ?, ?, ?, ?, 'Active')`).run(name, type, subType, number, type === 'Asset' || type === 'Expense' || type === 'Cost of Goods Sold' ? 'Debit' : 'Credit');
     return db.prepare('SELECT last_insert_rowid() AS id').get().id;
   };
-  const bankId    = ensureAccount('Checking Account',        'Asset',    'Bank',             '1000');
+  const bankId    = ensureAccount('Checking Account',        'Bank',     'Checking',         '1000');
   const arId      = ensureAccount('Accounts Receivable',     'Asset',    'Accounts Receivable','1100');
   const apId      = ensureAccount('Accounts Payable',        'Liability','Accounts Payable', '2000');
   const rentId    = ensureAccount('Rent Expense',            'Expense',  'Rent',             '6100');

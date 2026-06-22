@@ -263,7 +263,16 @@ const CreateInvoice = () => {
         if (res?.error) { message.error(typeof res.error === 'string' ? res.error : 'Insert failed'); setSaving(false); return; }
         if (res?.success === false) { message.error('Failed to create invoice'); setSaving(false); return; }
         if (res?.glWarning) {
-          message.warning(`Invoice saved but ledger post failed: ${res.glWarning}`, 8);
+          Modal.warning({
+            title: 'Invoice Saved — Ledger Post Failed',
+            content: `The invoice was saved but the journal entry could not be posted: ${res.glWarning}. You can retry now or the system will auto-retry on next startup.`,
+            okText: 'Retry Now',
+            onOk: async () => {
+              const repostRes = await window.electronAPI.journalRepostAll?.();
+              if (repostRes?.posted > 0) message.success(`Reposted ${repostRes.posted} entries`);
+              else message.warning('No entries needed reposting');
+            },
+          });
         } else {
           message.success('Invoice created');
         }

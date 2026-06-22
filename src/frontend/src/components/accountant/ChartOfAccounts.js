@@ -181,14 +181,17 @@ const ChartOfAccounts = () => {
     const totalAssets = (byType['Asset'] || 0) + (byType['Bank'] || 0) + (byType['Cash'] || 0);
     const totalLiabilities = byType['Liability'] || 0;
     const totalEquity = byType['Equity'] || 0;
+    const totalIncome = (byType['Income'] || 0) + (byType['Other Income'] || 0);
+    const totalExpenses = (byType['Expense'] || 0) + (byType['Cost of Goods Sold'] || 0) + (byType['Other Expense'] || 0);
+    const netIncome = totalIncome - totalExpenses;
     return {
       total: accounts.length,
       active: accounts.filter(a => a.status === 'Active').length,
       inactive: accounts.filter(a => a.status !== 'Active').length,
       totalBalance: accounts.reduce((s, a) => s + a.balance, 0),
       byType, byTypeCount,
-      totalAssets, totalLiabilities, totalEquity,
-      balanceCheck: totalAssets - totalLiabilities - totalEquity,
+      totalAssets, totalLiabilities, totalEquity, netIncome,
+      balanceCheck: totalAssets - totalLiabilities - totalEquity - netIncome,
     };
   }, [accounts]);
 
@@ -630,16 +633,18 @@ const ChartOfAccounts = () => {
         </Col>
       </Row>
 
-      {/* Accounting Equation Check */}
+      {/* Accounting Equation Check (Assets = Liabilities + Equity + Net Income) */}
       <Card size="small" style={{ marginBottom: 20, borderLeft: `4px solid ${Math.abs(stats.balanceCheck || 0) < 0.01 ? '#52c41a' : '#faad14'}` }}>
         <Row align="middle" gutter={16}>
           <Col flex="auto">
-            <Space size="large">
+            <Space size="large" wrap>
               <Text><strong>Assets</strong> {cSym} {fmtNum(stats.totalAssets)}</Text>
               <SwapOutlined />
               <Text><strong>Liabilities</strong> {cSym} {fmtNum(stats.totalLiabilities)}</Text>
               <Text>+</Text>
               <Text><strong>Equity</strong> {cSym} {fmtNum(stats.totalEquity)}</Text>
+              <Text>+</Text>
+              <Text><strong>Net Income</strong> <span style={{ color: stats.netIncome >= 0 ? '#52c41a' : '#f5222d' }}>{cSym} {fmtNum(stats.netIncome)}</span></Text>
             </Space>
           </Col>
           <Col>

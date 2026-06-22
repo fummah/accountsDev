@@ -132,7 +132,7 @@ const Invoices = {
       // JournalEntries.postInvoice() called from invoiceHandlers.js after this insert returns.
       // computedBalance() in chartOfAccounts.getAllAccounts() reads those journal_lines live.
 
-      return { success: true, invoiceId: Number(invoiceId) }; 
+      return { success: true, invoiceId: Number(invoiceId), id: Number(invoiceId), invoice_id: Number(invoiceId) }; 
     } 
       else {
         return { success: false };
