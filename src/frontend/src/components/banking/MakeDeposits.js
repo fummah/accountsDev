@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, DatePicker, Form, Input, InputNumber, Select, Button, Table, Space, message, Modal, Row, Col, Statistic, Typography, Tag, Tooltip, Alert } from 'antd';
-import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutlined, HistoryOutlined, DollarOutlined, SearchOutlined } from '@ant-design/icons';
+import { Card, DatePicker, Form, Input, InputNumber, Select, Button, Table, Space, message, Modal, Row, Col, Statistic, Typography, Tag, Tooltip, Alert, Tabs, Checkbox, Divider } from 'antd';
+import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutlined, HistoryOutlined, DollarOutlined, SearchOutlined, SwapOutlined, MoneyCollectOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
+const { TabPane } = Tabs;
 const fmt = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const MakeDeposits = () => {
@@ -19,17 +20,23 @@ const MakeDeposits = () => {
   const [selectedAccountId, setSelectedAccountId] = useState(null);
   const [total, setTotal] = useState(0);
   const [formItems, setFormItems] = useState([]);
+  const [activeTab, setActiveTab] = useState('manual');
+  const [pendingPayments, setPendingPayments] = useState([]);
+  const [selectedPayments, setSelectedPayments] = useState([]);
+  const [allAccounts, setAllAccounts] = useState([]);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     try {
-      const [accRes, txnRes] = await Promise.all([
+      const [accRes, txnRes, pmts] = await Promise.all([
         window.electronAPI.getChartOfAccounts().catch(() => []),
         window.electronAPI.getTransactions().catch(() => []),
+        window.electronAPI.getPayments?.().catch(() => []),
       ]);
       const accs = Array.isArray(accRes) ? accRes : [];
       setAccounts(accs);
+      setAllAccounts(accs);
       const banks = accs.filter(a => {
         const t = (a.accountType || a.type || '').toLowerCase();
         const n = (a.accountName || a.name || '').toLowerCase();
@@ -41,6 +48,10 @@ const MakeDeposits = () => {
       const deps = txns.filter(t => (t.type || '').toLowerCase() === 'deposit')
         .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
       setDepositHistory(deps);
+
+      // Load pending payments (Undeposited Funds)
+      const pmtArr = Array.isArray(pmts) ? pmts : (pmts?.all || pmts?.data || []);
+      setPendingPayments(pmtArr.filter(p => (p.status || '').toLowerCase() !== 'deposited'));
     } catch { setAccounts([]); setDepositHistory([]); }
   };
 
@@ -51,32 +62,58 @@ const MakeDeposits = () => {
   };
 
   const onFinish = async (values) => {
-    if (!values.items || values.items.length === 0) {
-      message.warning('Add at least one deposit item');
-      return;
-    }
     try {
       setLoading(true);
-      const payload = {
-        accountId: Number(values.accountId),
-        date: values.date.format('YYYY-MM-DD'),
-        items: values.items.map(it => ({
-          type: it.type || 'Cash',
-          reference: it.reference || '',
-          description: it.description || '',
-          amount: Number(it.amount) || 0,
-        })),
-        total,
-      };
-      const res = await window.electronAPI.createDeposit(payload);
-      if (res && res.success) {
-        message.success(`Deposit of ${cSym} ${fmt(total)} recorded successfully`);
-        form.resetFields();
-        form.setFieldsValue({ date: moment(), items: [{ type: 'Cash' }] });
-        loadData();
-      } else {
-        throw new Error(res?.error || 'Failed to record deposit');
+      if (activeTab === 'pending' && selectedPayments.length === 0) {
+        message.warning('Select at least one payment to deposit');
+        setLoading(false);
+        return;
       }
+      if (activeTab === 'manual' && (!values.items || values.items.length === 0)) {
+        message.warning('Add at least one deposit item');
+        setLoading(false);
+        return;
+      }
+
+      if (activeTab === 'pending') {
+        // Deposit existing payments from Undeposited Funds
+        const totalAmt = selectedPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+        const allocations = selectedPayments.map(p => ({
+          accountId: Number(values.depositToAccountId) || Number(values.accountId),
+          amount: Number(p.amount || 0),
+          description: p.description || `Payment from ${p.customerName || ''}`,
+        }));
+        const res = await window.electronAPI.createDeposit({
+          bankAccountId: Number(values.accountId),
+          date: values.date.format('YYYY-MM-DD'),
+          reference: values.reference || '',
+          memo: values.memo || 'Deposit — existing payments',
+          paymentIds: selectedPayments.map(p => p.id),
+          allocations,
+        });
+        if (res?.success) {
+          message.success(`Deposited ${cSym} ${fmt(totalAmt)} (${selectedPayments.length} payment(s))`);
+        } else {
+          throw new Error(res?.error || 'Deposit failed');
+        }
+      } else {
+        // Manual deposit
+        const payload = {
+          accountId: Number(values.accountId),
+          date: values.date.format('YYYY-MM-DD'),
+          items: values.items.map(it => ({
+            type: it.type || 'Cash',
+            reference: it.reference || '',
+            description: it.description || '',
+            amount: Number(it.amount) || 0,
+          })),
+          total,
+        };
+        }
+      form.resetFields();
+      form.setFieldsValue({ date: moment(), items: [{ type: 'Cash' }] });
+      setSelectedPayments([]);
+      loadData();
     } catch (e) {
       message.error(e.message || 'Failed to record deposit');
     } finally {
@@ -170,86 +207,165 @@ const MakeDeposits = () => {
         </Col>
       </Row>
 
-      {/* Deposit Form */}
-      <Card title={<><DollarOutlined style={{ marginRight: 4 }} /> New Deposit</>} size="small" style={{ marginBottom: 16 }}>
-        <Form form={form} layout="vertical" onFinish={onFinish} onValuesChange={onFormValuesChange} initialValues={{ date: moment(), items: [{ type: 'Cash' }] }}>
-          <Row gutter={16}>
-            <Col xs={24} sm={12}>
-              <Form.Item name="accountId" label="Deposit To (Bank Account)" rules={[{ required: true, message: 'Select bank account' }]}>
-                <Select showSearch optionFilterProp="children" placeholder="Select bank account"
-                  onChange={(val) => setSelectedAccountId(val)}>
-                  {bankAccounts.map(a => (
-                    <Option key={String(a.id)} value={String(a.id)}>{a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={6}>
-              <Form.Item name="date" label="Date" rules={[{ required: true }]}>
-                <DatePicker style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={6}>
-              <Form.Item label="Deposit Total">
-                <InputNumber value={total} readOnly style={{ width: '100%', fontWeight: 700, background: '#f6ffed' }} formatter={v => `${cSym} ${fmt(v)}`} />
-              </Form.Item>
-            </Col>
-          </Row>
+      {/* Deposit Form with Tabs */}
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Tabs activeKey={activeTab} onChange={setActiveTab}>
+          <TabPane tab={<span><MoneyCollectOutlined /> Manual Deposit</span>} key="manual">
+            <Form form={form} layout="vertical" onFinish={onFinish} onValuesChange={onFormValuesChange} initialValues={{ date: moment(), items: [{ type: 'Cash' }] }}>
+              <Row gutter={16}>
+                <Col xs={24} sm={12}>
+                  <Form.Item name="accountId" label="Deposit To (Bank Account)" rules={[{ required: true, message: 'Select bank account' }]}>
+                    <Select showSearch optionFilterProp="children" placeholder="Select bank account"
+                      onChange={(val) => setSelectedAccountId(val)}>
+                      {bankAccounts.map(a => (
+                        <Option key={String(a.id)} value={String(a.id)}>{a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}</Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={6}>
+                  <Form.Item name="date" label="Date" rules={[{ required: true }]}>
+                    <DatePicker style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={6}>
+                  <Form.Item label="Deposit Total">
+                    <InputNumber value={total} readOnly style={{ width: '100%', fontWeight: 700, background: '#f6ffed' }} formatter={v => `${cSym} ${fmt(v)}`} />
+                  </Form.Item>
+                </Col>
+              </Row>
 
-          <Form.List name="items">
-            {(fields, { add, remove }) => (
-              <Card size="small" title="Deposit Items" style={{ marginBottom: 16 }}
-                extra={<Button type="dashed" onClick={() => add({ type: 'Cash' })} icon={<PlusOutlined />} size="small">Add Item</Button>}
-              >
-                {fields.length === 0 && <Alert message="Add at least one deposit item" type="info" showIcon style={{ marginBottom: 8 }} />}
-                {fields.map((field) => (
-                  <Row key={field.key} gutter={8} style={{ marginBottom: 8 }} align="middle">
-                    <Col xs={24} sm={4}>
-                      <Form.Item {...field} name={[field.name, 'type']} noStyle rules={[{ required: true }]}>
-                        <Select style={{ width: '100%' }} placeholder="Type">
-                          <Option value="Cash">Cash</Option>
-                          <Option value="Check">Check</Option>
-                          <Option value="Card">Card</Option>
-                          <Option value="Wire">Wire</Option>
-                          <Option value="EFT">EFT</Option>
-                          <Option value="Other">Other</Option>
-                        </Select>
-                      </Form.Item>
-                    </Col>
-                    <Col xs={24} sm={4}>
-                      <Form.Item {...field} name={[field.name, 'reference']} noStyle>
-                        <Input placeholder="Reference #" />
-                      </Form.Item>
-                    </Col>
-                    <Col xs={24} sm={10}>
-                      <Form.Item {...field} name={[field.name, 'description']} noStyle>
-                        <Input placeholder="Description" />
-                      </Form.Item>
-                    </Col>
-                    <Col xs={24} sm={4}>
-                      <Form.Item {...field} name={[field.name, 'amount']} noStyle rules={[{ required: true, message: 'Required' }]}>
-                        <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="Amount" formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} />
-                      </Form.Item>
-                    </Col>
-                    <Col xs={24} sm={2} style={{ textAlign: 'center' }}>
-                      <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                    </Col>
-                  </Row>
-                ))}
-                {fields.length > 0 && (
-                  <div style={{ textAlign: 'right', paddingTop: 8, borderTop: '1px solid #f0f0f0', fontWeight: 700, fontSize: 16 }}>
-                    Total: <span style={{ color: '#52c41a' }}>${fmt(total)}</span>
+              <Form.List name="items">
+                {(fields, { add, remove }) => (
+                  <Card size="small" title="Deposit Items" style={{ marginBottom: 16 }}
+                    extra={<Button type="dashed" onClick={() => add({ type: 'Cash' })} icon={<PlusOutlined />} size="small">Add Item</Button>}
+                  >
+                    {fields.length === 0 && <Alert message="Add at least one deposit item" type="info" showIcon style={{ marginBottom: 8 }} />}
+                    {fields.map((field) => (
+                      <Row key={field.key} gutter={8} style={{ marginBottom: 8 }} align="middle">
+                        <Col xs={24} sm={4}>
+                          <Form.Item {...field} name={[field.name, 'type']} noStyle rules={[{ required: true }]}>
+                            <Select style={{ width: '100%' }} placeholder="Type">
+                              <Option value="Cash">Cash</Option>
+                              <Option value="Check">Check</Option>
+                              <Option value="Card">Card</Option>
+                              <Option value="Wire">Wire</Option>
+                              <Option value="EFT">EFT</Option>
+                              <Option value="Other">Other</Option>
+                            </Select>
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={4}>
+                          <Form.Item {...field} name={[field.name, 'reference']} noStyle>
+                            <Input placeholder="Reference #" />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={10}>
+                          <Form.Item {...field} name={[field.name, 'description']} noStyle>
+                            <Input placeholder="Description" />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={4}>
+                          <Form.Item {...field} name={[field.name, 'amount']} noStyle rules={[{ required: true, message: 'Required' }]}>
+                            <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="Amount" formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={2} style={{ textAlign: 'center' }}>
+                          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                        </Col>
+                      </Row>
+                    ))}
+                    {fields.length > 0 && (
+                      <div style={{ textAlign: 'right', paddingTop: 8, borderTop: '1px solid #f0f0f0', fontWeight: 700, fontSize: 16 }}>
+                        Total: <span style={{ color: '#52c41a' }}>${fmt(total)}</span>
+                      </div>
+                    )}
+                  </Card>
+                )}
+              </Form.List>
+
+              <Space>
+                <Button onClick={() => { form.resetFields(); form.setFieldsValue({ date: moment(), items: [{ type: 'Cash' }] }); }}>Reset</Button>
+                <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={loading} disabled={formItems.length === 0}>Record Deposit</Button>
+              </Space>
+            </Form>
+          </TabPane>
+
+          <TabPane tab={<span><SwapOutlined /> Deposit Existing Payments (Undeposited Funds)</span>} key="pending">
+            <Form form={form} layout="vertical" onFinish={onFinish}>
+              <Row gutter={16}>
+                <Col xs={24} sm={12}>
+                  <Form.Item name="accountId" label="Deposit To (Bank Account)" rules={[{ required: true, message: 'Select bank account' }]}>
+                    <Select showSearch optionFilterProp="children" placeholder="Select bank account">
+                      {bankAccounts.map(a => (
+                        <Option key={String(a.id)} value={String(a.id)}>{a.accountName || a.name}</Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={6}>
+                  <Form.Item name="date" label="Date" rules={[{ required: true }]}>
+                    <DatePicker style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={6}>
+                  <Form.Item name="reference" label="Reference">
+                    <Input placeholder="DEP-001" />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <div style={{ marginTop: 8, marginBottom: 16 }}>
+                <Text strong>Select Payments to Deposit</Text>
+                {pendingPayments.length === 0 ? (
+                  <Alert message="No pending payments in Undeposited Funds" type="info" showIcon style={{ marginTop: 8 }} />
+                ) : (
+                  <div style={{ marginTop: 8, maxHeight: 300, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6 }}>
+                    <table style={{ width: '100%', fontSize: 13 }}>
+                      <thead><tr style={{ background: '#fafafa' }}>
+                        <th style={{ padding: 8, textAlign: 'left', width: 40 }}></th>
+                        <th style={{ padding: 8, textAlign: 'left' }}>Customer</th>
+                        <th style={{ padding: 8, textAlign: 'left' }}>Description</th>
+                        <th style={{ padding: 8, textAlign: 'right' }}>Amount</th>
+                      </tr></thead>
+                      <tbody>
+                        {pendingPayments.map(p => (
+                          <tr key={p.id} style={{ borderTop: '1px solid #f0f0f0' }}>
+                            <td style={{ padding: 6, textAlign: 'center' }}>
+                              <input type="checkbox" checked={selectedPayments.some(sp => sp.id === p.id)}
+                                onChange={() => setSelectedPayments(prev =>
+                                  prev.some(sp => sp.id === p.id) ? prev.filter(sp => sp.id !== p.id) : [...prev, p]
+                                )} />
+                            </td>
+                            <td style={{ padding: 6 }}>{p.customerName || p.customer_name || '—'}</td>
+                            <td style={{ padding: 6 }}>{p.description || p.reference || ''}</td>
+                            <td style={{ padding: 6, textAlign: 'right' }}><Text strong>{cSym} {fmt(p.amount || 0)}</Text></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ borderTop: '2px solid #d9d9d9' }}>
+                          <td colSpan={3} style={{ padding: 8, textAlign: 'right' }}><Text strong>Total:</Text></td>
+                          <td style={{ padding: 8, textAlign: 'right' }}><Text strong style={{ color: '#52c41a' }}>{cSym} {fmt(selectedPayments.reduce((s, p) => s + Number(p.amount || 0), 0))}</Text></td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
                 )}
-              </Card>
-            )}
-          </Form.List>
+              </div>
 
-          <Space>
-            <Button onClick={() => { form.resetFields(); form.setFieldsValue({ date: moment(), items: [{ type: 'Cash' }] }); }}>Reset</Button>
-            <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={loading} disabled={formItems.length === 0}>Record Deposit</Button>
-          </Space>
-        </Form>
+              <Form.Item name="memo" label="Memo / Description">
+                <Input placeholder="Optional memo" />
+              </Form.Item>
+
+              <Space>
+                <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={loading} disabled={selectedPayments.length === 0}>
+                  Deposit Selected ({selectedPayments.length})
+                </Button>
+              </Space>
+            </Form>
+          </TabPane>
+        </Tabs>
       </Card>
 
       {/* Deposit History */}

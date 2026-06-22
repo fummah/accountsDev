@@ -7,6 +7,7 @@ import ManagementReportTab from "./Tabs/ManagementReportTab";
 import TaxReportTab from "./Tabs/TaxReportTab";
 import PlanningBudgeting from "./Tabs/PlanningBudgeting";
 import CashflowProjector from "./Tabs/CashflowProjector";
+import SalesReportTab from "./Tabs/SalesReportTab";
 
 const TabPane = Tabs.TabPane;
 
@@ -44,7 +45,12 @@ const Reports = () => {
             </div>
           </TabPane>
 
-          <TabPane tab="Tax Reports" key="3">
+                  <TabPane tab="Sales Reports" key="6">
+            <div className="gx-mb-2">
+            <SalesReportTab/>
+            </div>
+          </TabPane>
+                  <TabPane tab="Tax Reports" key="3">
             <div className="gx-mb-2">
             <TaxReportTab/>
             </div>

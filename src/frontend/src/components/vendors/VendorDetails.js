@@ -22,14 +22,21 @@ const VendorDetails = ({ match }) => {
 
   if (!vendor) return <Card title="Vendor Details" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => window.history.back()}>Back</Button>}>Loading...</Card>;
 
+  const fullAddr = [vendor.address1, vendor.address2, vendor.city, vendor.state, vendor.postal_code, vendor.country].filter(Boolean).join(', ');
+
   return (
     <Card title={`Vendor: ${vendor.display_name || vendor.first_name}`} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => window.history.back()}>Back</Button>}>
-      <Descriptions column={1} bordered>
-        <Descriptions.Item label="Name">{vendor.display_name || `${vendor.first_name} ${vendor.last_name}`}</Descriptions.Item>
-        <Descriptions.Item label="Email">{vendor.email}</Descriptions.Item>
-        <Descriptions.Item label="Phone">{vendor.phone_number}</Descriptions.Item>
-        <Descriptions.Item label="Opening Balance">{vendor.opening_balance}</Descriptions.Item>
-        <Descriptions.Item label="Due Amount">{vendor.due_amount ? vendor.due_amount.due_amount : '0.00'}</Descriptions.Item>
+      <Descriptions column={2} bordered size="small">
+        <Descriptions.Item label="Name" span={2}>{vendor.display_name || `${vendor.first_name} ${vendor.last_name}`}</Descriptions.Item>
+        <Descriptions.Item label="Company">{vendor.company_name || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Email">{vendor.email || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Phone">{vendor.phone_number || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Mobile">{vendor.mobile_number || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Fax">{vendor.fax || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Address" span={2}>{fullAddr || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Opening Balance">{Number(vendor.opening_balance || 0).toFixed(2)}</Descriptions.Item>
+        <Descriptions.Item label="Due Amount">{vendor.due_amount ? Number(vendor.due_amount.due_amount).toFixed(2) : '0.00'}</Descriptions.Item>
+        <Descriptions.Item label="Notes" span={2}>{vendor.notes || '-'}</Descriptions.Item>
       </Descriptions>
     </Card>
   );

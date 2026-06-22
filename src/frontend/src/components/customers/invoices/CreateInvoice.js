@@ -25,6 +25,7 @@ const CreateInvoice = () => {
   const [prodModalOpen, setProdModalOpen] = useState(false);
   const [vatModalOpen, setVatModalOpen] = useState(false);
   const [invoiceTemplate, setInvoiceTemplate] = useState({});
+  const [incomeAccounts, setIncomeAccounts] = useState([]);
   const [custForm] = Form.useForm();
   const [prodForm] = Form.useForm();
   const [vatForm] = Form.useForm();
@@ -85,9 +86,11 @@ const CreateInvoice = () => {
   const handleAddProduct = async () => {
     try {
       const vals = await prodForm.validateFields();
-      await window.electronAPI.insertProduct?.(
-        'Product', vals.name || '', vals.sku || '', '', vals.description || '',
-        Number(vals.price) || 0, '', 0, 0, 0, null
+      const incomeAcct = incomeAccounts.find(a => (a.accountName || a.name) === vals.income_account);
+      const res = await window.electronAPI.insertProduct?.(
+        vals.type || 'Product', vals.name || '', vals.sku || '', vals.category || '',
+        vals.description || '', Number(vals.price) || 0,
+        incomeAcct ? (incomeAcct.accountName || incomeAcct.name) : '', 0, 0, 0, null
       );
       message.success('Product added');
       setProdModalOpen(false);
@@ -95,6 +98,12 @@ const CreateInvoice = () => {
       const p = await window.electronAPI.getAllProducts?.();
       const prodArr = Array.isArray(p) ? p : (p?.all || []);
       setProducts(prodArr);
+      // Auto-select the newly created product on the last line
+      const newProd = prodArr.find(pr => pr.name === vals.name);
+      if (newProd && lines.length > 0) {
+        const lastKey = lines[lines.length - 1].key;
+        selectProduct(lastKey, newProd.id);
+      }
     } catch (e) { if (!e?.errorFields) message.error('Failed to add product'); }
   };
 
@@ -112,16 +121,22 @@ const CreateInvoice = () => {
 
   const loadDeps = async () => {
     try {
-      const [c, p, v] = await Promise.all([
+      const [c, p, v, coa] = await Promise.all([
         window.electronAPI.getAllCustomers?.(),
         window.electronAPI.getAllProducts?.(),
         window.electronAPI.getAllVat?.(),
+        window.electronAPI.getChartOfAccounts?.().catch(() => []),
       ]);
       const custArr = Array.isArray(c) ? c : (c?.all || []);
       setCustomers(custArr);
       const prodArr = Array.isArray(p) ? p : (p?.all || []);
       setProducts(prodArr);
       setVatRates(Array.isArray(v) ? v : []);
+      const allAccs = Array.isArray(coa) ? coa : (coa?.data || []);
+      setIncomeAccounts(allAccs.filter(a => {
+        const t = (a.accountType || a.type || '').toLowerCase();
+        return t === 'income' || t === 'other income';
+      }));
 
       // Pre-select customer from query string
       const params = new URLSearchParams(location.search);
@@ -480,12 +495,35 @@ const CreateInvoice = () => {
         </Form>
       </Modal>
 
-      <Modal title="Add New Product" visible={prodModalOpen} onOk={handleAddProduct} onCancel={() => setProdModalOpen(false)} okText="Add" destroyOnClose>
+      <Modal title="Add New Product / Service" visible={prodModalOpen} onOk={handleAddProduct} onCancel={() => setProdModalOpen(false)} okText="Add" destroyOnClose width={520}>
         <Form form={prodForm} layout="vertical" preserve={false}>
-          <Form.Item name="name" label="Product Name" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="sku" label="SKU"><Input /></Form.Item>
-          <Form.Item name="description" label="Description"><Input /></Form.Item>
-          <Form.Item name="price" label="Selling Price" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix={cSym} /></Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="type" label="Type" initialValue="Product" rules={[{ required: true }]}>
+                <Select><Select.Option value="Product">Product</Select.Option><Select.Option value="Service">Service</Select.Option></Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="category" label="Category"><Input placeholder="e.g. Goods" /></Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="name" label="Product/Service Name" rules={[{ required: true }]}><Input placeholder="e.g. Large Eggs" /></Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="sku" label="SKU/Code"><Input /></Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="price" label="Sales Price / Rate" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix={cSym} /></Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="income_account" label="Income Account (required for COA posting)" rules={[{ required: true, message: 'Select an income account' }]}>
+            <Select placeholder="Select income account..." showSearch optionFilterProp="children">
+              {incomeAccounts.map(a => (
+                <Select.Option key={a.id} value={a.accountName || a.name}>{a.accountName || a.name}</Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>
 

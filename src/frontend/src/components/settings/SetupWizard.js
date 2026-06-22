@@ -161,41 +161,31 @@ const SetupWizard = ({ onComplete, modal = false }) => {
 
   /* ── Step navigation ── */
   const goNext = async () => {
-    if (step === 1) {
-      try { await companyForm.validateFields(); } catch { return; }
-      const vals = companyForm.getFieldsValue();
-      try { await window.electronAPI?.saveCompany?.({ ...vals, logo }); } catch {}
-    }
-    if (step === 2) {
-      // Save branding (logo + accent colour) to company record
-      try {
+    try {
+      if (step === 1) {
+        await companyForm.validateFields();
+        const vals = companyForm.getFieldsValue();
+        await window.electronAPI?.saveCompany?.({ ...vals, logo });
+      }
+      if (step === 2) {
         const vals = companyForm.getFieldsValue();
         await window.electronAPI?.saveCompany?.({ ...vals, logo });
         await window.electronAPI?.settingsSet?.('accent_color', accentColor);
-      } catch {}
-    }
-    if (step === 3) {
-      // Save industry to company record
-      try {
+      }
+      if (step === 3) {
         const vals = companyForm.getFieldsValue();
         await window.electronAPI?.saveCompany?.({ ...vals, industry, logo });
-      } catch {}
-    }
-    if (step === 4) {
-      // Seed Chart of Accounts based on selected template
-      try {
+      }
+      if (step === 4) {
         await window.electronAPI?.coaSeedSystemAccounts?.();
         await window.electronAPI?.settingsSet?.('coa_template', coaTemplate);
-      } catch {}
-    }
-    if (step === 5) {
-      const vals = currencyForm.getFieldsValue();
-      try {
+      }
+      if (step === 5) {
+        const vals = currencyForm.getFieldsValue();
         if (vals.base_currency) await window.electronAPI?.currencySetBase?.(vals.base_currency);
         await window.electronAPI?.settingsSet?.('date_format', vals.date_format || 'MM/DD/YYYY');
         await window.electronAPI?.settingsSet?.('tax_jurisdiction', vals.jurisdiction || 'US');
         await window.electronAPI?.settingsSet?.('fiscal_year_start', vals.fiscal_year_start || 'january');
-        // Save currency, tax rate, and tax name to company record
         const compVals = companyForm.getFieldsValue();
         await window.electronAPI?.saveCompany?.({
           ...compVals, industry, logo, currency: vals.base_currency || '',
@@ -204,11 +194,9 @@ const SetupWizard = ({ onComplete, modal = false }) => {
           fy_start: vals.fiscal_year_start || '',
           terms: vals.terms != null ? vals.terms : 30,
         });
-      } catch {}
-    }
-    if (step === 6) {
-      const vals = bankForm.getFieldsValue();
-      try {
+      }
+      if (step === 6) {
+        const vals = bankForm.getFieldsValue();
         if (vals.account_name) {
           await window.electronAPI?.insertChartAccount?.({
             name: vals.account_name, type: 'Bank',
@@ -219,7 +207,6 @@ const SetupWizard = ({ onComplete, modal = false }) => {
             description: vals.bank_name || '',
           });
         }
-        // Save bank details to company record
         const compVals = companyForm.getFieldsValue();
         await window.electronAPI?.saveCompany?.({
           ...compVals, industry, logo,
@@ -230,9 +217,12 @@ const SetupWizard = ({ onComplete, modal = false }) => {
           account_type: vals.account_type || 'Checking',
           opening_balance: Number(vals.opening_balance) || 0,
         });
-      } catch {}
+      }
+      setStep(s => Math.min(s + 1, totalSteps - 1));
+    } catch (err) {
+      console.error('[SetupWizard] Step save failed:', err);
+      message.error('Failed to save: ' + (err?.message || 'Unknown error'));
     }
-    setStep(s => Math.min(s + 1, totalSteps - 1));
   };
 
   const goBack = () => setStep(s => Math.max(s - 1, 0));

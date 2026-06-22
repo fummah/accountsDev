@@ -31,34 +31,30 @@ const BankAccounts = () => {
           n.includes('bank') || n.includes('checking') || n.includes('savings');
       });
 
-      // Compute balances per account
+      // Compute balances per account — use COA balance (computed from journal_lines) as primary
       const enriched = banks.map(acc => {
         const accName = acc.accountName || acc.name || '';
         const accId = acc.id;
 
-        // Get transactions for this account
+        // Use the COA-computed balance (journal_lines double-entry) as current
+        const currentBalance = Number(acc.balance || acc.openingBalance || 0);
+
+        // Get transactions for this account for activity display
         const accTxns = allTxns.filter(t =>
           String(t.accountId) === String(accId) ||
           (t.account || '').toLowerCase() === accName.toLowerCase()
         );
 
-        // Current balance = opening + all transactions
-        const openingBalance = Number(acc.openingBalance || acc.balance || 0);
-        const totalDebits = accTxns.reduce((s, t) => s + (Number(t.debit || t.amount || 0)), 0);
-        const totalCredits = accTxns.reduce((s, t) => s + (Number(t.credit || 0)), 0);
-        const currentBalance = openingBalance + totalDebits - totalCredits;
-
         // Cleared = only reconciled/cleared transactions
-        const clearedTxns = accTxns.filter(t => (t.status || '').toLowerCase() === 'cleared' || (t.reconciled || false));
-        const clearedDebits = clearedTxns.reduce((s, t) => s + (Number(t.debit || t.amount || 0)), 0);
+        const clearedTxns = accTxns.filter(t => (t.status || '').toLowerCase() === 'cleared' || (t.isReconciled || false));
+        const clearedDebits = clearedTxns.reduce((s, t) => s + (Number(t.debit || 0)), 0);
         const clearedCredits = clearedTxns.reduce((s, t) => s + (Number(t.credit || 0)), 0);
-        const clearedBalance = openingBalance + clearedDebits - clearedCredits;
+        const clearedBalance = currentBalance - (clearedDebits - clearedCredits);
 
         // Uncleared = current - cleared
         const unclearedBalance = currentBalance - clearedBalance;
 
         // Recent activity
-        const recentTxns = accTxns.slice(0, 5);
         const lastActivity = accTxns.length > 0 ? accTxns.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))[0]?.date : null;
         const txnCount = accTxns.length;
 
@@ -73,7 +69,6 @@ const BankAccounts = () => {
           unclearedBalance,
           lastActivity,
           txnCount,
-          recentTxns,
         };
       });
 

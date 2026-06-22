@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Card, Table, Button, Modal, Form, DatePicker, Input, InputNumber, Select, Row, Col, Divider, Space, message, Tag, Typography } from 'antd';
-import { PlusOutlined, DeleteOutlined, CreditCardOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Modal, Form, DatePicker, Input, InputNumber, Select, Row, Col, Divider, Space, message, Tag, Typography, Upload } from 'antd';
+import { PlusOutlined, DeleteOutlined, CreditCardOutlined, EditOutlined, EyeOutlined, PaperClipOutlined, UploadOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
@@ -20,6 +20,8 @@ const CreditCardCharges = () => {
   const [editingId, setEditingId] = useState(null);
   const [viewItem, setViewItem] = useState(null);
   const [viewModal, setViewModal] = useState(false);
+  const [vendors, setVendors] = useState([]);
+  const [fileList, setFileList] = useState([]);
 
   const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
 
@@ -100,10 +102,12 @@ const CreditCardCharges = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [txs, accs] = await Promise.all([
+      const [txs, accs, vends] = await Promise.all([
         window.electronAPI.getTransactions(),
         window.electronAPI.getChartOfAccounts?.().catch(() => []),
+        window.electronAPI.getAllSuppliers?.().catch(() => []),
       ]);
+      setVendors(Array.isArray(vends) ? vends : (vends?.all || vends?.data || []));
       const allAccs = Array.isArray(accs) ? accs : (accs?.data || []);
       setAccounts(allAccs);
 
@@ -204,12 +208,12 @@ const CreditCardCharges = () => {
       >
         <Form form={form} layout="vertical" onFinish={handleCreate} preserve={false}>
           <Row gutter={12}>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="date" label="Date" initialValue={moment()}>
                 <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="creditCardAccount" label="Credit Card Account" rules={[{ required: true, message: 'Select card account' }]}>
                 <Select placeholder="Select credit card account" showSearch optionFilterProp="children"
                   dropdownRender={menu => (<>{menu}<Divider style={{margin:'4px 0'}}/><div style={{padding:'4px 8px'}}><Button type="link" size="small" icon={<PlusOutlined/>} onClick={()=>setAddCardModal(true)}>Add New</Button></div></>)}>
@@ -219,7 +223,23 @@ const CreditCardCharges = () => {
                 </Select>
               </Form.Item>
             </Col>
+            <Col span={8}>
+              <Form.Item name="vendor" label="Vendor / Payee">
+                <Select placeholder="Select vendor" showSearch optionFilterProp="children" allowClear>
+                  {vendors.map(v => (
+                    <Option key={v.id} value={v.display_name || `${v.first_name} ${v.last_name}`}>
+                      {v.display_name || `${v.first_name} ${v.last_name}`}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
           </Row>
+          <div style={{ marginBottom: 16 }}>
+            <Upload fileList={fileList} onChange={({ fileList: fl }) => setFileList(fl)} beforeUpload={() => false} maxCount={1}>
+              <Button icon={<UploadOutlined />} size="small">Attach Receipt</Button>
+            </Upload>
+          </div>
 
           <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0 12px' }}>Expense Categories (Split)</Divider>
           <div style={{ marginBottom: 12 }}>

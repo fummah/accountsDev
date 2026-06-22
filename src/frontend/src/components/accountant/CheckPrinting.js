@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Divider, Alert, Tooltip, Modal, Statistic } from 'antd';
-import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, StopOutlined, PlusOutlined } from '@ant-design/icons';
+import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Divider, Alert, Tooltip, Modal, Statistic, Upload } from 'antd';
+import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, StopOutlined, PlusOutlined, PaperClipOutlined, UploadOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
@@ -99,6 +99,7 @@ const CheckPrinting = () => {
   const [watchMemo, setWatchMemo] = useState('');
   const [watchAccountId, setWatchAccountId] = useState(null);
   const [splitLines, setSplitLines] = useState([{ key: 1, account: '', description: '', amount: 0 }]);
+  const [fileList, setFileList] = useState([]);
 
   const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
 
@@ -540,6 +541,10 @@ const CheckPrinting = () => {
                   <TextArea rows={2} placeholder="What is this check for?" maxLength={200} showCount onChange={(e) => setWatchMemo(e.target.value)} />
                 </Form.Item>
               </div>
+
+              <Upload fileList={fileList} onChange={({ fileList: fl }) => setFileList(fl)} beforeUpload={() => false} maxCount={1} style={{ marginBottom: 12 }}>
+                <Button icon={<UploadOutlined />} size="small"><PaperClipOutlined /> Attach Receipt</Button>
+              </Upload>
 
               <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0' }}>Split Lines (Expense Accounts)</Divider>
               <div style={{ marginBottom: 12 }}>

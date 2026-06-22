@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   Card, Form, Input, Button, DatePicker, Select, message, Divider, Modal,
-  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Spin, Collapse
+  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Spin, Collapse, Upload
 } from 'antd';
 import {
   ArrowLeftOutlined, PlusOutlined, MinusCircleOutlined, SaveOutlined,
-  FileTextOutlined, DollarOutlined, SwapOutlined, CheckCircleOutlined
+  FileTextOutlined, DollarOutlined, SwapOutlined, CheckCircleOutlined,
+  PaperClipOutlined, UploadOutlined
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
@@ -25,7 +26,8 @@ const TERMS_OPTIONS = [
 
 const ACCOUNT_TYPES_ALLOWED = [
   'Expense', 'Cost of Goods Sold', 'Other Expense',
-  'Asset', 'Inventory', 'Bank', 'Cash'
+  'Asset', 'Inventory', 'Bank', 'Cash', 'Liability',
+  'Income', 'Other Income', 'Equity'
 ];
 
 const EnterBill = ({ history, location, match }) => {
@@ -52,6 +54,7 @@ const EnterBill = ({ history, location, match }) => {
   const [payAmount, setPayAmount] = useState(0);
   const [billData, setBillData] = useState(null);
   const [paying, setPaying] = useState(false);
+  const [fileList, setFileList] = useState([]);
 
   useEffect(() => {
     loadVendors();
@@ -70,6 +73,10 @@ const EnterBill = ({ history, location, match }) => {
       'Inventory': 'Inventory',
       'Bank': 'Bank',
       'Cash': 'Cash',
+      'Liability': 'Liability',
+      'Income': 'Income',
+      'Other Income': 'Oth Inc',
+      'Equity': 'Equity',
     };
     return map[type] || type;
   };
@@ -83,6 +90,10 @@ const EnterBill = ({ history, location, match }) => {
       'Inventory': '#52c41a',
       'Bank': '#722ed1',
       'Cash': '#13c2c2',
+      'Liability': '#f5222d',
+      'Income': '#52c41a',
+      'Other Income': '#389e0d',
+      'Equity': '#1890ff',
     };
     return map[type] || '#999';
   };
@@ -347,6 +358,19 @@ const EnterBill = ({ history, location, match }) => {
               <Input placeholder="Internal memo..." />
             </Form.Item>
           </div>
+        </div>
+
+        {/* File Attachment */}
+        <div style={{ marginBottom: 16 }}>
+          <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}><PaperClipOutlined style={{ marginRight: 4 }} />Attachment (Vendor Invoice File)</Text>
+          <Upload
+            fileList={fileList}
+            onChange={({ fileList: fl }) => setFileList(fl)}
+            beforeUpload={() => false}
+            maxCount={1}
+          >
+            <Button icon={<UploadOutlined />}>Select File</Button>
+          </Upload>
         </div>
 
         <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0 16px' }}>

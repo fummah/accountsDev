@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Modal, Form, Input, Divider } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
-import { ShopOutlined, DollarOutlined, FileTextOutlined, ClockCircleOutlined } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { ArrowLeftOutlined, ShopOutlined, DollarOutlined, FileTextOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
 const { TabPane } = Tabs;
 
 const VendorCenter = () => {
+  const history = useHistory();
   const { symbol: cSym } = useCurrency();
   const [vendors, setVendors] = useState([]);
   const [bills, setBills] = useState([]);
@@ -141,10 +141,10 @@ const VendorCenter = () => {
       key: 'actions',
       render: (_, record) => (
         <Space>
-          <Button type="link" href={`/main/vendors/bills/new?vendor=${record.id}`}>
+          <Button type="link" onClick={() => history.push(`/main/vendors/bills/new?vendor=${record.id}`)}>
             Enter Bill
           </Button>
-          <Button type="link" href={`/main/vendors/details/${record.id}`}>
+          <Button type="link" onClick={() => history.push(`/main/vendors/details/${record.id}`)}>
             View Details
           </Button>
         </Space>

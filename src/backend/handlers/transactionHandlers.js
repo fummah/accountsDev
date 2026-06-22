@@ -22,7 +22,21 @@ const registerTransactionHandlers = () => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
       validateTransaction(tx);
-      const res = Transactions.insert(tx);
+      // Infer proper debit/credit based on transaction type and account type
+      const amt = Number(tx.amount) || 0;
+      let debit = tx.debit;
+      let credit = tx.credit;
+      if (debit == null && credit == null && amt > 0) {
+        const type = (tx.type || '').toLowerCase();
+        if (type === 'deposit') {
+          debit = amt; credit = null;
+        } else if (type === 'check' || type === 'expense' || type === 'payment' || type === 'transfer_out') {
+          debit = null; credit = amt;
+        } else {
+          debit = null; credit = amt;
+        }
+      }
+      const res = Transactions.insert({ ...tx, debit, credit });
       if (res?.changes > 0) {
         AuditLog.log({
           userId: ctx.userId,
@@ -68,6 +82,7 @@ const registerTransactionHandlers = () => {
   ipcMain.handle('update-transaction', async (event, id, data) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
+      const existing = Transactions.getById(id);
       const res = Transactions.update(id, data);
       if (res?.changes > 0) {
         AuditLog.log({
@@ -75,8 +90,26 @@ const registerTransactionHandlers = () => {
           action: 'update',
           entityType: 'transaction',
           entityId: id,
-          details: { data }
+          details: { before: existing, after: data }
         });
+        // Reverse old journal entry and repost with updated data
+        try {
+          if (existing) JournalEntries.reverse('transaction', String(id));
+          const splitLines = Array.isArray(data.splitLines) ? data.splitLines : (existing ? [] : []);
+          if (splitLines.length > 0 || Number(data.amount || existing?.amount || 0) > 0) {
+            JournalEntries.postTransaction({
+              id,
+              date: data.date || existing?.date,
+              description: data.description || existing?.description || '',
+              reference: data.reference || existing?.reference || '',
+              accountId: data.accountId || existing?.accountId,
+              amount: data.amount != null ? data.amount : existing?.amount,
+              splitLines,
+            });
+          }
+        } catch (jErr) {
+          console.warn('Journal reverse-repost (transaction update) failed:', jErr.message);
+        }
       }
       return res;
     } catch (error) {
