@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   Card, Form, Input, Button, DatePicker, Select, message, Divider, Modal,
-  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Spin, Collapse, Upload
+  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Spin, Collapse, Upload, Statistic
 } from 'antd';
 import {
   ArrowLeftOutlined, PlusOutlined, MinusCircleOutlined, SaveOutlined,
   FileTextOutlined, DollarOutlined, SwapOutlined, CheckCircleOutlined,
-  PaperClipOutlined, UploadOutlined
+  PaperClipOutlined, UploadOutlined, BankOutlined, ShopOutlined, ReloadOutlined, DownloadOutlined
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
@@ -314,11 +314,19 @@ const EnterBill = ({ history, location, match }) => {
   const allAccounts = accounts.filter(a => ACCOUNT_TYPES_ALLOWED.includes(a.accountType || a.type));
   const isPaid = billData && (billData.approval_status || '').toLowerCase() === 'paid';
 
+  const vendorName = vendors.find(v => v.id === form.getFieldValue('vendorId'))?.display_name || '';
+
   return (
-    <Card
-      title={<span><FileTextOutlined style={{ marginRight: 8 }} />{isEdit ? 'Edit Bill' : 'Enter Bill'}</span>}
-      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => (history?.goBack ? history.goBack() : null)}>Back</Button>}
-    >
+    <div style={{ padding: 24 }}>
+      <Card title={<span style={{ fontSize: 18, fontWeight: 600 }}><FileTextOutlined style={{ marginRight: 8 }} />{isEdit ? 'Edit Bill' : 'Enter Bill'}</span>}
+        extra={<Space><Button icon={<DownloadOutlined />} onClick={() => {}}>Export</Button><Button icon={<ReloadOutlined />} onClick={loadVendors}>Refresh</Button></Space>}>
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #1890ff' }}><Statistic title="Total Lines" value={lines.length} valueStyle={{ color: '#1890ff', fontSize: 18 }} /></Card></Col>
+          <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #52c41a' }}><Statistic title="Total Amount" value={totalAmount} prefix={cSym} precision={2} valueStyle={{ color: '#52c41a', fontSize: 18 }} /></Card></Col>
+          <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #722ed1' }}><Statistic title="Vendor" value={vendorName || '—'} valueStyle={{ fontSize: 14 }} /></Card></Col>
+          <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #fa8c16' }}><Statistic title="Status" value={isPaid ? 'Paid' : isEdit ? 'Unpaid' : 'New'} valueStyle={{ color: isPaid ? '#52c41a' : '#fa8c16', fontSize: 16 }} /></Card></Col>
+        </Row>
+
       <Form form={form} layout="vertical" onFinish={handleSubmit} initialValues={{ billDate: moment(), terms: 30 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 140px', minWidth: 120 }}>
@@ -506,6 +514,10 @@ const EnterBill = ({ history, location, match }) => {
               <Option value="Inventory">Inventory</Option>
               <Option value="Bank">Bank</Option>
               <Option value="Cash">Cash</Option>
+              <Option value="Liability">Liability</Option>
+              <Option value="Income">Income</Option>
+              <Option value="Other Income">Other Income</Option>
+              <Option value="Equity">Equity</Option>
             </Select>
           </Form.Item>
           <Form.Item name="code" label="Account Code">
@@ -602,7 +614,8 @@ const EnterBill = ({ history, location, match }) => {
           </div>
         </Form>
       </Modal>
-    </Card>
+      </Card>
+    </div>
   );
 };
 

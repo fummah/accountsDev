@@ -98,11 +98,15 @@ const CreateInvoice = () => {
       const p = await window.electronAPI.getAllProducts?.();
       const prodArr = Array.isArray(p) ? p : (p?.all || []);
       setProducts(prodArr);
-      // Auto-select the newly created product on the last line
+      // Auto-select the newly created product on the last line using fresh data
       const newProd = prodArr.find(pr => pr.name === vals.name);
       if (newProd && lines.length > 0) {
         const lastKey = lines[lines.length - 1].key;
-        selectProduct(lastKey, newProd.id);
+        const rate = Number(newProd.selling_price || newProd.price || 0);
+        setLines(prev => prev.map(l => {
+          if (l.key !== lastKey) return l;
+          return { ...l, description: newProd.name || newProd.description || '', rate, amount: (l.quantity || 1) * rate, product_id: newProd.id };
+        }));
       }
     } catch (e) { if (!e?.errorFields) message.error('Failed to add product'); }
   };
@@ -495,35 +499,60 @@ const CreateInvoice = () => {
         </Form>
       </Modal>
 
-      <Modal title="Add New Product / Service" visible={prodModalOpen} onOk={handleAddProduct} onCancel={() => setProdModalOpen(false)} okText="Add" destroyOnClose width={520}>
-        <Form form={prodForm} layout="vertical" preserve={false}>
+      <Modal title="Add New Product / Service" visible={prodModalOpen} onOk={handleAddProduct} onCancel={() => setProdModalOpen(false)} okText="Add" destroyOnClose width={700}>
+        <Form form={prodForm} layout="horizontal" preserve={false}>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="type" label="Type" initialValue="Product" rules={[{ required: true }]}>
+              <Form.Item name="type" label="Type" initialValue="Product" rules={[{ required: true }]} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
                 <Select><Select.Option value="Product">Product</Select.Option><Select.Option value="Service">Service</Select.Option></Select>
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="category" label="Category"><Input placeholder="e.g. Goods" /></Form.Item>
+              <Form.Item name="name" label="Name" rules={[{ required: true }]} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                <Input placeholder="e.g. Large Eggs" />
+              </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="name" label="Product/Service Name" rules={[{ required: true }]}><Input placeholder="e.g. Large Eggs" /></Form.Item>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="sku" label="SKU/Code"><Input /></Form.Item>
+              <Form.Item name="category" label="Category" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                <Select placeholder="Select category" allowClear>
+                  <Select.Option value="Goods">Goods</Select.Option>
+                  <Select.Option value="Services">Services</Select.Option>
+                  <Select.Option value="Consumables">Consumables</Select.Option>
+                  <Select.Option value="Material">Material</Select.Option>
+                </Select>
+              </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="price" label="Sales Price / Rate" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix={cSym} /></Form.Item>
+              <Form.Item name="sku" label="SKU" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                <Input />
+              </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="income_account" label="Income Account (required for COA posting)" rules={[{ required: true, message: 'Select an income account' }]}>
-            <Select placeholder="Select income account..." showSearch optionFilterProp="children">
-              {incomeAccounts.map(a => (
-                <Select.Option key={a.id} value={a.accountName || a.name}>{a.accountName || a.name}</Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-          <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="price" label="Price" rules={[{ required: true }]} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                <InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix={cSym} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="income_account" label="Income Acct" rules={[{ required: true, message: 'Req' }]} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                <Select placeholder="Select..." showSearch optionFilterProp="children">
+                  {incomeAccounts.map(a => (
+                    <Select.Option key={a.id} value={a.accountName || a.name}>{a.accountName || a.name}</Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="description" label="Description" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                <Input placeholder="Brief description" />
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Modal>
 

@@ -78,15 +78,10 @@ const PayBills = () => {
           throw new Error(`Failed to create check for bill ${bill.ref_no || bill.id}`);
         }
 
-        // 2. Mark bill as paid
-        const payRes = await window.electronAPI.billPay({
-          expenseId: bill.id,
-          amount: amt,
-          paymentDate,
-          bankAccount: bankName,
-        });
+        // 2. Mark bill as paid (journal already posted by check transaction above)
+        const payRes = await window.electronAPI.markExpensePaid(bill.id);
         if (!payRes?.success) {
-          throw new Error(payRes?.error || `Failed to pay bill ${bill.ref_no || bill.id}`);
+          throw new Error(payRes?.error || `Failed to mark bill ${bill.ref_no || bill.id} as paid`);
         }
       }
 

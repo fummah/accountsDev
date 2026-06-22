@@ -57,8 +57,14 @@ const CustomerDetails = () => {
       display_name: customer.display_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
       company: customer.company || customer.company_name,
       email: customer.email,
-      phone_number: customer.phone_number,
-      billing_address: customer.billing_address || customer.address1,
+      phone_number: customer.phone_number || customer.mobile_number,
+      mobile_number: customer.mobile_number || '',
+      address1: customer.address1 || customer.billing_address || '',
+      address2: customer.address2 || '',
+      city: customer.city || '',
+      state: customer.state || '',
+      postal_code: customer.postal_code || '',
+      country: customer.country || '',
       notes: customer.notes,
     });
     setEditOpen(true);
@@ -67,7 +73,7 @@ const CustomerDetails = () => {
   const handleUpdate = async () => {
     try {
       const vals = await form.validateFields();
-      await window.electronAPI.updateCustomer?.({ id: Number(id), ...vals });
+      await window.electronAPI.updateCustomer?.({ id: Number(id), display_name: vals.display_name, company_name: vals.company, email: vals.email, phone_number: vals.phone_number, mobile_number: vals.mobile_number, address1: vals.address1, address2: vals.address2, city: vals.city, state: vals.state, postal_code: vals.postal_code, country: vals.country, notes: vals.notes });
       message.success('Customer updated');
       setEditOpen(false);
       load();
@@ -278,15 +284,25 @@ const CustomerDetails = () => {
         )}
       </div>
 
-      <Modal title="Edit Customer" visible={editOpen} onOk={handleUpdate} onCancel={() => setEditOpen(false)} okText="Save">
+      <Modal title="Edit Customer" visible={editOpen} onOk={handleUpdate} onCancel={() => setEditOpen(false)} okText="Save" width={600}>
         <Form form={form} layout="vertical">
-          <Form.Item name="display_name" label="Display Name" rules={[{ required: true }]}><Input /></Form.Item>
           <Row gutter={12}>
+            <Col span={12}><Form.Item name="display_name" label="Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="company" label="Company"><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
           </Row>
-          <Form.Item name="phone_number" label="Phone"><Input /></Form.Item>
-          <Form.Item name="billing_address" label="Billing Address"><Input.TextArea rows={2} /></Form.Item>
+          <Row gutter={12}>
+            <Col span={12}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="phone_number" label="Phone"><Input /></Form.Item></Col>
+            <Col span={6}><Form.Item name="mobile_number" label="Mobile"><Input /></Form.Item></Col>
+          </Row>
+          <Form.Item name="address1" label="Street Address"><Input placeholder="123 Main St" /></Form.Item>
+          <Form.Item name="address2" label="Address Line 2"><Input placeholder="Apt/Suite" /></Form.Item>
+          <Row gutter={12}>
+            <Col span={8}><Form.Item name="city" label="City"><Input /></Form.Item></Col>
+            <Col span={6}><Form.Item name="state" label="State"><Input /></Form.Item></Col>
+            <Col span={5}><Form.Item name="postal_code" label="ZIP"><Input /></Form.Item></Col>
+            <Col span={5}><Form.Item name="country" label="Country"><Input /></Form.Item></Col>
+          </Row>
           <Form.Item name="notes" label="Notes"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>

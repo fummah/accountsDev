@@ -123,8 +123,12 @@ const Expenses = {
             }
             if (expAccountId) {
               txStmt.run(payment_date, 'Expense', lineAmt, `Expense - ${line.description || cat}`, expAccountId, ref_no || '', lineAmt, null, entered_by || null);
-              // Update COA balance
-              db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(lineAmt, expAccountId);
+              // Update COA balance based on account type
+              const acctType = db.prepare('SELECT normalBalance FROM chart_of_accounts WHERE id = ?').get(expAccountId);
+              const normalBal = acctType?.normalBalance || 'Debit';
+              // For debit-normal (expense/asset): debit increases balance; for credit-normal (liability/income): debit decreases balance
+              const lineDelta = normalBal === 'Debit' ? lineAmt : -lineAmt;
+              db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(lineDelta, expAccountId);
             }
           }
 

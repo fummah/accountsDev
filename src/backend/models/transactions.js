@@ -127,25 +127,30 @@ const Transactions = {
     return db.prepare("SELECT * FROM transactions WHERE LOWER(type) IN ('transfer_in', 'transfer_out') ORDER BY date DESC").all();
   },
 
-  insert({ date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class: classTag, location, department }) {
+  insert({ date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class: classTag, location, department, categories }) {
     // Closing date enforcement
     const closingDate = Settings.get('closingDate');
     if (closingDate && date && typeof date === 'string' && date <= closingDate) {
       throw new Error(`Posting date ${date} is on or before closing date ${closingDate}`);
     }
+    // Ensure categories column exists
+    try {
+      const cols = new Set(db.prepare("PRAGMA table_info('transactions')").all().map(c => c.name.toLowerCase()));
+      if (!cols.has('categories')) db.prepare("ALTER TABLE transactions ADD COLUMN categories TEXT").run();
+    } catch {}
     return db.prepare(`
       INSERT INTO transactions (
         date, type, amount, description, status, accountId, customerId,
-        reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class, location, department
-      ) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id || null, isIntercompany ? 1 : 0, eliminateOnConsolidation ? 1 : 0, pairId || null, classTag || null, location || null, department || null);
+        reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class, location, department, categories
+      ) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id || null, isIntercompany ? 1 : 0, eliminateOnConsolidation ? 1 : 0, pairId || null, classTag || null, location || null, department || null, categories || null);
   },
 
   getById(id) {
     return db.prepare("SELECT * FROM transactions WHERE id = ?").get(id);
   },
 
-  update(id, { date, type, amount, description, reference }) {
+  update(id, { date, type, amount, description, reference, accountId, categories }) {
     const closingDate = Settings.get('closingDate');
     const existing = this.getById(id);
     if (!existing) throw new Error(`Transaction ${id} not found`);
@@ -153,7 +158,7 @@ const Transactions = {
       throw new Error(`Posting date ${date} is on or before closing date ${closingDate}`);
     }
     return db.prepare(`
-      UPDATE transactions SET date=?, type=?, amount=?, description=?, reference=?
+      UPDATE transactions SET date=?, type=?, amount=?, description=?, reference=?, accountId=?, categories=?
       WHERE id=?
     `).run(
       date || existing.date,
@@ -161,6 +166,8 @@ const Transactions = {
       amount != null ? amount : existing.amount,
       description != null ? description : existing.description,
       reference != null ? reference : existing.reference,
+      accountId != null ? accountId : existing.accountId,
+      categories != null ? categories : existing.categories,
       id
     );
   },

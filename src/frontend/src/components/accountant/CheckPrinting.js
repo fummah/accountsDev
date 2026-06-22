@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Divider, Alert, Tooltip, Modal, Statistic, Upload } from 'antd';
-import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, StopOutlined, PlusOutlined, PaperClipOutlined, UploadOutlined } from '@ant-design/icons';
+import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, StopOutlined, PlusOutlined, PaperClipOutlined, UploadOutlined, EditOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
@@ -100,6 +100,7 @@ const CheckPrinting = () => {
   const [watchAccountId, setWatchAccountId] = useState(null);
   const [splitLines, setSplitLines] = useState([{ key: 1, account: '', description: '', amount: 0 }]);
   const [fileList, setFileList] = useState([]);
+  const [editingId, setEditingId] = useState(null);
 
   const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
 
@@ -277,7 +278,7 @@ const CheckPrinting = () => {
           <!-- PAY TO THE ORDER OF | **Amount Box -->
           <div class="payto-row">
             <span class="payto-label">PAY TO THE<br>ORDER OF</span>
-            <span class="payto-name"></span>
+            <span class="payto-name">${payeeName}</span>
             <span class="amt-box">**${amtStr}</span>
           </div>
 
@@ -326,6 +327,10 @@ const CheckPrinting = () => {
   };
 
   const onFinish = async (values) => {
+    if (editingId) {
+      await updateAndPrint(values);
+      return;
+    }
     if (isDuplicate) {
       Modal.confirm({
         title: 'Duplicate Check Number',
@@ -374,6 +379,45 @@ const CheckPrinting = () => {
     }
   };
 
+  const updateAndPrint = async (values) => {
+    try {
+      setLoading(true);
+      const totalAmt = splitLines.length > 1 ? splitTotal : Number(values.amount || 0);
+      if (splitLines.length > 1 && Math.abs(splitTotal - totalAmt) > 0.005) {
+        message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not match the check amount (${cSym}${totalAmt.toFixed(2)}).`);
+        setLoading(false);
+        return;
+      }
+      const payload = {
+        date: values.date.format('YYYY-MM-DD'),
+        type: 'Check',
+        amount: totalAmt,
+        description: values.memo || `Check #${values.checkNumber || ''} to ${values.payeeName || ''}`,
+        reference: values.checkNumber || undefined,
+        accountId: Number(values.accountId),
+        entered_by: 'system',
+        splitLines: splitLines.filter(l => Number(l.amount) > 0).map(l => ({ account: l.account, description: l.description, amount: Number(l.amount) })),
+      };
+      await window.electronAPI.updateTransaction(editingId, payload);
+      message.success(`Check #${values.checkNumber} updated`);
+      const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
+      handlePrint(vals);
+      cancelEdit();
+      loadData();
+    } catch (e) {
+      message.error('Failed to update check');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    form.resetFields();
+    setSplitLines([{ key: 1, account: '', description: '', amount: 0 }]);
+    form.setFieldsValue({ date: moment(), checkNumber: suggestedCheckNum });
+  };
+
   const handleVoid = async (record) => {
     try {
       if (record.id) {
@@ -394,6 +438,23 @@ const CheckPrinting = () => {
       accountName: '',
     };
     handlePrint(vals);
+  };
+
+  const handleEditCheck = (record) => {
+    const payeeName = (record.description || '').replace(/^Check #?\d*\s*to\s*/i, '').trim() || record.description || '';
+    const existingLines = record.splitLines && record.splitLines.length > 0
+      ? record.splitLines.map((l, i) => ({ key: i, account: l.account || l.category || '', description: l.description || '', amount: Number(l.amount || 0) }))
+      : [{ key: 1, account: '', description: '', amount: Number(record.amount || 0) }];
+    setSplitLines(existingLines);
+    setEditingId(record.id);
+    form.setFieldsValue({
+      date: record.date ? moment(record.date) : moment(),
+      accountId: Number(record.accountId) || undefined,
+      checkNumber: record.reference || '',
+      payeeName,
+      amount: Number(record.amount || record.debit || 0),
+      memo: record.description || '',
+    });
   };
 
   const filteredHistory = useMemo(() => {
@@ -419,8 +480,9 @@ const CheckPrinting = () => {
       const s = (r.status || 'active').toLowerCase();
       return s === 'void' ? <Tag color="red">Void</Tag> : <Tag color="green">Active</Tag>;
     }},
-    { title: 'Actions', key: 'actions', width: 120, render: (_, r) => (
+    { title: 'Actions', key: 'actions', width: 160, render: (_, r) => (
       <Space size="small">
+        <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEditCheck(r)} /></Tooltip>
         <Tooltip title="Reprint"><Button type="text" size="small" icon={<PrinterOutlined />} onClick={() => handleReprintHistory(r)} /></Tooltip>
         {(r.status || '').toLowerCase() !== 'void' && (
           <Tooltip title="Void"><Button type="text" size="small" danger icon={<StopOutlined />} onClick={() => Modal.confirm({ title: `Void Check #${r.reference}?`, content: 'This will mark the check as voided.', okText: 'Void', okType: 'danger', onOk: () => handleVoid(r) })} /></Tooltip>
@@ -466,7 +528,8 @@ const CheckPrinting = () => {
       <Row gutter={[16, 16]}>
         {/* Check Form */}
         <Col xs={24} lg={14}>
-          <Card title={<><DollarOutlined style={{ marginRight: 4 }} /> Write a Check</>} size="small">
+          <Card title={<><DollarOutlined style={{ marginRight: 4 }} />{editingId ? ' Edit Check' : ' Write a Check'}</>} size="small"
+            extra={editingId ? <Button size="small" onClick={cancelEdit}>Cancel Edit</Button> : null}>
             {isDuplicate && (
               <Alert message={`Check #${watchCheckNumber} already exists!`} type="warning" showIcon icon={<WarningOutlined />} style={{ marginBottom: 12 }} />
             )}

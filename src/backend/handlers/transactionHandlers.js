@@ -94,7 +94,14 @@ const registerTransactionHandlers = () => {
         });
         // Reverse old journal entry and repost with updated data
         try {
-          if (existing) JournalEntries.reverse('transaction', String(id));
+          if (existing) {
+            // Find and reverse the old journal entry by source_type + source_id
+            const db = require('../models/dbmgr');
+            const oldEntry = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'transaction' AND source_id = ? AND status = 'Posted' LIMIT 1").get(String(id));
+            if (oldEntry) {
+              JournalEntries.reverse(oldEntry.id, data.date || existing?.date, ctx.userId);
+            }
+          }
           const splitLines = Array.isArray(data.splitLines) ? data.splitLines : (existing ? [] : []);
           if (splitLines.length > 0 || Number(data.amount || existing?.amount || 0) > 0) {
             JournalEntries.postTransaction({

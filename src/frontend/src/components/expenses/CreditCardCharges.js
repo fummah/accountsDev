@@ -5,6 +5,7 @@ import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
+const { Text } = Typography;
 
 const CreditCardCharges = () => {
   const { symbol: cSym } = useCurrency();
@@ -274,6 +275,13 @@ const CreditCardCharges = () => {
           <Form.Item name="description" label="Memo / Description">
             <Input placeholder="Optional overall memo" />
           </Form.Item>
+
+          <div style={{ marginBottom: 12 }}>
+            <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Attachment (Receipt / Invoice)</Text>
+            <Upload fileList={fileList} onChange={({ fileList: fl }) => setFileList(fl)} beforeUpload={() => false} maxCount={1}>
+              <Button icon={<UploadOutlined />}><PaperClipOutlined /> Attach File</Button>
+            </Upload>
+          </div>
         </Form>
       </Modal>
 

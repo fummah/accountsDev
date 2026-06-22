@@ -343,33 +343,11 @@ safeHandle('insert-expense', async (event, payee,payment_account,payment_date, p
   }
 });
 
-// Mark an expense as paid — create journal entry if missing
+// Mark an expense as paid — skip journal posting (handled by check transaction from PayBills)
 safeHandle('mark-expense-paid', async (event, id) => {
   try {
     const db = require('../models/dbmgr');
     const res = db.prepare('UPDATE expenses SET approval_status = ? WHERE id = ?').run('Paid', id);
-    if (res.changes > 0) {
-      // Ensure a journal entry exists for this expense
-      try {
-        const JournalEntries = require('../models/journalEntries');
-        if (!JournalEntries.hasPosting('expense', Number(id))) {
-          const exp = db.prepare(`
-            SELECT e.*, COALESCE(SUM(el.amount), 0) AS total
-            FROM expenses e
-            LEFT JOIN expense_lines el ON el.expense_id = e.id
-            WHERE e.id = ?
-            GROUP BY e.id
-          `).get(Number(id));
-          if (exp && Number(exp.total) > 0) {
-            JournalEntries.postExpense({
-              id: Number(id), amount: Number(exp.total),
-              date: exp.payment_date, description: exp.category || '',
-              category: exp.category, reference: exp.ref_no,
-            });
-          }
-        }
-      } catch (jErr) { console.warn('[mark-expense-paid] journal post failed:', jErr.message); }
-    }
     return { success: res.changes > 0 };
   } catch (error) {
     console.error('Error marking expense paid:', error);
