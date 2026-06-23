@@ -316,7 +316,7 @@ const CheckPrinting = () => {
     setPreviewVisible(true);
   };
 
-  const handlePrint = (vals) => {
+  const handlePrint = async (vals) => {
     vals.accountName = vals.accountName || selectedAccount?.accountName || selectedAccount?.name || '';
     vals.payeeAddress = vals.payeeAddress || form.getFieldValue('payeeAddress') || '';
     vals._company = vals._company || company;
@@ -324,6 +324,14 @@ const CheckPrinting = () => {
     const w = window.open('', '_blank');
     w.document.open(); w.document.write(html); w.document.close();
     setTimeout(() => w.print(), 300);
+    if (vals.checkNumber) {
+      const txns = await window.electronAPI.getTransactions?.();
+      const check = Array.isArray(txns) ? txns.find(t => t.reference === vals.checkNumber && (t.type || '').toLowerCase() === 'check') : null;
+      if (check?.id) {
+        await window.electronAPI.markCheckPrinted?.(check.id);
+        loadData();
+      }
+    }
   };
 
   const onFinish = async (values) => {
@@ -476,6 +484,7 @@ const CheckPrinting = () => {
     { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: (v, r) => <Text strong>${fmt(v || r.debit || 0)}</Text> },
+    { title: 'Printed', key: 'printed', width: 80, render: (_, r) => r.printed ? <Tag color="green">Printed</Tag> : <Tag color="orange">Not Printed</Tag> },
     { title: 'Status', key: 'status', width: 80, render: (_, r) => {
       const s = (r.status || 'active').toLowerCase();
       return s === 'void' ? <Tag color="red">Void</Tag> : <Tag color="green">Active</Tag>;

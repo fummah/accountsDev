@@ -163,6 +163,26 @@ const registerTransactionHandlers = () => {
     }
   });
 
+  ipcMain.handle('mark-check-printed', async (event, id) => {
+    try {
+      const ctx = authorize(event, { permissions: 'write:transactions' });
+      const res = db.prepare("UPDATE transactions SET printed = 1, printed_at = datetime('now') WHERE id = ?").run(id);
+      if (res.changes > 0) {
+        AuditLog.log({
+          userId: ctx.userId,
+          action: 'print',
+          entityType: 'transaction',
+          entityId: id,
+          details: { printedAt: new Date().toISOString() }
+        });
+      }
+      return { success: res.changes > 0 };
+    } catch (error) {
+      console.error('Error marking check as printed:', error);
+      return { error: error.message };
+    }
+  });
+
   // Journal
   ipcMain.handle('get-journal', async () => {
     try {

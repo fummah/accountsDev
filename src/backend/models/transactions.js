@@ -101,6 +101,8 @@ const Transactions = {
       if (!cols.includes('isintercompany')) toAdd.push({ name: 'isIntercompany', sql: 'INTEGER DEFAULT 0' });
       if (!cols.includes('eliminateonconsolidation')) toAdd.push({ name: 'eliminateOnConsolidation', sql: 'INTEGER DEFAULT 1' });
       if (!cols.includes('pairid')) toAdd.push({ name: 'pairId', sql: 'INTEGER' });
+      if (!cols.includes('printed')) toAdd.push({ name: 'printed', sql: 'INTEGER DEFAULT 0' });
+      if (!cols.includes('printed_at')) toAdd.push({ name: 'printed_at', sql: 'TEXT' });
 
       toAdd.forEach(col => {
         try {

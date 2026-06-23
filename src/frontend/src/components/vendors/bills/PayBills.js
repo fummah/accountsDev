@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, Table, Button, message, Modal, Form, DatePicker, Select, Row, Col, InputNumber, Typography, Space, Tag, Divider } from 'antd';
+import { Card, Table, Button, message, Modal, Form, DatePicker, Select, Row, Col, InputNumber, Typography, Space, Tag, Divider, Radio } from 'antd';
 import { PrinterOutlined, CheckCircleOutlined, DollarOutlined, FileTextOutlined, BankOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
@@ -16,6 +16,9 @@ const PayBills = () => {
   const [bankAccounts, setBankAccounts] = useState([]);
   const [payForm] = Form.useForm();
   const [paying, setPaying] = useState(false);
+  const [printOptionVisible, setPrintOptionVisible] = useState(false);
+  const [createdChecks, setCreatedChecks] = useState([]);
+  const [printOption, setPrintOption] = useState('now');
 
   const loadBills = useCallback(async () => {
     setLoading(true);
@@ -57,6 +60,7 @@ const PayBills = () => {
       const paymentDate = values.paymentDate ? values.paymentDate.format('YYYY-MM-DD') : moment().format('YYYY-MM-DD');
       const bankName = values.bankAccount;
       const bankAccount = bankAccounts.find(a => (a.accountName || a.name) === bankName);
+      const createdChecks = [];
 
       for (const bill of selectedBills) {
         const amt = Number(bill.amount || 0);
@@ -77,6 +81,8 @@ const PayBills = () => {
         if (!checkRes || (!checkRes.changes && !checkRes.success)) {
           throw new Error(`Failed to create check for bill ${bill.ref_no || bill.id}`);
         }
+        const checkId = checkRes.lastInsertRowid || checkRes.id;
+        createdChecks.push({ checkId, billId: bill.id, billRef: bill.ref_no || bill.id, amount: amt, payee: bill.payee_name, bankName, paymentDate });
 
         // 2. Mark bill as paid (journal already posted by check transaction above)
         const payRes = await window.electronAPI.markExpensePaid(bill.id);
@@ -85,6 +91,9 @@ const PayBills = () => {
         }
       }
 
+      setCreatedChecks(createdChecks);
+      setPrintOption('now');
+      setPrintOptionVisible(true);
       message.success(`${selectedBills.length} bill(s) paid. Checks created.`);
       setPayModalVisible(false);
       payForm.resetFields();
@@ -93,6 +102,20 @@ const PayBills = () => {
     } catch (err) {
       message.error(err.message || 'Failed to process payment');
     } finally { setPaying(false); }
+  };
+
+  const handlePrintNow = () => {
+    setPrintOptionVisible(false);
+    // Navigate to check printing with the created checks for printing
+    createdChecks.forEach(check => {
+      window.electronAPI?.printCheck?.(check.checkId).catch(() => {});
+    });
+    message.success('Opening check for printing...');
+  };
+
+  const handlePrintLater = () => {
+    setPrintOptionVisible(false);
+    message.success('Checks saved. Print later from Check Printing screen.');
   };
 
   const columns = [
@@ -161,6 +184,28 @@ const PayBills = () => {
             </div>
           </div>
         </Form>
+      </Modal>
+
+      <Modal
+        title="Print Checks?"
+        visible={printOptionVisible}
+        onCancel={handlePrintLater}
+        footer={[
+          <Button key="later" onClick={handlePrintLater}>Print Later</Button>,
+          <Button key="now" type="primary" onClick={handlePrintNow}>Print Now</Button>,
+        ]}
+        width={400}
+        destroyOnClose
+      >
+        <Text>{createdChecks.length} check(s) created. Do you want to print them now?</Text>
+        <Radio.Group value={printOption} onChange={e => setPrintOption(e.target.value)} style={{ marginTop: 12 }}>
+          <Radio value="now">Print Now</Radio>
+          <Radio value="later">Print Later</Radio>
+        </Radio.Group>
+        <div style={{ marginTop: 12, fontSize: 12, color: '#666' }}>
+          Print Now: Opens check print preview immediately and marks as Printed<br />
+          Print Later: Saves checks without printing. Print from Check Printing screen later.
+        </div>
       </Modal>
     </div>
   );
