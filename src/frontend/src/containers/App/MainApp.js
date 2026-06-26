@@ -95,7 +95,10 @@ const MainApp = () => {
         const info = await window.electronAPI?.getCompany?.();
         if (info?.name) {
           setCompanyName(info.name);
-        } else {
+        }
+        // Only show onboarding if wizard hasn't been completed AND no company name exists
+        const wizardDone = await window.electronAPI?.setupWizardStatus?.().catch(() => false);
+        if (!wizardDone && !info?.name) {
           setOnboardingVisible(true);
         }
       } catch {}

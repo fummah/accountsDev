@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Divider, Alert, Tooltip, Modal, Statistic, Upload } from 'antd';
 import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, StopOutlined, PlusOutlined, PaperClipOutlined, UploadOutlined, EditOutlined } from '@ant-design/icons';
 import moment from 'moment';
@@ -32,6 +32,7 @@ const toWords = (num) => {
 const CheckPrinting = () => {
   const { symbol: cSym } = useCurrency();
   const [form] = Form.useForm();
+  const formRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -85,6 +86,21 @@ const CheckPrinting = () => {
       const checks = txns.filter(t => (t.type || '').toLowerCase() === 'check' || (t.reference || '').match(/^\d+$/))
         .map((t, i) => ({ ...t, key: t.id || i }))
         .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      // Enrich checks with split lines from journal entries (single API call)
+      try {
+        const journalEntries = await window.electronAPI.journalList?.().catch(() => []);
+        const jeList = Array.isArray(journalEntries) ? journalEntries : [];
+        for (const chk of checks) {
+          const linked = jeList.find(
+            e => e.source_type === 'transaction' && String(e.source_id) === String(chk.id) && e.status === 'Posted'
+          );
+          if (linked && linked.lines && linked.lines.length > 0) {
+            chk.splitLines = linked.lines
+              .filter(l => Number(l.debit || 0) > 0 && l.accountName)
+              .map(l => ({ account: l.accountName || l.account || '', description: l.description || l.lineDesc || '', amount: Number(l.debit || 0) }));
+          }
+        }
+      } catch {}
       setCheckHistory(checks);
     } catch (e) {
       console.error('Failed to load check data:', e);
@@ -216,42 +232,49 @@ const CheckPrinting = () => {
        amount box, written amount, address window, memo, signature line.
        Two identical remittance stubs follow below.
        ═══════════════════════════════════════════════════════════════════ */
+    const payeeAddrLines = (payeeAddr || '').split('\n').filter(Boolean);
+
     return `<!doctype html><html><head><title>Check #${checkNum}</title>
     <style>
-      @page { margin: 0.25in 0.4in; size: letter portrait; }
+      @page { margin: 0.25in 0.35in; size: letter portrait; }
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: Arial, sans-serif; background: #fff; color: #1a1a1a; }
 
-      .check-wrap { position: relative; height: 310px; border-bottom: 1px dashed #999; overflow: hidden; }
+      .check-wrap { position: relative; height: 310px; border-bottom: 1px dashed #999; overflow: hidden; page-break-inside: avoid; }
       .check-inner { position: absolute; inset: 0; padding: 0 28px; }
 
       /* ---------- check header ---------- */
-      .chk-header { display: flex; justify-content: space-between; align-items: flex-start; padding-top: 14px; }
-      .co-block    { font-size: 12px; line-height: 1.55; }
-      .co-name     { font-size: 13px; font-weight: 700; }
+      .chk-header { display: flex; justify-content: space-between; align-items: flex-start; padding-top: 12px; }
+      .co-block    { font-size: 11px; line-height: 1.5; }
+      .co-name     { font-size: 13px; font-weight: 700; margin-bottom: 1px; }
+      .co-addr     { font-size: 10px; color: #333; }
 
       /* ---------- DATE row ---------- */
-      .date-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 6px; gap: 8px; }
+      .date-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 4px; gap: 8px; }
       .date-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; background: #eee; padding: 1px 6px; border: 1px solid #bbb; }
-      .date-val   { font-size: 12px; font-weight: 700; min-width: 90px; border-bottom: 1px solid #555; text-align: center; }
+      .date-val   { font-size: 12px; font-weight: 700; min-width: 100px; border-bottom: 1px solid #555; text-align: center; padding-bottom: 1px; }
 
       /* ---------- PAY TO row ---------- */
-      .payto-row { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
+      .payto-row { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
       .payto-label { font-size: 9px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
       .payto-name  { font-size: 13px; font-weight: 700; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
-      .amt-box     { font-size: 13px; font-weight: 700; border: 2px solid #555; padding: 2px 10px; white-space: nowrap; min-width: 90px; text-align: center; }
+      .amt-box     { font-size: 14px; font-weight: 700; border: 2px solid #555; padding: 2px 12px; white-space: nowrap; min-width: 100px; text-align: center; }
 
       /* ---------- written amount row ---------- */
-      .words-row { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; }
-      .words-text { font-size: 12px; letter-spacing: 0.02em; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
+      .words-row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+      .words-text { font-size: 11px; letter-spacing: 0.02em; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
       .dollars-vert { font-size: 9px; font-weight: 700; letter-spacing: 2px; writing-mode: vertical-rl; text-orientation: upright; border: 1px solid #555; padding: 3px 1px; line-height: 1; }
 
+      /* ---------- address window ---------- */
+      .addr-window { margin-top: 8px; padding-left: 40px; font-size: 11px; line-height: 1.45; min-height: 40px; }
+      .addr-name   { font-weight: 700; font-size: 12px; }
+
       /* ---------- memo + signature ---------- */
-      .memo-sig-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px; }
+      .memo-sig-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 8px; }
       .memo-block   { display: flex; align-items: baseline; gap: 6px; }
       .memo-label   { font-size: 9px; font-weight: 700; letter-spacing: 1px; }
-      .memo-val     { font-size: 10px; min-width: 180px; border-bottom: 1px solid #555; }
-      .sig-block    { font-size: 9px; font-weight: 700; letter-spacing: 1px; min-width: 180px; border-top: 1px solid #555; text-align: center; padding-top: 2px; }
+      .memo-val     { font-size: 10px; min-width: 200px; border-bottom: 1px solid #555; padding-bottom: 1px; }
+      .sig-block    { font-size: 9px; font-weight: 700; letter-spacing: 1px; min-width: 200px; border-top: 1px solid #555; text-align: center; padding-top: 2px; }
 
       /* ---------- stubs ---------- */
       .stub-wrap { border-bottom: 1px dashed #999; }
@@ -261,12 +284,13 @@ const CheckPrinting = () => {
       <div class="check-wrap">
         <div class="check-inner">
 
-          <!-- Header: company name + payee name -->
+          <!-- Header: company info left + check number right -->
           <div class="chk-header">
             <div class="co-block">
               <div class="co-name">${coName}</div>
+              ${coAddr.map(l => `<div class="co-addr">${l}</div>`).join('')}
             </div>
-            <div style="font-size:14px; font-weight:700; text-align:right;">${payeeName}</div>
+            <div style="text-align:right; font-size:11px; color:#888;"></div>
           </div>
 
           <!-- DATE -->
@@ -288,6 +312,11 @@ const CheckPrinting = () => {
             <span class="dollars-vert">DOLLARS</span>
           </div>
 
+          <!-- Address Window (for envelope window alignment) -->
+          <div class="addr-window">
+            ${payeeAddrLines.map(l => `<div>${l}</div>`).join('')}
+          </div>
+
           <!-- Memo + Authorized Signature -->
           <div class="memo-sig-row">
             <div class="memo-block">
@@ -301,6 +330,9 @@ const CheckPrinting = () => {
       </div>
 
       <!-- ═══════════════ STUB 1 ═══════════════ -->
+      <div class="stub-wrap">${stub()}</div>
+
+      <!-- ═══════════════ STUB 2 ═══════════════ -->
       <div class="stub-wrap">${stub()}</div>
 
     </body></html>`;
@@ -334,9 +366,9 @@ const CheckPrinting = () => {
     }
   };
 
-  const onFinish = async (values) => {
+  const onFinish = async (values, saveOnly) => {
     if (editingId) {
-      await updateAndPrint(values);
+      await updateAndPrint(values, saveOnly);
       return;
     }
     if (isDuplicate) {
@@ -345,14 +377,18 @@ const CheckPrinting = () => {
         content: `Check #${values.checkNumber} already exists. Are you sure you want to proceed?`,
         okText: 'Proceed Anyway',
         okType: 'danger',
-        onOk: () => recordAndPrint(values),
+        onOk: () => recordAndPrint(values, saveOnly),
       });
       return;
     }
-    await recordAndPrint(values);
+    await recordAndPrint(values, saveOnly);
   };
 
-  const recordAndPrint = async (values) => {
+  const recordOnly = async (values) => {
+    await recordAndPrint(values, true);
+  };
+
+  const recordAndPrint = async (values, recordOnlyFlag) => {
     try {
       setLoading(true);
       const totalAmt = splitLines.length > 1 ? splitTotal : Number(values.amount || 0);
@@ -374,8 +410,10 @@ const CheckPrinting = () => {
       };
       await window.electronAPI.insertTransaction(payload);
       message.success(`Check #${values.checkNumber} recorded successfully`);
-      const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
-      handlePrint(vals);
+      if (!recordOnlyFlag) {
+        const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
+        handlePrint(vals);
+      }
       form.resetFields();
       setSplitLines([{ key: 1, account: '', description: '', amount: 0 }]);
       form.setFieldsValue({ date: moment(), checkNumber: String(Number(values.checkNumber || 0) + 1) });
@@ -387,7 +425,7 @@ const CheckPrinting = () => {
     }
   };
 
-  const updateAndPrint = async (values) => {
+  const updateAndPrint = async (values, updateOnly) => {
     try {
       setLoading(true);
       const totalAmt = splitLines.length > 1 ? splitTotal : Number(values.amount || 0);
@@ -408,8 +446,10 @@ const CheckPrinting = () => {
       };
       await window.electronAPI.updateTransaction(editingId, payload);
       message.success(`Check #${values.checkNumber} updated`);
-      const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
-      handlePrint(vals);
+      if (!updateOnly) {
+        const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
+        handlePrint(vals);
+      }
       cancelEdit();
       loadData();
     } catch (e) {
@@ -437,19 +477,29 @@ const CheckPrinting = () => {
   };
 
   const handleReprintHistory = (record) => {
+    const payeeName = (record.description || '').replace(/^Check #?\d*\s*to\s*/i, '') || record.description;
+    const matchedPayee = payees.find(p => p.name === payeeName);
+    const payeeAddress = matchedPayee?._raw
+      ? [matchedPayee._raw.address1, matchedPayee._raw.address2, [matchedPayee._raw.city, matchedPayee._raw.state].filter(Boolean).join(', '), matchedPayee._raw.postal_code].filter(Boolean).join('\n')
+      : '';
     const vals = {
       date: record.date ? { format: (f) => moment(record.date).format(f) } : null,
-      payeeName: (record.description || '').replace(/^Check #?\d*\s*to\s*/i, '') || record.description,
+      payeeName,
+      payeeAddress,
       amount: record.amount || record.debit || 0,
       checkNumber: record.reference || '',
       memo: record.description || '',
       accountName: '',
     };
-    handlePrint(vals);
+    handlePrint(vals).then(() => loadData());
   };
 
   const handleEditCheck = (record) => {
     const payeeName = (record.description || '').replace(/^Check #?\d*\s*to\s*/i, '').trim() || record.description || '';
+    const matchedPayee = payees.find(p => p.name === payeeName);
+    const payeeAddress = matchedPayee?._raw
+      ? [matchedPayee._raw.address1, matchedPayee._raw.address2, [matchedPayee._raw.city, matchedPayee._raw.state].filter(Boolean).join(', '), matchedPayee._raw.postal_code].filter(Boolean).join('\n')
+      : '';
     const existingLines = record.splitLines && record.splitLines.length > 0
       ? record.splitLines.map((l, i) => ({ key: i, account: l.account || l.category || '', description: l.description || '', amount: Number(l.amount || 0) }))
       : [{ key: 1, account: '', description: '', amount: Number(record.amount || 0) }];
@@ -459,10 +509,14 @@ const CheckPrinting = () => {
       date: record.date ? moment(record.date) : moment(),
       accountId: Number(record.accountId) || undefined,
       checkNumber: record.reference || '',
+      payee: matchedPayee?.id || undefined,
       payeeName,
+      payeeAddress,
       amount: Number(record.amount || record.debit || 0),
       memo: record.description || '',
     });
+    setWatchPayeeName(payeeName);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
   };
 
   const filteredHistory = useMemo(() => {
@@ -484,7 +538,14 @@ const CheckPrinting = () => {
     { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: (v, r) => <Text strong>${fmt(v || r.debit || 0)}</Text> },
-    { title: 'Printed', key: 'printed', width: 80, render: (_, r) => r.printed ? <Tag color="green">Printed</Tag> : <Tag color="orange">Not Printed</Tag> },
+    { title: 'Printed', key: 'printed', width: 110, render: (_, r) => (
+      <Tag color={r.printed ? 'green' : 'orange'} style={{ cursor: 'pointer' }} onClick={async () => {
+        await window.electronAPI.markCheckPrinted?.(r.id, r.printed ? 0 : 1);
+        loadData();
+      }}>
+        {r.printed ? 'Printed' : 'Not Printed'}
+      </Tag>
+    )},
     { title: 'Status', key: 'status', width: 80, render: (_, r) => {
       const s = (r.status || 'active').toLowerCase();
       return s === 'void' ? <Tag color="red">Void</Tag> : <Tag color="green">Active</Tag>;
@@ -537,6 +598,7 @@ const CheckPrinting = () => {
       <Row gutter={[16, 16]}>
         {/* Check Form */}
         <Col xs={24} lg={14}>
+          <div ref={formRef}>
           <Card title={<><DollarOutlined style={{ marginRight: 4 }} />{editingId ? ' Edit Check' : ' Write a Check'}</>} size="small"
             extra={editingId ? <Button size="small" onClick={cancelEdit}>Cancel Edit</Button> : null}>
             {isDuplicate && (
@@ -653,11 +715,13 @@ const CheckPrinting = () => {
 
               <Space wrap>
                 <Button icon={<EyeOutlined />} onClick={handlePreview}>Preview</Button>
-                <Button icon={<PrinterOutlined />} onClick={() => { const vals = form.getFieldsValue(true); vals.accountName = selectedAccount?.accountName || selectedAccount?.name || ''; vals.splitLines = splitLines; handlePrint(vals); }}>Print Only</Button>
-                <Button type="primary" htmlType="submit" loading={loading} icon={<SaveOutlined />}>Record &amp; Print</Button>
+                <Button icon={<PrinterOutlined />} onClick={() => { if (editingId) { form.submit(); return; } const vals = form.getFieldsValue(true); vals.accountName = selectedAccount?.accountName || selectedAccount?.name || ''; vals.splitLines = splitLines; handlePrint(vals); }}>Print Only</Button>
+                <Button type="primary" htmlType="submit" loading={loading} icon={<SaveOutlined />}>{editingId ? 'Update & Print' : 'Record & Print'}</Button>
+                <Button onClick={async () => { try { const vals = await form.validateFields(); await onFinish(vals, true); } catch {} }} loading={loading} icon={<CheckCircleOutlined />}>{editingId ? 'Update Only' : 'Record Only'}</Button>
               </Space>
             </Form>
           </Card>
+          </div>
         </Col>
 
         {/* Live Preview */}
@@ -697,7 +761,7 @@ const CheckPrinting = () => {
       {/* Preview Modal */}
       <Modal title="Check Preview" visible={previewVisible} onCancel={() => setPreviewVisible(false)} width={860} footer={[
         <Button key="close" onClick={() => setPreviewVisible(false)}>Close</Button>,
-        <Button key="print" type="primary" icon={<PrinterOutlined />} onClick={() => { const vals = form.getFieldsValue(true); vals.accountName = selectedAccount?.accountName || selectedAccount?.name || ''; handlePrint(vals); setPreviewVisible(false); }}>Print</Button>,
+        <Button key="print" type="primary" icon={<PrinterOutlined />} onClick={() => { setPreviewVisible(false); if (editingId) { form.submit(); return; } const vals = form.getFieldsValue(true); vals.accountName = selectedAccount?.accountName || selectedAccount?.name || ''; handlePrint(vals); }}>Print</Button>,
       ]}>
         <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
       </Modal>

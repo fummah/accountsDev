@@ -65,6 +65,7 @@ const CreditCardCharges = () => {
         form.setFieldsValue({
           date: full.date ? moment(full.date) : moment(),
           creditCardAccount: full.reference || record.card,
+          vendor: full.payee_name || record.vendor || '',
           description: full.description || '',
           amount: Number(full.amount || record.amount || 0),
         });
@@ -86,6 +87,7 @@ const CreditCardCharges = () => {
   const columns = [
     { title: 'Date', dataIndex: 'date', key: 'date', width: 110, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Card Account', dataIndex: 'card', key: 'card' },
+    { title: 'Vendor', dataIndex: 'vendor', key: 'vendor', render: v => v || '-' },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
     { title: 'Categories', dataIndex: 'categories', key: 'categories', render: v => v ? v.split(',').map((c, i) => <Tag key={i}>{c.trim()}</Tag>) : '-' },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: a => `${cSym} ${Number(a||0).toFixed(2)}` },
@@ -124,6 +126,7 @@ const CreditCardCharges = () => {
         key: t.id,
         date: t.date,
         card: t.reference || '',
+        vendor: t.payee_name || '',
         description: t.description,
         amount: t.amount || t.credit || 0,
         categories: t.categories || '',
@@ -165,6 +168,7 @@ const CreditCardCharges = () => {
         accountId: cardAccount ? Number(cardAccount.id) : undefined,
         entered_by: 'system',
         categories,
+        payee_name: values.vendor || '',
         splitLines: splitLines.filter(l => Number(l.amount) > 0).map(l => ({ account: l.category, description: l.description, amount: Number(l.amount) })),
       };
 
@@ -225,7 +229,7 @@ const CreditCardCharges = () => {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="vendor" label="Vendor / Payee">
+              <Form.Item name="vendor" label="Vendor / Payee" rules={[{ required: true, message: 'Select a vendor' }]}>
                 <Select placeholder="Select vendor" showSearch optionFilterProp="children" allowClear>
                   {vendors.map(v => (
                     <Option key={v.id} value={v.display_name || `${v.first_name} ${v.last_name}`}>
@@ -275,13 +279,6 @@ const CreditCardCharges = () => {
           <Form.Item name="description" label="Memo / Description">
             <Input placeholder="Optional overall memo" />
           </Form.Item>
-
-          <div style={{ marginBottom: 12 }}>
-            <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Attachment (Receipt / Invoice)</Text>
-            <Upload fileList={fileList} onChange={({ fileList: fl }) => setFileList(fl)} beforeUpload={() => false} maxCount={1}>
-              <Button icon={<UploadOutlined />}><PaperClipOutlined /> Attach File</Button>
-            </Upload>
-          </div>
         </Form>
       </Modal>
 

@@ -121,6 +121,18 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <span>Bill Tracker</span>
                   </Link>
                 </Menu.Item>
+                <Menu.Item key="main/vendors/bills/enter">
+                  <Link to="/main/vendors/bills/enter">
+                    <i className="icon icon-editor"/>
+                    <span>Enter Bill</span>
+                  </Link>
+                </Menu.Item>
+                <Menu.Item key="main/vendors/bills/pay">
+                  <Link to="/main/vendors/bills/pay">
+                    <i className="icon icon-check-square-o"/>
+                    <span>Pay Bills</span>
+                  </Link>
+                </Menu.Item>
                 <Menu.Item key="main/expenses/suppliers">
                   <Link to="/main/expenses/suppliers">
                     <i className="icon icon-user"/>
@@ -185,6 +197,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                   <Link to="/main/accountant/trial-balance">
                     <i className="icon icon-check-square-o"/>
                     <span>Trial Balance</span>
+                  </Link>
+                </Menu.Item>
+                <Menu.Item key="main/reports/sales">
+                  <Link to="/main/reports/sales">
+                    <i className="icon icon-revenue-new"/>
+                    <span>Sales Report</span>
                   </Link>
                 </Menu.Item>
               </SubMenu>

@@ -153,6 +153,29 @@ const registerInvoiceHandlers = () => {
         } catch (auditErr) {
           console.warn('Audit log failed (non-fatal):', auditErr.message);
         }
+        // ── Post-on-save: post/repost journal entry for non-Draft invoices ──
+        if (invoiceData?.status && invoiceData.status !== 'Draft') {
+          try {
+            const inv = await Invoices.getSingleInvoice(invoiceData.id);
+            if (inv) {
+              // Reverse existing posting if any, then re-post
+              const db = require('../models/dbmgr');
+              const oldJe = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted' LIMIT 1").get(Number(invoiceData.id));
+              if (oldJe) {
+                JournalEntries.voidEntry(oldJe.id);
+              }
+              JournalEntries.postInvoice({
+                id: invoiceData.id,
+                date: inv.start_date || new Date().toISOString().slice(0, 10),
+                number: inv.number || String(invoiceData.id),
+                total: inv.total || inv.amount || 0,
+                customerName: inv.first_name ? `${inv.first_name} ${inv.last_name || ''}`.trim() : '',
+              });
+            }
+          } catch (jErr) {
+            console.warn('Journal re-post (invoice update) failed:', jErr.message);
+          }
+        }
       }
       return res;
     } catch (error) {    

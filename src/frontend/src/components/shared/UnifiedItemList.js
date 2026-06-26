@@ -129,7 +129,7 @@ const UnifiedItemList = () => {
           await insertFn(
             vals.type || 'Product', vals.name || '', vals.sku || '', vals.category || '',
             vals.description || '', Number(vals.selling_price) || 0, vals.income_account || '',
-            0, 0, 0, null
+            '', '', '', 'system'
           );
         } else if (insertFn) {
           await insertFn(vals);

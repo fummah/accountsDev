@@ -4,6 +4,7 @@ const JournalEntries = require('../models/journalEntries');
 const Journal = require('../models/journal');
 const Ledger = require('../models/ledger');
 const AuditLog = require('../models/auditLog');
+const db = require('../models/dbmgr');
 const { authorize } = require('../security/authz');
 const { validateTransaction, validateJournal } = require('../validation/validators');
 
@@ -22,18 +23,21 @@ const registerTransactionHandlers = () => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
       validateTransaction(tx);
-      // Infer proper debit/credit based on transaction type and account type
+      // Infer proper debit/credit based on transaction type
+      // For the bank register: deposits increase the bank (debit for Asset accounts),
+      // checks/expenses decrease the bank (credit for Asset accounts).
       const amt = Number(tx.amount) || 0;
       let debit = tx.debit;
       let credit = tx.credit;
       if (debit == null && credit == null && amt > 0) {
         const type = (tx.type || '').toLowerCase();
-        if (type === 'deposit') {
-          debit = amt; credit = null;
-        } else if (type === 'check' || type === 'expense' || type === 'payment' || type === 'transfer_out') {
-          debit = null; credit = amt;
+        if (type === 'deposit' || type === 'transfer_in') {
+          debit = amt; credit = 0;
+        } else if (type === 'check' || type === 'expense' || type === 'payment' || type === 'transfer_out' || type === 'credit card') {
+          debit = 0; credit = amt;
         } else {
-          debit = null; credit = amt;
+          // Default: treat unknown types as outgoing (credit)
+          debit = 0; credit = amt;
         }
       }
       const res = Transactions.insert({ ...tx, debit, credit });
@@ -96,7 +100,6 @@ const registerTransactionHandlers = () => {
         try {
           if (existing) {
             // Find and reverse the old journal entry by source_type + source_id
-            const db = require('../models/dbmgr');
             const oldEntry = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'transaction' AND source_id = ? AND status = 'Posted' LIMIT 1").get(String(id));
             if (oldEntry) {
               JournalEntries.reverse(oldEntry.id, data.date || existing?.date, ctx.userId);
@@ -163,22 +166,23 @@ const registerTransactionHandlers = () => {
     }
   });
 
-  ipcMain.handle('mark-check-printed', async (event, id) => {
+  ipcMain.handle('mark-check-printed', async (event, id, printed = 1) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
-      const res = db.prepare("UPDATE transactions SET printed = 1, printed_at = datetime('now') WHERE id = ?").run(id);
+      const val = printed ? 1 : 0;
+      const res = db.prepare("UPDATE transactions SET printed = ?, printed_at = CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END WHERE id = ?").run(val, val, id);
       if (res.changes > 0) {
         AuditLog.log({
           userId: ctx.userId,
-          action: 'print',
+          action: val ? 'print' : 'unprint',
           entityType: 'transaction',
           entityId: id,
-          details: { printedAt: new Date().toISOString() }
+          details: { printed: val, printedAt: val ? new Date().toISOString() : null }
         });
       }
       return { success: res.changes > 0 };
     } catch (error) {
-      console.error('Error marking check as printed:', error);
+      console.error('Error updating check printed status:', error);
       return { error: error.message };
     }
   });
@@ -235,7 +239,6 @@ const registerTransactionHandlers = () => {
   // Blockchain anchoring for journal entries (fallback in case accountingHandlers fails)
   ipcMain.handle('journal-anchor', async (_e, entryId) => {
     try {
-      const db = require('../models/dbmgr');
       const entry = db.prepare('SELECT id, status FROM journal_entries WHERE id = ?').get(entryId);
       if (!entry) return { error: 'Entry not found' };
       if (entry.status === 'Void') return { error: 'Cannot anchor a voided entry' };

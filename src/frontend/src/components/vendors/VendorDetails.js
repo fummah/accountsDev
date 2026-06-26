@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Descriptions, message, Button } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
+import { useParams, useHistory } from 'react-router-dom';
 
 const VendorDetails = ({ match }) => {
+  const params = useParams();
+  const history = useHistory();
   const [vendor, setVendor] = useState(null);
 
   useEffect(() => {
-    const id = match?.params?.id;
+    const id = params?.id || match?.params?.id;
     if (id) loadVendor(id);
-  }, [match]);
+  }, [params?.id, match?.params?.id]);
 
   const loadVendor = async (id) => {
     try {
@@ -20,12 +23,12 @@ const VendorDetails = ({ match }) => {
     }
   };
 
-  if (!vendor) return <Card title="Vendor Details" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => window.history.back()}>Back</Button>}>Loading...</Card>;
+  if (!vendor) return <Card title="Vendor Details" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => history.goBack()}>Back</Button>}>Loading...</Card>;
 
   const fullAddr = [vendor.address1, vendor.address2, vendor.city, vendor.state, vendor.postal_code, vendor.country].filter(Boolean).join(', ');
 
   return (
-    <Card title={`Vendor: ${vendor.display_name || vendor.first_name}`} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => window.history.back()}>Back</Button>}>
+    <Card title={`Vendor: ${vendor.display_name || vendor.first_name}`} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => history.goBack()}>Back</Button>}>
       <Descriptions column={2} bordered size="small">
         <Descriptions.Item label="Name" span={2}>{vendor.display_name || `${vendor.first_name} ${vendor.last_name}`}</Descriptions.Item>
         <Descriptions.Item label="Company">{vendor.company_name || '-'}</Descriptions.Item>

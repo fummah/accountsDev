@@ -273,8 +273,7 @@ const ExpenseTracking = () => {
           <DatePicker.RangePicker onChange={(range) => setFilters(f => ({ ...f, dateRange: range || [] }))} format="MM/DD/YYYY" />
           <Input.Search allowClear placeholder="Search description, category, payee" prefix={<SearchOutlined />}
             onSearch={(val) => setFilters(f => ({ ...f, q: val }))} style={{ width: 280 }} />
-          <Button type="primary" icon={<PlusOutlined />} onClick={showDrawer}>Add Expense</Button>
-          <Button icon={<FileTextOutlined />} onClick={() => window.location.hash = '#/main/vendors/bills/enter'}>Enter Bill</Button>
+          <Button type="primary" icon={<FileTextOutlined />} onClick={() => window.location.hash = '#/main/vendors/bills/enter'}>Enter Bill</Button>
         </Space>
         <Table columns={columns} dataSource={filtered} loading={loading} rowKey={(r) => r.id || r.key}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} expenses` }} size="middle" />

@@ -583,7 +583,34 @@ safeHandle('updatevat', async (event,vatData) => {
 // Handler update expense
 safeHandle('updateexpense', async (event,expenseData) => {
   try {
-    return await Expenses.updateExpense(expenseData);
+    const res = await Expenses.updateExpense(expenseData);
+    // ── Post-on-save: reverse old journal entry and re-post for bills ──
+    if (res?.success && expenseData?.id) {
+      const isDraft = (expenseData.approval_status || '').toLowerCase() === 'draft';
+      const isBill = (expenseData.category || '').toLowerCase() === 'bill';
+      if (!isDraft && isBill) {
+        try {
+          const JournalEntries = require('../models/journalEntries');
+          const db = require('../models/dbmgr');
+          const oldJe = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'expense' AND source_id = ? AND status = 'Posted' LIMIT 1").get(Number(expenseData.id));
+          if (oldJe) {
+            JournalEntries.voidEntry(oldJe.id);
+          }
+          const totalAmount = Array.isArray(expenseData.lines) ? expenseData.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) : 0;
+          if (totalAmount > 0) {
+            JournalEntries.postExpense({
+              id: expenseData.id,
+              amount: totalAmount,
+              date: expenseData.payment_date || new Date().toISOString().slice(0, 10),
+              description: expenseData.category || expenseData.ref_no || '',
+              category: expenseData.category,
+              reference: expenseData.ref_no,
+            });
+          }
+        } catch (jErr) { console.warn('Journal re-post (expense update) failed:', jErr.message); }
+      }
+    }
+    return res;
   } catch (error) {    
     console.error('Error updating expense:', error);
     return { error: error.message };

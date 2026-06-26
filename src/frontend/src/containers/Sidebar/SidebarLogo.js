@@ -15,6 +15,7 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
   const {width, themeType} = useSelector(({settings}) => settings);
   let navStyle = useSelector(({settings}) => settings.navStyle);
   const [companyLogo, setCompanyLogo] = useState(null);
+  const [companyName, setCompanyName] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -23,6 +24,7 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
         if (info?.logo && typeof info.logo === 'string' && info.logo.startsWith('data:')) {
           setCompanyLogo(info.logo);
         }
+        if (info?.name) setCompanyName(info.name);
       } catch {}
     })();
   }, []);
@@ -55,8 +57,13 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
         />
       </div> : null}
 
-      <Link to="/" className="gx-site-logo">
-        {sidebarCollapsed ? null : logoImg}
+      <Link to="/" className="gx-site-logo" style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+        {sidebarCollapsed ? null : (
+          <>
+            {logoImg}
+            {companyName && <span style={{ fontSize: 13, fontWeight: 600, color: themeType === THEME_TYPE_LITE ? '#1a1a1a' : '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>{companyName}</span>}
+          </>
+        )}
       </Link>
     </div>
   );

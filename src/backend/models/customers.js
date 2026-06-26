@@ -103,67 +103,67 @@ const Customers = {
   updateCustomer : async (customerData) => {
     const { id, ...customerDetails } = customerData;
     try {
-      // Update the main customer details
+      // Merge with existing record so partial updates (e.g. only address/phone)
+      // don't wipe NOT NULL columns like first_name.
+      const existing = db.prepare('SELECT * FROM customers WHERE id = ?').get(id) || {};
+      const pick = (key, fallbackKeys = []) => {
+        if (customerDetails[key] !== undefined && customerDetails[key] !== null) return customerDetails[key];
+        for (const fk of fallbackKeys) {
+          if (customerDetails[fk] !== undefined && customerDetails[fk] !== null) return customerDetails[fk];
+        }
+        return existing[key];
+      };
+
+      // If only a display_name was provided, derive first/last from it so the
+      // NOT NULL first_name constraint is always satisfied.
+      let firstName = pick('first_name');
+      let lastName = pick('last_name');
+      const dn = pick('display_name');
+      if ((firstName === undefined || firstName === null || firstName === '') && dn) {
+        const parts = String(dn).trim().split(/\s+/);
+        firstName = parts[0] || existing.first_name || dn;
+        if (!lastName) lastName = parts.slice(1).join(' ') || existing.last_name || '';
+      }
+      if (!firstName) firstName = existing.first_name || dn || 'Customer';
+
       await db.prepare(
         `UPDATE customers 
          SET 
-             title = ?, 
-             first_name = ?, 
-             middle_name = ?, 
-             last_name = ?, 
-             suffix = ?, 
-             email = ?, 
-             display_name = ?, 
-             company_name = ?, 
-             phone_number = ?, 
-             mobile_number = ?, 
-             fax = ?, 
-             other = ?, 
-             website = ?, 
-             address1 = ?, 
-             address2 = ?, 
-             city = ?, 
-             state = ?, 
-             postal_code = ?, 
-             country = ?, 
-             payment_method = ?, 
-             terms = ?, 
-             tax_number = ?,
-             opening_balance = ?, 
-             as_of = ?, 
-             delivery_option = ?, 
-             language = ?,
-             notes = ? 
+             title = ?, first_name = ?, middle_name = ?, last_name = ?, suffix = ?, 
+             email = ?, display_name = ?, company_name = ?, phone_number = ?, mobile_number = ?, 
+             fax = ?, other = ?, website = ?, address1 = ?, address2 = ?, city = ?, state = ?, 
+             postal_code = ?, country = ?, payment_method = ?, terms = ?, tax_number = ?,
+             opening_balance = ?, as_of = ?, delivery_option = ?, language = ?, notes = ? 
          WHERE id = ?`).run(
         [
-          customerDetails.title,           // Title
-          customerDetails.first_name,      // First name
-          customerDetails.middle_name,     // Middle name
-          customerDetails.last_name,       // Last name
-          customerDetails.suffix,          // Suffix
-          customerDetails.email,           // Email
-          customerDetails.display_name,    // Display name
-          customerDetails.company_name,    // Company name
-          customerDetails.phone_number,    // Phone number
-          customerDetails.mobile_number,   // Mobile number
-          customerDetails.fax,             // Fax
-          customerDetails.other,           // Other
-          customerDetails.website,         // Website
-          customerDetails.address1,        // Address line 1
-          customerDetails.address2,        // Address line 2
-          customerDetails.city,            // City
-          customerDetails.state,           // State
-          customerDetails.postal_code,     // Postal code
-          customerDetails.country,         // Country
-          customerDetails.payment_method,  // Payment method
-          customerDetails.terms,           // Terms
-          customerDetails.tax_number,      // Tax number
-          customerDetails.opening_balance, // Opening balance
-          customerDetails.as_of,           // As of (date)
-          customerDetails.delivery_option, // Delivery option
-          customerDetails.language,
-          customerDetails.notes,         // Language
-          id                               // Customer ID (for WHERE clause)
+          pick('title'),
+          firstName,
+          pick('middle_name'),
+          lastName,
+          pick('suffix'),
+          pick('email'),
+          dn,
+          pick('company_name', ['company']),
+          pick('phone_number', ['phone']),
+          pick('mobile_number', ['mobile']),
+          pick('fax'),
+          pick('other'),
+          pick('website'),
+          pick('address1'),
+          pick('address2'),
+          pick('city'),
+          pick('state'),
+          pick('postal_code', ['zip']),
+          pick('country'),
+          pick('payment_method'),
+          pick('terms'),
+          pick('tax_number'),
+          pick('opening_balance'),
+          pick('as_of'),
+          pick('delivery_option'),
+          pick('language'),
+          pick('notes'),
+          id
         ]
       );
   

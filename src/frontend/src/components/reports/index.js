@@ -16,6 +16,7 @@ import TaxSummary from './TaxSummary';
 import TaxForms from './TaxForms';
 import TaxFilingCenter from './TaxFilingCenter';
 import ConsolidatedReports from './ConsolidatedReports';
+import SalesReport from './SalesReport';
 
 const ReportRoutes = ({ match }) => {
   return (
@@ -36,6 +37,7 @@ const ReportRoutes = ({ match }) => {
       <Route path={`${match.path}/tax-forms`} component={TaxForms} />
       <Route path={`${match.path}/tax-filing`} component={TaxFilingCenter} />
       <Route path={`${match.path}/consolidated`} component={ConsolidatedReports} />
+      <Route path={`${match.path}/sales`} component={SalesReport} />
     </Switch>
   );
 };

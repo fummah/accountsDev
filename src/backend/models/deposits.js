@@ -51,11 +51,16 @@ const Deposits = {
       `).run(bankAccountId, date, reference || null, memo || null, totalAmount, createdBy || null);
       const depositId = dep.lastInsertRowid;
 
-      // 2. Insert allocations
+      // 2. Insert allocations (resolve account name → id if needed)
       if (allocations && allocations.length > 0) {
         const allocStmt = db.prepare('INSERT INTO deposit_allocations (deposit_id, account_id, amount, description) VALUES (?, ?, ?, ?)');
         for (const a of allocations) {
-          allocStmt.run(depositId, a.accountId || null, Number(a.amount || 0), a.description || null);
+          let acctId = a.accountId || null;
+          if (acctId && isNaN(Number(acctId))) {
+            const found = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1").get(String(acctId));
+            acctId = found ? found.id : null;
+          }
+          allocStmt.run(depositId, acctId, Number(a.amount || 0), a.description || null);
         }
       }
 
@@ -64,11 +69,39 @@ const Deposits = {
         db.prepare(`UPDATE payments SET deposit_id = ?, status = 'Deposited' WHERE id IN (${paymentIds.map(() => '?').join(',')})`).run(depositId, ...paymentIds);
       }
 
-      // 4. Post journal entry: DR Bank / CR Undeposited Funds
+      // 4. Post journal entry: DR Bank / CR (credit side)
+      //    - Existing-payment deposits  → CR Undeposited Funds (clearing UF)
+      //    - Manual deposits            → CR the selected income/asset/equity
+      //      account on each allocation line (Sales Income, Owner Contribution…)
       const bank = db.prepare('SELECT id FROM chart_of_accounts WHERE id = ?').get(bankAccountId);
-      const undeposited = COA.getSystemAccount('Undeposited Funds') || db.prepare("SELECT id FROM chart_of_accounts WHERE name = 'Undeposited Funds' LIMIT 1").get();
       if (!bank) throw new Error('Bank account not found');
-      if (!undeposited) throw new Error('Undeposited Funds account not found');
+
+      const isExistingPaymentsDeposit = Array.isArray(paymentIds) && paymentIds.length > 0;
+      const creditLines = [];
+
+      if (isExistingPaymentsDeposit) {
+        const undeposited = COA.getSystemAccount('Undeposited Funds') || db.prepare("SELECT id FROM chart_of_accounts WHERE name = 'Undeposited Funds' LIMIT 1").get();
+        if (!undeposited) throw new Error('Undeposited Funds account not found');
+        creditLines.push({ account_id: undeposited.id, debit: 0, credit: totalAmount, description: 'Clear undeposited funds' });
+      } else {
+        // Manual deposit — credit each allocation's chosen account/category.
+        // Fall back to Undeposited Funds only if an allocation has no account.
+        const undeposited = COA.getSystemAccount('Undeposited Funds') || db.prepare("SELECT id FROM chart_of_accounts WHERE name = 'Undeposited Funds' LIMIT 1").get();
+        for (const a of (allocations || [])) {
+          const amt = Number(a.amount || 0);
+          if (amt <= 0) continue;
+          let creditAcctId = a.accountId || null;
+          // accountId may be a name string — resolve to COA id
+          if (creditAcctId && isNaN(Number(creditAcctId))) {
+            const found = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1").get(String(creditAcctId));
+            creditAcctId = found ? found.id : null;
+          }
+          if (!creditAcctId && undeposited) creditAcctId = undeposited.id;
+          if (!creditAcctId) throw new Error('Deposit allocation has no valid account/category');
+          creditLines.push({ account_id: Number(creditAcctId), debit: 0, credit: amt, description: a.description || 'Deposit' });
+        }
+        if (!creditLines.length) throw new Error('Manual deposit requires at least one allocation with an account');
+      }
 
       JournalEntries.post({
         date: date || new Date().toISOString().slice(0, 10),
@@ -77,7 +110,7 @@ const Deposits = {
         source_id: Number(depositId),
         lines: [
           { account_id: bank.id, debit: totalAmount, credit: 0, description: 'Deposit to bank' },
-          { account_id: undeposited.id, debit: 0, credit: totalAmount, description: 'Clear undeposited funds' },
+          ...creditLines,
         ],
       });
 

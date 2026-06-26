@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Form, Select, Input, InputNumber, DatePicker, Button, Card, Table, message, Space, Modal, Tag, Typography, Divider, Checkbox, Tooltip } from 'antd';
-import { PlusOutlined, SaveOutlined, DeleteOutlined, HistoryOutlined, SearchOutlined, ReloadOutlined, MinusCircleOutlined, EyeOutlined, StopOutlined } from '@ant-design/icons';
+import { PlusOutlined, SaveOutlined, DeleteOutlined, HistoryOutlined, SearchOutlined, ReloadOutlined, MinusCircleOutlined, EyeOutlined, StopOutlined, SwapOutlined } from '@ant-design/icons';
 import moment from 'moment';
 
 const { Option } = Select;
@@ -22,6 +22,7 @@ const Deposits = () => {
   const [historySearch, setHistorySearch] = useState('');
   const [activeTab, setActiveTab] = useState('1');
   const [viewDeposit, setViewDeposit] = useState(null);
+  const [depositMode, setDepositMode] = useState('payments'); // 'payments' or 'manual'
 
   useEffect(() => { loadData(); }, []);
 
@@ -105,18 +106,28 @@ const Deposits = () => {
     setAllocations(prev => prev.filter(a => a.id !== id));
   };
 
+  const manualTotal = allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
+
   const handleSubmit = async (values) => {
-    if (selectedPaymentIds.length === 0) {
-      message.error('Please select at least one payment to deposit');
-      return;
-    }
-    if (allocations.length === 0) {
-      message.error('Please add at least one allocation line');
-      return;
-    }
-    if (!isBalanced) {
-      message.error('Split amounts must equal the total deposit amount');
-      return;
+    if (depositMode === 'payments') {
+      if (selectedPaymentIds.length === 0) {
+        message.error('Please select at least one payment to deposit');
+        return;
+      }
+      if (allocations.length === 0) {
+        message.error('Please add at least one allocation line');
+        return;
+      }
+      if (!isBalanced) {
+        message.error('Split amounts must equal the total deposit amount');
+        return;
+      }
+    } else {
+      // Manual deposit mode
+      if (allocations.length === 0 || manualTotal <= 0) {
+        message.error('Please add at least one allocation line with an amount');
+        return;
+      }
     }
 
     try {
@@ -126,7 +137,7 @@ const Deposits = () => {
         date: values.date ? values.date.format('YYYY-MM-DD') : moment().format('YYYY-MM-DD'),
         reference: values.reference || null,
         memo: values.memo || null,
-        paymentIds: selectedPaymentIds,
+        paymentIds: depositMode === 'payments' ? selectedPaymentIds : [],
         allocations: allocations.map(a => ({
           accountId: a.accountId || null,
           amount: Number(a.amount || 0),
@@ -253,6 +264,10 @@ const Deposits = () => {
         <div style={{ padding: 24 }}>
           {activeTab === '1' && (
             <Form form={form} layout="vertical" onFinish={handleSubmit} initialValues={{ date: moment() }}>
+              <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
+                <Button type={depositMode === 'payments' ? 'primary' : 'default'} onClick={() => setDepositMode('payments')}>Deposit Existing Payments</Button>
+                <Button type={depositMode === 'manual' ? 'primary' : 'default'} icon={<SwapOutlined />} onClick={() => setDepositMode('manual')}>Manual Deposit</Button>
+              </div>
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <Form.Item name="bankAccountId" label="Deposit To" rules={[{ required: true, message: 'Select bank account' }]}
                   style={{ minWidth: 250, flex: 2 }}>
@@ -273,33 +288,37 @@ const Deposits = () => {
                 </Form.Item>
               </div>
 
-              <Divider orientation="left" style={{ fontSize: 13 }}>Payments Awaiting Deposit</Divider>
-
-              {pendingPayments.length === 0 ? (
-                <div style={{ padding: '24px 0', textAlign: 'center', color: '#999' }}>
-                  No payments awaiting deposit. Payments are placed here after they are recorded against invoices.
-                </div>
-              ) : (
+              {depositMode === 'payments' && (
                 <>
-                  <Table columns={pendingColumns} dataSource={pendingPayments} rowKey="id" size="small" pagination={false}
-                    locale={{ emptyText: 'No pending payments' }}
-                    summary={() => selectedPaymentIds.length > 0 ? (
-                      <Table.Summary.Row>
-                        <Table.Summary.Cell index={0} colSpan={3}><Text strong>Selected Total</Text></Table.Summary.Cell>
-                        <Table.Summary.Cell index={3} align="right"><Text strong style={{ color: '#1890ff', fontSize: 15 }}>$ {fmt(selectedTotal)}</Text></Table.Summary.Cell>
-                        <Table.Summary.Cell index={4} colSpan={2} />
-                      </Table.Summary.Row>
-                    ) : null}
-                  />
-                  <div style={{ marginTop: 8 }}>
-                    <Text type="secondary">{selectedPaymentIds.length} of {pendingPayments.length} payments selected</Text>
-                  </div>
+                  <Divider orientation="left" style={{ fontSize: 13 }}>Payments Awaiting Deposit</Divider>
+
+                  {pendingPayments.length === 0 ? (
+                    <div style={{ padding: '24px 0', textAlign: 'center', color: '#999' }}>
+                      No payments awaiting deposit. Payments are placed here after they are recorded against invoices.
+                    </div>
+                  ) : (
+                    <>
+                      <Table columns={pendingColumns} dataSource={pendingPayments} rowKey="id" size="small" pagination={false}
+                        locale={{ emptyText: 'No pending payments' }}
+                        summary={() => selectedPaymentIds.length > 0 ? (
+                          <Table.Summary.Row>
+                            <Table.Summary.Cell index={0} colSpan={3}><Text strong>Selected Total</Text></Table.Summary.Cell>
+                            <Table.Summary.Cell index={3} align="right"><Text strong style={{ color: '#1890ff', fontSize: 15 }}>$ {fmt(selectedTotal)}</Text></Table.Summary.Cell>
+                            <Table.Summary.Cell index={4} colSpan={2} />
+                          </Table.Summary.Row>
+                        ) : null}
+                      />
+                      <div style={{ marginTop: 8 }}>
+                        <Text type="secondary">{selectedPaymentIds.length} of {pendingPayments.length} payments selected</Text>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
 
-              {selectedPaymentIds.length > 0 && (
+              {(depositMode === 'manual' || selectedPaymentIds.length > 0) && (
                 <>
-                  <Divider orientation="left" style={{ fontSize: 13 }}>Split Allocation (Categories)</Divider>
+                  <Divider orientation="left" style={{ fontSize: 13 }}>{depositMode === 'manual' ? 'Deposit Lines' : 'Split Allocation (Categories)'}</Divider>
 
                   {allocations.map(a => (
                     <div key={a.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
@@ -339,17 +358,19 @@ const Deposits = () => {
                   </Button>
 
                   <div style={{ marginBottom: 16, padding: '12px 16px', background: '#f6f8fa', borderRadius: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                      {depositMode === 'payments' && (
+                        <Text style={{ fontSize: 13 }}>
+                          <span style={{ fontWeight: 500 }}>Selected Payments:</span> $ {fmt(selectedTotal)}
+                        </Text>
+                      )}
                       <Text style={{ fontSize: 13 }}>
-                        <span style={{ fontWeight: 500 }}>Selected Payments:</span> $ {fmt(selectedTotal)}
-                      </Text>
-                      <Text style={{ fontSize: 13 }}>
-                        <span style={{ fontWeight: 500 }}>Allocation Total:</span>{' '}
-                        <span style={{ color: isBalanced ? '#52c41a' : '#f5222d', fontWeight: 700 }}>
+                        <span style={{ fontWeight: 500 }}>{depositMode === 'manual' ? 'Deposit Total:' : 'Allocation Total:'}</span>{' '}
+                        <span style={{ color: depositMode === 'manual' ? '#1890ff' : (isBalanced ? '#52c41a' : '#f5222d'), fontWeight: 700 }}>
                           $ {fmt(allocationsTotal)}
                         </span>
                       </Text>
-                      {!isBalanced && allocationsTotal > 0 && (
+                      {depositMode === 'payments' && !isBalanced && allocationsTotal > 0 && (
                         <Text style={{ color: '#f5222d', fontSize: 12, fontWeight: 500 }}>
                           Split amounts must equal the total deposit amount
                         </Text>
@@ -365,7 +386,7 @@ const Deposits = () => {
                     Reset
                   </Button>
                   <Button type="primary" icon={<SaveOutlined />} htmlType="submit" loading={loading}
-                    disabled={selectedPaymentIds.length === 0 || allocations.length === 0 || !isBalanced}>
+                    disabled={depositMode === 'payments' ? (selectedPaymentIds.length === 0 || allocations.length === 0 || !isBalanced) : (allocations.length === 0 || manualTotal <= 0)}>
                     Save Deposit
                   </Button>
                 </Space>

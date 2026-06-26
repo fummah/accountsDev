@@ -1,5 +1,5 @@
 import React from 'react';
-import { Route, Switch, Redirect } from 'react-router-dom';
+import { Route, Switch } from 'react-router-dom';
 import VendorCenter from './VendorCenter';
 import BillTracker from './BillTracker';
 import EnterBill from './bills/EnterBill';
@@ -20,7 +20,7 @@ const VendorRoutes = ({ match }) => {
       <Route exact path={`${match.path}/bills/enter`} component={EnterBill} />
       <Route exact path={`${match.path}/bills/new`} component={EnterBill} />
       <Route exact path={`${match.path}/bills/edit/:id`} component={EnterBill} />
-      <Redirect exact from={`${match.path}/bills/pay`} to={`${match.path}/bills/tracker`} />
+      <Route exact path={`${match.path}/bills/pay`} component={PayBills} />
       <Route exact path={`${match.path}/bills/expenses`} component={ExpenseTracking} />
       <Route exact path={`${match.path}/credits`} component={VendorCredits} />
       <Route exact path={`${match.path}/items`} component={UnifiedItemList} />

@@ -47,7 +47,12 @@ const CreateInvoice = () => {
     if (cust) {
       const updates = {};
       if (cust.email && cust.email !== 'null') updates.customer_email = cust.email;
-      if (cust.address1 && cust.address1 !== 'null') updates.billing_address = cust.address1;
+      const addrParts = [
+        cust.address1, cust.address2,
+        [cust.city, cust.state].filter(Boolean).join(', '),
+        cust.postal_code || cust.zip
+      ].filter(v => v && v !== 'null');
+      if (addrParts.length > 0) updates.billing_address = addrParts.join('\n');
       if (cust.terms && cust.terms !== 'null') updates.terms = cust.terms;
       form.setFieldsValue(updates);
       if (updates.terms) {
@@ -90,7 +95,7 @@ const CreateInvoice = () => {
       const res = await window.electronAPI.insertProduct?.(
         vals.type || 'Product', vals.name || '', vals.sku || '', vals.category || '',
         vals.description || '', Number(vals.price) || 0,
-        incomeAcct ? (incomeAcct.accountName || incomeAcct.name) : '', 0, 0, 0, null
+        incomeAcct ? (incomeAcct.accountName || incomeAcct.name) : '', '', '', '', 'system'
       );
       message.success('Product added');
       setProdModalOpen(false);

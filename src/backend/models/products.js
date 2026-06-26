@@ -77,23 +77,20 @@ const Products = {
     return { data, total };
   },
   updateProduct : async (productData) => {
-    const { id, ...productDetails } = productData;
+    const { id, ...p } = productData;
     try {
-      // Update the main product details
-      await db.prepare(`UPDATE products SET type = ?,name = ?,sku = ?, category = ?, description = ?,price = ?, income_account = ?, tax_inclusive = ?,tax = ?, isfromsupplier = ? WHERE id = ?`).run(
-        [
-          productDetails.type,
-          productDetails.name,
-          productDetails.sku,
-          productDetails.category,
-          productDetails.description,
-          productDetails.price,
-          productDetails.income_account,
-          productDetails.tax_inclusive,
-          productDetails.tax,
-          productDetails.isfromsupplier,
-          id,
-        ]
+      db.prepare(`UPDATE products SET type = ?, name = ?, sku = ?, category = ?, description = ?, price = ?, income_account = ?, tax_inclusive = ?, tax = ?, isfromsupplier = ? WHERE id = ?`).run(
+          p.type || null,
+          p.name || null,
+          p.sku || null,
+          p.category || null,
+          p.description || null,
+          p.price != null ? p.price : (p.selling_price != null ? p.selling_price : null),
+          p.income_account || null,
+          p.tax_inclusive || null,
+          p.tax || null,
+          p.isfromsupplier || null,
+          id
       );
   
       return { success: true, message: 'Product updated successfully.' };

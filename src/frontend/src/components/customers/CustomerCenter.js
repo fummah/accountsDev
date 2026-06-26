@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Tag, Input } from 'antd';
+import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Tag, Input, Modal, Form } from 'antd';
 import { UserOutlined, DollarOutlined, FileDoneOutlined, ClockCircleOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
@@ -20,6 +20,8 @@ const CustomerCenter = () => {
   const [custPage, setCustPage] = useState(1);
   const [custTotal, setCustTotal] = useState(0);
   const PAGE_SIZE = 25;
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [custForm] = Form.useForm();
   const [stats, setStats] = useState({
     totalCustomers: 0,
     totalReceivables: 0,
@@ -84,6 +86,29 @@ const CustomerCenter = () => {
       message.error('Failed to load customer data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onCreateCustomer = async (values) => {
+    try {
+      const display = values.display_name || `${values.first_name || ''} ${values.last_name || ''}`.trim();
+      const res = await window.electronAPI.insertCustomer(
+        '', values.first_name || '', '', values.last_name || '', '', values.email || '',
+        display, values.company_name || '', values.phone_number || '', values.mobile_number || '',
+        '', '', '', values.address1 || '', '', values.city || '', values.state || '',
+        values.postal_code || '', '', '', '', '', 'system', 0, null, 'Email', 'en', ''
+      );
+      if (res && res.success) {
+        message.success('Customer added');
+        setShowAddCustomer(false);
+        custForm.resetFields();
+        await loadData();
+        await loadCustomersPage();
+      } else {
+        message.error(res?.error || 'Failed to add customer');
+      }
+    } catch (err) {
+      message.error('Error adding customer');
     }
   };
 
@@ -158,7 +183,10 @@ const CustomerCenter = () => {
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
           <TabPane tab={`Customers (${custTotal})`} key="customers">
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => history.push('/main/customers/list')}>Manage Customers</Button>
+              <Space>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setShowAddCustomer(true)}>Add Customer</Button>
+                <Button onClick={() => history.push('/main/customers/list')}>Manage Customers</Button>
+              </Space>
               <Input.Search placeholder="Search customers..." allowClear style={{ width: 280 }}
                 onSearch={v => { setCustSearch(v); setCustPage(1); }} />
             </div>
@@ -182,6 +210,33 @@ const CustomerCenter = () => {
           </TabPane>
         </Tabs>
       </Card>
+
+      <Modal title="Add Customer" visible={showAddCustomer} width={750}
+        onCancel={() => { setShowAddCustomer(false); custForm.resetFields(); }}
+        onOk={() => custForm.submit()} okText="Create" destroyOnClose>
+        <Form form={custForm} layout="vertical" onFinish={onCreateCustomer} preserve={false}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
+            <Form.Item name="first_name" label="First Name" rules={[{ required: true, message: 'Enter first name' }]} style={{ flex: 1 }}><Input /></Form.Item>
+            <Form.Item name="last_name" label="Last Name" style={{ flex: 1 }}><Input /></Form.Item>
+            <Form.Item name="display_name" label="Display Name" style={{ flex: 1 }}><Input placeholder="Auto-generated if blank" /></Form.Item>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
+            <Form.Item name="email" label="Email" style={{ flex: 1 }}><Input type="email" placeholder="email@example.com" /></Form.Item>
+            <Form.Item name="phone_number" label="Phone" style={{ flex: 1 }}><Input placeholder="(XXX) XXX-XXXX" /></Form.Item>
+            <Form.Item name="mobile_number" label="Mobile" style={{ flex: 1 }}><Input placeholder="(XXX) XXX-XXXX" /></Form.Item>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
+            <Form.Item name="company_name" label="Company" style={{ flex: 1 }}><Input /></Form.Item>
+            <Form.Item name="address1" label="Address" style={{ flex: 1 }}><Input placeholder="123 Main St" /></Form.Item>
+            <Form.Item name="city" label="City" style={{ flex: 1 }}><Input /></Form.Item>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
+            <Form.Item name="state" label="State" style={{ flex: 1 }}><Input /></Form.Item>
+            <Form.Item name="postal_code" label="ZIP" style={{ flex: 1 }}><Input /></Form.Item>
+            <div style={{ flex: 1 }} />
+          </div>
+        </Form>
+      </Modal>
     </div>
   );
 };

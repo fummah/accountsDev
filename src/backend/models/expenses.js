@@ -75,72 +75,16 @@ const Expenses = {
           }
         } catch (balErr) { console.error('[expenses] vendor balance update failed:', balErr); }
 
-        // --- GL Posting: double-entry for each expense line to its COA account ---
-        try {
-          const totalAmount = expenseLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-          const txStmt = db.prepare(`INSERT INTO transactions (date, type, amount, description, status, accountId, reference, debit, credit, entered_by) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?)`);
-
-          // Determine if this is a bill (unpaid expense — creates AP liability)
-          const isBill = (payment_method || '').toLowerCase() === 'bill'
-            || (category || '').toLowerCase() === 'bill'
-            || (approval_status || '').toLowerCase() === 'unpaid'
-            || (approval_status || '').toLowerCase() === 'partially paid';
-
-          // For bills, credit Accounts Payable instead of reducing bank
-          let creditAccountId = null;
-          if (isBill) {
-            const apRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = 'Accounts Payable' OR number = '2000' LIMIT 1").get();
-            if (apRow) creditAccountId = apRow.id;
-          }
-          if (!creditAccountId) {
-            // Find the payment (credit) account in COA
-            if (payment_account) {
-              const payAccRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(payment_account, payment_account);
-              if (payAccRow) creditAccountId = payAccRow.id;
-            }
-            if (!creditAccountId) {
-              const fallbackPay = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%bank%' OR LOWER(type) LIKE '%cash%' OR LOWER(name) LIKE '%cash%' LIMIT 1").get();
-              if (fallbackPay) creditAccountId = fallbackPay.id;
-            }
-          }
-
-          // Credit the liability / payment account (money owed or leaving)
-          txStmt.run(payment_date, 'Expense', totalAmount, isBill ? `Bill AP - ${category || 'Bill'}` : `Expense - ${category || 'Payment'}`, creditAccountId, ref_no || '', null, totalAmount, entered_by || null);
-
-          // Debit each expense category account
-          for (const line of expenseLines) {
-            const lineAmt = Number(line.amount) || 0;
-            if (lineAmt === 0) continue;
-            let expAccountId = null;
-            const cat = line.category || category || '';
-            if (cat) {
-              const expAccRow = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(cat, cat);
-              if (expAccRow) expAccountId = expAccRow.id;
-            }
-            if (!expAccountId) {
-              const fallbackExp = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) LIKE '%expense%' LIMIT 1").get();
-              if (fallbackExp) expAccountId = fallbackExp.id;
-            }
-            if (expAccountId) {
-              txStmt.run(payment_date, 'Expense', lineAmt, `Expense - ${line.description || cat}`, expAccountId, ref_no || '', lineAmt, null, entered_by || null);
-              // Update COA balance based on account type
-              const acctType = db.prepare('SELECT normalBalance FROM chart_of_accounts WHERE id = ?').get(expAccountId);
-              const normalBal = acctType?.normalBalance || 'Debit';
-              // For debit-normal (expense/asset): debit increases balance; for credit-normal (liability/income): debit decreases balance
-              const lineDelta = normalBal === 'Debit' ? lineAmt : -lineAmt;
-              db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(lineDelta, expAccountId);
-            }
-          }
-
-          // Update credit account balance (increase for AP liability, decrease for bank/cash)
-          if (creditAccountId) {
-            const creditDelta = isBill ? totalAmount : -totalAmount;
-            db.prepare('UPDATE chart_of_accounts SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(creditDelta, creditAccountId);
-          }
-        } catch (txErr) {
-          console.error('Failed to create GL entries for expense:', txErr);
-          return { success: true, expenseId, warning: 'expense_created_but_gl_posting_failed' };
-        }
+        // NOTE: GL posting (double-entry journal) is handled centrally by
+        // JournalEntries.postExpense() in the insert-expense IPC handler.
+        // The legacy manual transactions/balance updates were REMOVED here to
+        // prevent double-posting. Account balances are computed from
+        // journal_lines (see chartOfAccounts.computedBalance), which already
+        // applies correct debit/credit rules per account type:
+        //   • Liability line (e.g. Truck Loan) → DR reduces the loan balance
+        //   • Asset line → DR increases the asset balance
+        //   • Expense line → DR increases the expense balance
+        //   • Accounts Payable → CR increases AP (money owed)
       }
 
       return { success: true, expenseId,result };

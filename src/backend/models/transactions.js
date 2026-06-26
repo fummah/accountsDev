@@ -103,6 +103,10 @@ const Transactions = {
       if (!cols.includes('pairid')) toAdd.push({ name: 'pairId', sql: 'INTEGER' });
       if (!cols.includes('printed')) toAdd.push({ name: 'printed', sql: 'INTEGER DEFAULT 0' });
       if (!cols.includes('printed_at')) toAdd.push({ name: 'printed_at', sql: 'TEXT' });
+      if (!cols.includes('categories')) toAdd.push({ name: 'categories', sql: 'TEXT' });
+      if (!cols.includes('payee_name')) toAdd.push({ name: 'payee_name', sql: 'TEXT' });
+      if (!cols.includes('source_type')) toAdd.push({ name: 'source_type', sql: 'TEXT' });
+      if (!cols.includes('source_id')) toAdd.push({ name: 'source_id', sql: 'INTEGER' });
 
       toAdd.forEach(col => {
         try {
@@ -129,38 +133,45 @@ const Transactions = {
     return db.prepare("SELECT * FROM transactions WHERE LOWER(type) IN ('transfer_in', 'transfer_out') ORDER BY date DESC").all();
   },
 
-  insert({ date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class: classTag, location, department, categories }) {
+  insert({ date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class: classTag, location, department, categories, payee_name, source_type, source_id }) {
     // Closing date enforcement
     const closingDate = Settings.get('closingDate');
     if (closingDate && date && typeof date === 'string' && date <= closingDate) {
       throw new Error(`Posting date ${date} is on or before closing date ${closingDate}`);
     }
-    // Ensure categories column exists
+    // Ensure dynamic columns exist
     try {
       const cols = new Set(db.prepare("PRAGMA table_info('transactions')").all().map(c => c.name.toLowerCase()));
       if (!cols.has('categories')) db.prepare("ALTER TABLE transactions ADD COLUMN categories TEXT").run();
+      if (!cols.has('payee_name')) db.prepare("ALTER TABLE transactions ADD COLUMN payee_name TEXT").run();
+      if (!cols.has('source_type')) db.prepare("ALTER TABLE transactions ADD COLUMN source_type TEXT").run();
+      if (!cols.has('source_id')) db.prepare("ALTER TABLE transactions ADD COLUMN source_id INTEGER").run();
     } catch {}
     return db.prepare(`
       INSERT INTO transactions (
         date, type, amount, description, status, accountId, customerId,
-        reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class, location, department, categories
-      ) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id || null, isIntercompany ? 1 : 0, eliminateOnConsolidation ? 1 : 0, pairId || null, classTag || null, location || null, department || null, categories || null);
+        reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class, location, department, categories, payee_name, source_type, source_id
+      ) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id || null, isIntercompany ? 1 : 0, eliminateOnConsolidation ? 1 : 0, pairId || null, classTag || null, location || null, department || null, categories || null, payee_name || null, source_type || null, source_id || null);
   },
 
   getById(id) {
     return db.prepare("SELECT * FROM transactions WHERE id = ?").get(id);
   },
 
-  update(id, { date, type, amount, description, reference, accountId, categories }) {
+  update(id, { date, type, amount, description, reference, accountId, categories, payee_name }) {
     const closingDate = Settings.get('closingDate');
     const existing = this.getById(id);
     if (!existing) throw new Error(`Transaction ${id} not found`);
     if (closingDate && date && typeof date === 'string' && date <= closingDate) {
       throw new Error(`Posting date ${date} is on or before closing date ${closingDate}`);
     }
+    try {
+      const cols = new Set(db.prepare("PRAGMA table_info('transactions')").all().map(c => c.name.toLowerCase()));
+      if (!cols.has('payee_name')) db.prepare("ALTER TABLE transactions ADD COLUMN payee_name TEXT").run();
+    } catch {}
     return db.prepare(`
-      UPDATE transactions SET date=?, type=?, amount=?, description=?, reference=?, accountId=?, categories=?
+      UPDATE transactions SET date=?, type=?, amount=?, description=?, reference=?, accountId=?, categories=?, payee_name=?
       WHERE id=?
     `).run(
       date || existing.date,
@@ -170,6 +181,7 @@ const Transactions = {
       reference != null ? reference : existing.reference,
       accountId != null ? accountId : existing.accountId,
       categories != null ? categories : existing.categories,
+      payee_name != null ? payee_name : existing.payee_name,
       id
     );
   },

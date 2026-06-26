@@ -97,19 +97,35 @@ const MakeDeposits = () => {
           throw new Error(res?.error || 'Deposit failed');
         }
       } else {
-        // Manual deposit
-        const payload = {
-          accountId: Number(values.accountId),
-          date: values.date.format('YYYY-MM-DD'),
-          items: values.items.map(it => ({
-            type: it.type || 'Cash',
-            reference: it.reference || '',
-            description: it.description || '',
-            amount: Number(it.amount) || 0,
-          })),
-          total,
-        };
+        // Manual deposit — each line credits its chosen income/asset/equity account
+        const allocations = (values.items || []).map(it => ({
+          accountId: it.account || null,
+          amount: Number(it.amount) || 0,
+          description: [it.receivedFrom, it.description].filter(Boolean).join(' — ') || it.description || 'Manual deposit',
+        })).filter(a => a.amount > 0);
+
+        if (!allocations.length) {
+          message.warning('Add at least one deposit item with an amount');
+          setLoading(false);
+          return;
         }
+        if (allocations.some(a => !a.account && !a.accountId)) {
+          // account is required for manual deposits
+        }
+        const res = await window.electronAPI.createDeposit({
+          bankAccountId: Number(values.accountId),
+          date: values.date.format('YYYY-MM-DD'),
+          reference: values.reference || '',
+          memo: values.memo || 'Manual deposit',
+          paymentIds: [],
+          allocations,
+        });
+        if (res?.success) {
+          message.success(`Deposit recorded — ${cSym} ${fmt(total)}`);
+        } else {
+          throw new Error(res?.error || 'Deposit failed');
+        }
+      }
       form.resetFields();
       form.setFieldsValue({ date: moment(), items: [{ type: 'Cash' }] });
       setSelectedPayments([]);
@@ -154,6 +170,15 @@ const MakeDeposits = () => {
   const selectedAccount = useMemo(() => {
     return accounts.find(a => String(a.id) === String(selectedAccountId));
   }, [accounts, selectedAccountId]);
+
+  // Accounts available as deposit "Category" — Income, Asset, Equity, Other Income
+  const categoryAccounts = useMemo(() => {
+    return accounts.filter(a => {
+      const t = (a.accountType || a.type || '').toLowerCase();
+      return t.includes('income') || t.includes('revenue') || t.includes('asset') ||
+        t.includes('equity') || t.includes('liabilit');
+    });
+  }, [accounts]);
 
   const getAccName = (id) => {
     if (!id) return '-';
@@ -229,6 +254,18 @@ const MakeDeposits = () => {
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={6}>
+                  <Form.Item name="reference" label="Reference">
+                    <Input placeholder="DEP-001" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col xs={24} sm={12}>
+                  <Form.Item name="memo" label="Memo / Description">
+                    <Input placeholder="Optional memo" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={6}>
                   <Form.Item label="Deposit Total">
                     <InputNumber value={total} readOnly style={{ width: '100%', fontWeight: 700, background: '#f6ffed' }} formatter={v => `${cSym} ${fmt(v)}`} />
                   </Form.Item>
@@ -241,9 +278,36 @@ const MakeDeposits = () => {
                     extra={<Button type="dashed" onClick={() => add({ type: 'Cash' })} icon={<PlusOutlined />} size="small">Add Item</Button>}
                   >
                     {fields.length === 0 && <Alert message="Add at least one deposit item" type="info" showIcon style={{ marginBottom: 8 }} />}
+                    {/* Column headers */}
+                    {fields.length > 0 && (
+                      <Row gutter={8} style={{ marginBottom: 4 }}>
+                        <Col sm={4}><Text type="secondary" style={{ fontSize: 11 }}>Received From</Text></Col>
+                        <Col sm={6}><Text type="secondary" style={{ fontSize: 11 }}>Account / Category *</Text></Col>
+                        <Col sm={3}><Text type="secondary" style={{ fontSize: 11 }}>Type</Text></Col>
+                        <Col sm={6}><Text type="secondary" style={{ fontSize: 11 }}>Description / Memo</Text></Col>
+                        <Col sm={3}><Text type="secondary" style={{ fontSize: 11 }}>Amount</Text></Col>
+                        <Col sm={2}></Col>
+                      </Row>
+                    )}
                     {fields.map((field) => (
                       <Row key={field.key} gutter={8} style={{ marginBottom: 8 }} align="middle">
                         <Col xs={24} sm={4}>
+                          <Form.Item {...field} name={[field.name, 'receivedFrom']} noStyle>
+                            <Input placeholder="Payor name" />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={6}>
+                          <Form.Item {...field} name={[field.name, 'account']} noStyle rules={[{ required: true, message: 'Account required' }]}>
+                            <Select style={{ width: '100%' }} placeholder="Account / Category" showSearch optionFilterProp="children">
+                              {categoryAccounts.map(a => (
+                                <Option key={a.id} value={a.accountName || a.name}>
+                                  {(a.accountName || a.name)}{a.accountType ? ` (${a.accountType})` : ''}
+                                </Option>
+                              ))}
+                            </Select>
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={3}>
                           <Form.Item {...field} name={[field.name, 'type']} noStyle rules={[{ required: true }]}>
                             <Select style={{ width: '100%' }} placeholder="Type">
                               <Option value="Cash">Cash</Option>
@@ -255,19 +319,14 @@ const MakeDeposits = () => {
                             </Select>
                           </Form.Item>
                         </Col>
-                        <Col xs={24} sm={4}>
-                          <Form.Item {...field} name={[field.name, 'reference']} noStyle>
-                            <Input placeholder="Reference #" />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} sm={10}>
+                        <Col xs={24} sm={6}>
                           <Form.Item {...field} name={[field.name, 'description']} noStyle>
                             <Input placeholder="Description" />
                           </Form.Item>
                         </Col>
-                        <Col xs={24} sm={4}>
+                        <Col xs={24} sm={3}>
                           <Form.Item {...field} name={[field.name, 'amount']} noStyle rules={[{ required: true, message: 'Required' }]}>
-                            <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="Amount" formatter={v => v ? `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} />
+                            <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="Amount" formatter={v => v ? `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''} parser={v => v.replace(/\$\s?|(,*)/g, '')} />
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={2} style={{ textAlign: 'center' }}>
