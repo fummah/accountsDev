@@ -198,7 +198,7 @@ useEffect(() => {
               </Col>
 
               <Col span={24}>
-              <Form.Item name="tax_inclusive">
+              <Form.Item name="tax_inclusive" valuePropName="checked">
               <span className='h5 gx-mb-0'><Checkbox> Inclusive of tax</Checkbox> </span>
               </Form.Item>
               </Col>
@@ -210,7 +210,7 @@ useEffect(() => {
               </Col>
 
               <Col span={24}>
-              <Form.Item name="isfromsupplier" label="Purchasing information">
+              <Form.Item name="isfromsupplier" label="Purchasing information" valuePropName="checked">
               <span className='h5 gx-mb-0'><Checkbox> I purchase this product/service from a supplier.</Checkbox> </span>
               </Form.Item>
               </Col>

@@ -33,11 +33,11 @@ const ProductsTab = () => {
       const sku = userData.sku;
       const category = userData.category;
       const description = userData.description;
-      const price = userData.price;
+      const price = Number(userData.price) || 0;
       const income_account = userData.income_account;
-      const tax_inclusive = userData.tax_inclusive;
+      const tax_inclusive = userData.tax_inclusive === true || userData.tax_inclusive === 'true' || userData.tax_inclusive === 1 ? 'true' : 'false';
       const tax = userData.tax;
-      const isfromsupplier = userData.isfromsupplier;
+      const isfromsupplier = userData.isfromsupplier === true || userData.isfromsupplier === 'true' || userData.isfromsupplier === 1 ? 'true' : 'false';
       const stock = userData.stock != null ? userData.stock : 0;
       const entered_by = "1";
 
