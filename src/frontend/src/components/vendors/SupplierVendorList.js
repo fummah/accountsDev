@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, Table, Button, Modal, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Tabs, Statistic, Popconfirm, Badge } from 'antd';
 import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useCurrency } from '../../utils/currency';
+import { formatPhone } from '../../utils/phone';
+import COUNTRIES from '../../utils/countries';
 
 const { Option } = Select;
 const { TabPane } = Tabs;
@@ -115,6 +117,7 @@ const SupplierVendorList = () => {
           opening_balance: Number(vals.opening_balance) || Number(existing.opening_balance) || 0,
           as_of: vals.as_of || existing.as_of || null,
           notes: vals.notes || existing.notes || '',
+          vendor_type: vals.vendor_type || existing.vendor_type || 'Regular',
         });
         message.success('Supplier/Vendor updated');
       } else {
@@ -179,7 +182,7 @@ const SupplierVendorList = () => {
     },
     { title: 'Company', dataIndex: 'company_name', key: 'company_name', sorter: (a, b) => (a.company_name || '').localeCompare(b.company_name || '') },
     { title: 'Email', dataIndex: 'email', key: 'email' },
-    { title: 'Phone', dataIndex: 'phone_number', key: 'phone_number' },
+    { title: 'Phone', dataIndex: 'phone_number', key: 'phone_number', render: v => formatPhone(v) || '' },
     { title: 'City', dataIndex: 'city', key: 'city' },
     {
       title: 'Status', dataIndex: 'status', key: 'status', width: 100,
@@ -289,7 +292,7 @@ const SupplierVendorList = () => {
             <Col span={8}><Form.Item name="postal_code" label="Postal Code"><Input /></Form.Item></Col>
           </Row>
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="country" label="Country"><Input /></Form.Item></Col>
+            <Col span={12}><Form.Item name="country" label="Country"><Select showSearch placeholder="Select country" allowClear optionFilterProp="children">{COUNTRIES.map(c => <Option key={c} value={c}>{c}</Option>)}</Select></Form.Item></Col>
             <Col span={12}><Form.Item name="supplier_terms" label="Payment Terms"><Select allowClear><Option value="Net 15">Net 15</Option><Option value="Net 30">Net 30</Option><Option value="Net 60">Net 60</Option><Option value="Due on receipt">Due on receipt</Option></Select></Form.Item></Col>
           </Row>
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -299,6 +302,18 @@ const SupplierVendorList = () => {
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={12}><Form.Item name="opening_balance" label="Opening Balance"><Input type="number" /></Form.Item></Col>
             <Col span={12}><Form.Item name="expense_category" label="Default Expense Category"><Input /></Form.Item></Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={12}>
+              <Form.Item name="vendor_type" label="Vendor Type" initialValue="Regular">
+                <Select>
+                  <Option value="Regular">Regular</Option>
+                  <Option value="1099">1099 Vendor</Option>
+                  <Option value="Contractor">Contractor</Option>
+                  <Option value="Government">Government</Option>
+                </Select>
+              </Form.Item>
+            </Col>
           </Row>
           <Form.Item name="notes" label="Notes"><TextArea rows={3} /></Form.Item>
         </Form>
@@ -321,10 +336,11 @@ const SupplierVendorList = () => {
                 <p><strong>Name:</strong> {viewingSupplier.display_name || `${viewingSupplier.first_name || ''} ${viewingSupplier.last_name || ''}`.trim()}</p>
                 <p><strong>Company:</strong> {viewingSupplier.company_name || '-'}</p>
                 <p><strong>Email:</strong> {viewingSupplier.email || '-'}</p>
-                <p><strong>Phone:</strong> {viewingSupplier.phone_number || '-'}</p>
+                <p><strong>Phone:</strong> {formatPhone(viewingSupplier.phone_number) || '-'}</p>
                 <p><strong>Address:</strong> {[viewingSupplier.address1, viewingSupplier.city, viewingSupplier.state, viewingSupplier.postal_code, viewingSupplier.country].filter(Boolean).join(', ') || '-'}</p>
                 <p><strong>Payment Terms:</strong> {viewingSupplier.supplier_terms || '-'}</p>
                 <p><strong>Business #:</strong> {viewingSupplier.business_number || '-'}</p>
+                <p><strong>Vendor Type:</strong> <Tag color={viewingSupplier.vendor_type === '1099' ? 'red' : viewingSupplier.vendor_type === 'Contractor' ? 'blue' : 'default'}>{viewingSupplier.vendor_type || 'Regular'}</Tag></p>
                 <p><strong>Notes:</strong> {viewingSupplier.notes || '-'}</p>
               </TabPane>
               <TabPane tab="Expenses" key="2">

@@ -141,7 +141,7 @@ const ChartOfAccounts = {
       ORDER BY CAST(number AS INTEGER) ASC, name ASC
     `).all();
 
-    return rows.map(r => {
+    const accounts = rows.map(r => {
       const nb = r.normalBalance || NORMAL_BALANCE[r.type] || 'Debit';
       const computed = computedBalance(r.id, nb, r.openingBalance);
       // If there are NO journal entries yet, fall back to the stored static balance
@@ -168,10 +168,37 @@ const ChartOfAccounts = {
         openingBalance:     Number(r.openingBalance || 0),
         openingBalanceDate: r.openingBalanceDate || '',
         balance:            finalBalance,
+        ownBalance:         finalBalance,
         status:             r.status || 'Active',
         isSystem:           !!r.isSystem,
       };
     });
+
+    // ── Roll up child balances into parent accounts ──────────────────────
+    const byId = new Map(accounts.map(a => [a.id, a]));
+    // Build list of parent IDs (accounts that have children)
+    const parentIds = new Set(accounts.filter(a => a.parentId).map(a => a.parentId));
+    // Recursive rollup: sum child balances into parent
+    const rollup = (parentId) => {
+      let total = 0;
+      for (const a of accounts) {
+        if (a.parentId === parentId) {
+          // If this child is also a parent, recurse first
+          if (parentIds.has(a.id)) rollup(a.id);
+          total += Number(a.balance || 0);
+        }
+      }
+      const parent = byId.get(parentId);
+      if (parent) {
+        parent.balance = Number(parent.ownBalance || 0) + total;
+      }
+    };
+    // Only process top-level parents (parents that are not children themselves, or all parents)
+    for (const pid of parentIds) {
+      rollup(pid);
+    }
+
+    return accounts;
   },
 
   // ── Single account with computed balance ────────────────────────────────

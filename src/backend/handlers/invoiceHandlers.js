@@ -66,6 +66,16 @@ const registerInvoiceHandlers = () => {
     }
   });
 
+  // Sales by Product report
+  ipcMain.handle('sales-by-product', async (_event, filters) => {
+    try {
+      return Invoices.getSalesByProduct(filters || {});
+    } catch (error) {
+      console.error('Error fetching sales by product:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Get Dashboard Summary
   ipcMain.handle('dashboard', async () => {
     try {

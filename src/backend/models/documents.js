@@ -29,11 +29,11 @@ const Documents = {
   // Insert a new Documents
   insertDocuments: async (document_name,document_size,document_type,random_number,category,linked_id,entered_by) => {
     try {
-    const stmt = db.prepare('INSERT INTO Documents (document_name,document_size,document_type,random_number,category,linked_id,entered_by) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    const result = await stmt.run(document_name,document_size,document_type,random_number,category,linked_id,entered_by);  
+    const stmt = db.prepare('INSERT INTO Documents (document_name,document_size,document_type,random_number,category,linked_id,entered_by,file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const result = await stmt.run(document_name,document_size,document_type,random_number,category,linked_id,entered_by, random_number);  
      
     if (result.changes > 0) {
-        return { success: true };
+        return { success: true, id: result.lastInsertRowid };
       } else {
         return { success: false };
       }
@@ -61,5 +61,10 @@ const Documents = {
 
 // Ensure the Documents table is created
 Documents.createTable();
+
+// Migration: backfill file_path from random_number for existing records
+try {
+  db.prepare("UPDATE documents SET file_path = random_number WHERE file_path IS NULL AND random_number IS NOT NULL").run();
+} catch (e) { /* ignore */ }
 
 module.exports = Documents;

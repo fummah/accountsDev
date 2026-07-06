@@ -24,15 +24,18 @@ const MakeDeposits = () => {
   const [pendingPayments, setPendingPayments] = useState([]);
   const [selectedPayments, setSelectedPayments] = useState([]);
   const [allAccounts, setAllAccounts] = useState([]);
+  const [payors, setPayors] = useState([]);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     try {
-      const [accRes, txnRes, pmts] = await Promise.all([
+      const [accRes, txnRes, pmts, custRes, vendRes] = await Promise.all([
         window.electronAPI.getChartOfAccounts().catch(() => []),
         window.electronAPI.getTransactions().catch(() => []),
         window.electronAPI.getPayments?.().catch(() => []),
+        window.electronAPI.getAllCustomers().catch(() => ({ all: [] })),
+        window.electronAPI.getAllSuppliers().catch(() => []),
       ]);
       const accs = Array.isArray(accRes) ? accRes : [];
       setAccounts(accs);
@@ -52,6 +55,15 @@ const MakeDeposits = () => {
       // Load pending payments (Undeposited Funds)
       const pmtArr = Array.isArray(pmts) ? pmts : (pmts?.all || pmts?.data || []);
       setPendingPayments(pmtArr.filter(p => (p.status || '').toLowerCase() !== 'deposited'));
+
+      // Load payors (customers + vendors) for Received From dropdown
+      const customers = Array.isArray(custRes?.all) ? custRes.all : (Array.isArray(custRes) ? custRes : []);
+      const vendors = Array.isArray(vendRes) ? vendRes : (vendRes?.data || vendRes?.all || []);
+      const merged = [
+        ...customers.map(c => ({ id: `c-${c.id}`, name: c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim(), type: 'Customer' })),
+        ...vendors.map(v => ({ id: `v-${v.id}`, name: v.display_name || `${v.first_name || ''} ${v.last_name || ''}`.trim(), type: 'Vendor' })),
+      ].filter(p => p.name);
+      setPayors(merged);
     } catch { setAccounts([]); setDepositHistory([]); }
   };
 
@@ -293,7 +305,9 @@ const MakeDeposits = () => {
                       <Row key={field.key} gutter={8} style={{ marginBottom: 8 }} align="middle">
                         <Col xs={24} sm={4}>
                           <Form.Item {...field} name={[field.name, 'receivedFrom']} noStyle>
-                            <Input placeholder="Payor name" />
+                            <Select showSearch optionFilterProp="children" placeholder="Customer/Vendor" allowClear style={{ width: '100%' }}>
+                              {payors.map(p => <Option key={p.id} value={p.name}>{p.name} ({p.type})</Option>)}
+                            </Select>
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={6}>

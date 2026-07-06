@@ -126,7 +126,8 @@ const Suppliers = {
              expense_category = ?,
              opening_balance = ?, 
              as_of = ?,
-             notes = ?
+             notes = ?,
+             vendor_type = ?
          WHERE id = ?`).run(
         [
           supplierDetails.title,           // Title
@@ -154,8 +155,9 @@ const Suppliers = {
           supplierDetails.expense_category,
           supplierDetails.opening_balance, // Opening balance
           supplierDetails.as_of, 
-          supplierDetails.notes,         // Language
-          id                               // Customer ID (for WHERE clause)
+          supplierDetails.notes,
+          supplierDetails.vendor_type || 'Regular',
+          id                               // Supplier ID (for WHERE clause)
         ]
       );
   
@@ -195,6 +197,9 @@ try {
   if (!cols.some(c => c.name === 'status')) {
     db.prepare("ALTER TABLE suppliers ADD COLUMN status TEXT DEFAULT 'Active'").run();
   }
-} catch (e) { console.error('[suppliers] status migration:', e); }
+  if (!cols.some(c => c.name === 'vendor_type')) {
+    db.prepare("ALTER TABLE suppliers ADD COLUMN vendor_type TEXT DEFAULT 'Regular'").run();
+  }
+} catch (e) { console.error('[suppliers] migration:', e); }
 
 module.exports = Suppliers;

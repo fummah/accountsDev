@@ -37,19 +37,20 @@ const ProductsTab = () => {
       const income_account = userData.income_account;
       const tax_inclusive = userData.tax_inclusive;
       const tax = userData.tax;
-      const isfromsupplier = userData.isfromsupplier;     
+      const isfromsupplier = userData.isfromsupplier;
+      const stock = userData.stock != null ? userData.stock : 0;
       const entered_by = "1";
 
       let result;
         
       if (userData.id) {
         const id = userData.id;
-        const productData = {id,type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by};
+        const productData = {id, type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, stock, entered_by};
         result = await window.electronAPI.updateProduct(productData);   
       }
       else{
-        result = await window.electronAPI.insertProduct(type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by);
-          }
+        result = await window.electronAPI.insertProduct(type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock);
+      }
              setIsSuccess(result.success);
   
       if (result.success) {

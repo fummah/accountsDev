@@ -251,19 +251,19 @@ const CheckPrinting = () => {
 
       /* ---------- DATE row ---------- */
       .date-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 4px; gap: 8px; }
-      .date-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; background: #eee; padding: 1px 6px; border: 1px solid #bbb; }
+      .date-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 1px 6px; color: #555; }
       .date-val   { font-size: 12px; font-weight: 700; min-width: 100px; border-bottom: 1px solid #555; text-align: center; padding-bottom: 1px; }
 
       /* ---------- PAY TO row ---------- */
       .payto-row { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
       .payto-label { font-size: 9px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
       .payto-name  { font-size: 13px; font-weight: 700; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
-      .amt-box     { font-size: 14px; font-weight: 700; border: 2px solid #555; padding: 2px 12px; white-space: nowrap; min-width: 100px; text-align: center; }
+      .amt-box     { font-size: 14px; font-weight: 700; padding: 2px 12px; white-space: nowrap; min-width: 100px; text-align: center; }
 
       /* ---------- written amount row ---------- */
       .words-row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
       .words-text { font-size: 11px; letter-spacing: 0.02em; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
-      .dollars-vert { font-size: 9px; font-weight: 700; letter-spacing: 2px; writing-mode: vertical-rl; text-orientation: upright; border: 1px solid #555; padding: 3px 1px; line-height: 1; }
+      .dollars-vert { font-size: 9px; font-weight: 700; letter-spacing: 2px; writing-mode: vertical-rl; text-orientation: upright; padding: 3px 1px; line-height: 1; color: #555; }
 
       /* ---------- address window ---------- */
       .addr-window { margin-top: 8px; padding-left: 40px; font-size: 11px; line-height: 1.45; min-height: 40px; }
@@ -391,10 +391,24 @@ const CheckPrinting = () => {
   const recordAndPrint = async (values, recordOnlyFlag) => {
     try {
       setLoading(true);
-      const totalAmt = splitLines.length > 1 ? splitTotal : Number(values.amount || 0);
+      const userAmt = Number(values.amount || 0);
+      const totalAmt = splitLines.length > 1 ? splitTotal : userAmt;
       // Validate split lines match check amount
-      if (splitLines.length > 1 && Math.abs(splitTotal - totalAmt) > 0.005) {
-        message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not match the check amount (${cSym}${totalAmt.toFixed(2)}). Please correct before saving.`);
+      if (splitLines.length > 1 && userAmt > 0 && Math.abs(splitTotal - userAmt) > 0.005) {
+        message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not match the check amount (${cSym}${userAmt.toFixed(2)}). Please correct before saving.`);
+        setLoading(false);
+        return;
+      }
+      // Validate at least one split line has an account selected
+      const validSplits = splitLines.filter(l => Number(l.amount) > 0);
+      if (validSplits.length > 0 && validSplits.some(l => !l.account)) {
+        message.error('Each split line with an amount must have an expense account selected.');
+        setLoading(false);
+        return;
+      }
+      // Validate total amount is > 0
+      if (totalAmt <= 0) {
+        message.error('Check amount must be greater than zero.');
         setLoading(false);
         return;
       }

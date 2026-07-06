@@ -22,22 +22,31 @@ const SalesReport = () => {
   const [customerFilter, setCustomerFilter] = useState(null);
   const [statusFilter, setStatusFilter] = useState(null);
   const [activeTab, setActiveTab] = useState('summary');
+  const [productSummary, setProductSummary] = useState([]);
+  const [productDetail, setProductDetail] = useState([]);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [invRes, prodRes, custRes] = await Promise.all([
+      const from = dateRange?.[0]?.format('YYYY-MM-DD');
+      const to = dateRange?.[1]?.format('YYYY-MM-DD');
+      const [invRes, prodRes, custRes, salesRes] = await Promise.all([
         window.electronAPI.getAllInvoices?.().catch(() => ({ all: [] })),
         window.electronAPI.getAllProducts?.().catch(() => []),
         window.electronAPI.getAllCustomers?.().catch(() => ({ all: [] })),
+        window.electronAPI.getSalesByProduct?.({ from, to }).catch(() => ({ summary: [], detail: [] })),
       ]);
       const invArr = Array.isArray(invRes) ? invRes : (invRes?.all || []);
       setInvoices(invArr);
       setProducts(Array.isArray(prodRes) ? prodRes : (prodRes?.all || []));
       const custArr = Array.isArray(custRes) ? custRes : (custRes?.all || []);
       setCustomers(custArr);
+      if (salesRes?.success !== false) {
+        setProductSummary(salesRes?.summary || []);
+        setProductDetail(salesRes?.detail || []);
+      }
     } catch (e) {
       message.error('Failed to load sales data');
     } finally {
@@ -84,8 +93,19 @@ const SalesReport = () => {
     return Object.values(map).sort((a, b) => b.total - a.total);
   }, [filtered]);
 
-  // Sales by Product (from invoice_lines via products)
+  // Sales by Product — use backend data, fallback to client-side
   const salesByProduct = useMemo(() => {
+    if (productSummary.length > 0) {
+      return productSummary.map(r => ({
+        product: r.productName || 'Unitemized',
+        productId: r.productId,
+        sku: r.sku || '',
+        quantity: Number(r.totalQty || 0),
+        total: Number(r.totalSales || 0),
+        invoiceCount: Number(r.invoiceCount || 0),
+      }));
+    }
+    // Fallback: client-side from invoice data
     const map = {};
     for (const inv of filtered) {
       const lines = inv.lines || [];
@@ -105,7 +125,12 @@ const SalesReport = () => {
       }
     }
     return Object.values(map).sort((a, b) => b.total - a.total);
-  }, [filtered]);
+  }, [filtered, productSummary]);
+
+  // Product drill-down: lines grouped by product name
+  const getProductDrillDown = (productName) => {
+    return productDetail.filter(d => (d.productName || 'Unitemized') === productName);
+  };
 
   // Sales by Income Account
   const salesByIncomeAccount = useMemo(() => {
@@ -148,10 +173,22 @@ const SalesReport = () => {
   ];
 
   const productColumns = [
-    { title: 'Product / Service', dataIndex: 'product', key: 'product' },
+    { title: 'Product / Service', dataIndex: 'product', key: 'product', render: (v) => <Text strong>{v}</Text> },
+    { title: 'SKU', dataIndex: 'sku', key: 'sku', width: 100, render: v => v || '-' },
     { title: 'Qty Sold', dataIndex: 'quantity', key: 'quantity', width: 90, align: 'center' },
     { title: 'Total Sales', dataIndex: 'total', key: 'total', width: 140, align: 'right', sorter: (a, b) => a.total - b.total, render: v => <Text strong>{cSym} {fmt(v)}</Text> },
     { title: 'Invoices', dataIndex: 'invoiceCount', key: 'invoiceCount', width: 90, align: 'center' },
+  ];
+
+  const drillDownColumns = [
+    { title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 100, render: v => v || '-' },
+    { title: 'Date', dataIndex: 'invoiceDate', key: 'invoiceDate', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
+    { title: 'Customer', dataIndex: 'customerName', key: 'customerName', ellipsis: true },
+    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    { title: 'Qty', dataIndex: 'quantity', key: 'quantity', width: 60, align: 'center' },
+    { title: 'Rate', dataIndex: 'rate', key: 'rate', width: 100, align: 'right', render: v => v != null ? `${cSym} ${fmt(v)}` : '-' },
+    { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: v => <Text strong>{cSym} {fmt(v)}</Text> },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: s => <Tag color={statusColors[s] || 'default'}>{s}</Tag> },
   ];
 
   const accountColumns = [
@@ -274,12 +311,21 @@ const SalesReport = () => {
           <TabPane tab={<span><ShoppingOutlined /> By Product</span>} key="product">
             <Table columns={productColumns} dataSource={salesByProduct} rowKey="product" size="small"
               pagination={false}
+              expandable={{
+                expandedRowRender: (record) => {
+                  const lines = getProductDrillDown(record.product);
+                  if (!lines.length) return <Text type="secondary">No line detail available</Text>;
+                  return <Table columns={drillDownColumns} dataSource={lines} rowKey="lineId" size="small" pagination={false} />;
+                },
+                rowExpandable: () => productDetail.length > 0,
+              }}
               summary={() => salesByProduct.length > 0 ? (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0}><Text strong>Total</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={1} align="center"><Text strong>{salesByProduct.reduce((s, p) => s + p.quantity, 0)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={2} align="right"><Text strong>{cSym} {fmt(salesByProduct.reduce((s, p) => s + p.total, 0))}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} />
+                  <Table.Summary.Cell index={1} />
+                  <Table.Summary.Cell index={2} align="center"><Text strong>{salesByProduct.reduce((s, p) => s + p.quantity, 0)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right"><Text strong>{cSym} {fmt(salesByProduct.reduce((s, p) => s + p.total, 0))}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} />
                 </Table.Summary.Row>
               ) : null}
             />

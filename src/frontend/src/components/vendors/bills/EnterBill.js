@@ -27,6 +27,7 @@ const TERMS_OPTIONS = [
 const ACCOUNT_TYPES_ALLOWED = [
   'Expense', 'Cost of Goods Sold', 'Other Expense',
   'Asset', 'Inventory', 'Bank', 'Cash', 'Liability',
+  'Credit Card', 'Long Term Liability', 'Other Current Liability',
   'Income', 'Other Income', 'Equity'
 ];
 
@@ -74,6 +75,9 @@ const EnterBill = ({ history, location, match }) => {
       'Bank': 'Bank',
       'Cash': 'Cash',
       'Liability': 'Liability',
+      'Credit Card': 'Credit Card',
+      'Long Term Liability': 'LT Liab',
+      'Other Current Liability': 'Cur Liab',
       'Income': 'Income',
       'Other Income': 'Oth Inc',
       'Equity': 'Equity',
@@ -91,6 +95,9 @@ const EnterBill = ({ history, location, match }) => {
       'Bank': '#722ed1',
       'Cash': '#13c2c2',
       'Liability': '#f5222d',
+      'Credit Card': '#cf1322',
+      'Long Term Liability': '#ad4e00',
+      'Other Current Liability': '#d46b08',
       'Income': '#52c41a',
       'Other Income': '#389e0d',
       'Equity': '#1890ff',

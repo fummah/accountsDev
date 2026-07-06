@@ -1,9 +1,9 @@
-import MyCompany from "./Components/MyCompany";
+import CompanySettings from "../../../../components/settings/CompanySettings";
 
 const Company = () => { 
 
   return (
-    <MyCompany/>
+    <CompanySettings/>
   );
 };
 

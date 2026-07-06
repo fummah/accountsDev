@@ -5,7 +5,6 @@ import AllSalesTab from "./Tabs/AllSalesTab";
 import InvoicesTab from "./Tabs/InvoicesTab";
 import QuotesTab from "./Tabs/QuotesTab";
 import CustomersTab from "../CustomersLeads/Tabs/CustomersTab";
-import ProductsTab from "./Tabs/ProductsTab";
 import CreateStatement from "../../../components/customers/statements/CreateStatement";
 import ReceivePayments from "../../../components/customers/payments/ReceivePayments";
 import RecurringTransactions from "../../../components/customers/RecurringTransactions";
@@ -61,11 +60,6 @@ const Sales = () => {
            <TabPane tab="Customers" key="9">
             <div className="gx-mb-2">
               <CustomersTab />
-            </div>
-          </TabPane>
-          <TabPane tab="Products and Services" key="10">
-            <div className="gx-mb-2">
-              <ProductsTab />
             </div>
           </TabPane>
           <TabPane tab="Statements" key="4">

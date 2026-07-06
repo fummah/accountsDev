@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Table, Space, message, Divider, Row, Col, Spin, Modal } from 'antd';
-import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined, SettingOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined, SettingOutlined, MailOutlined } from '@ant-design/icons';
 import { handleDocumentPDF } from '../shared/generateDocumentPDF';
+import SendEmailModal from '../shared/SendEmailModal';
 import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
@@ -23,12 +24,16 @@ const CreateInvoice = () => {
   const [company, setCompany] = useState({});
   const [custModalOpen, setCustModalOpen] = useState(false);
   const [prodModalOpen, setProdModalOpen] = useState(false);
+  const [catModalOpen, setCatModalOpen] = useState(false);
   const [vatModalOpen, setVatModalOpen] = useState(false);
   const [invoiceTemplate, setInvoiceTemplate] = useState({});
   const [incomeAccounts, setIncomeAccounts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [custForm] = Form.useForm();
   const [prodForm] = Form.useForm();
+  const [catForm] = Form.useForm();
   const [vatForm] = Form.useForm();
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   const calcDueDate = (invoiceDate, terms) => {
     if (!invoiceDate || !terms) return;
@@ -95,7 +100,8 @@ const CreateInvoice = () => {
       const res = await window.electronAPI.insertProduct?.(
         vals.type || 'Product', vals.name || '', vals.sku || '', vals.category || '',
         vals.description || '', Number(vals.price) || 0,
-        incomeAcct ? (incomeAcct.accountName || incomeAcct.name) : '', '', '', '', 'system'
+        incomeAcct ? (incomeAcct.accountName || incomeAcct.name) : '', '', '', '', 'system',
+        Number(vals.stock) || 0
       );
       message.success('Product added');
       setProdModalOpen(false);
@@ -110,10 +116,23 @@ const CreateInvoice = () => {
         const rate = Number(newProd.selling_price || newProd.price || 0);
         setLines(prev => prev.map(l => {
           if (l.key !== lastKey) return l;
-          return { ...l, description: newProd.name || newProd.description || '', rate, amount: (l.quantity || 1) * rate, product_id: newProd.id };
+          return { ...l, description: newProd.description || newProd.name || '', rate, amount: (l.quantity || 1) * rate, product_id: newProd.id };
         }));
       }
     } catch (e) { if (!e?.errorFields) message.error('Failed to add product'); }
+  };
+
+  const handleAddCategory = async () => {
+    try {
+      const vals = await catForm.validateFields();
+      const res = await window.electronAPI.insertProductCategory?.(vals.cat_name);
+      if (res?.error) { message.error(res.error); return; }
+      message.success('Category added');
+      setCatModalOpen(false);
+      catForm.resetFields();
+      const c = await window.electronAPI.getProductCategories?.();
+      setCategories(Array.isArray(c) ? c : []);
+    } catch (e) { if (!e?.errorFields) message.error('Failed to add category'); }
   };
 
   const handleAddVat = async () => {
@@ -146,6 +165,8 @@ const CreateInvoice = () => {
         const t = (a.accountType || a.type || '').toLowerCase();
         return t === 'income' || t === 'other income';
       }));
+      const cat = await window.electronAPI.getProductCategories?.();
+      setCategories(Array.isArray(cat) ? cat : []);
 
       // Pre-select customer from query string
       const params = new URLSearchParams(location.search);
@@ -220,11 +241,12 @@ const CreateInvoice = () => {
   const selectProduct = (key, productId) => {
     const prod = products.find(p => p.id === productId);
     if (prod) {
-      updateLine(key, 'description', prod.name || prod.description);
+      const desc = prod.description || prod.name || '';
+      updateLine(key, 'description', desc);
       setLines(prev => prev.map(l => {
         if (l.key !== key) return l;
         const rate = Number(prod.selling_price || prod.price || 0);
-        return { ...l, description: prod.name || prod.description, rate, amount: (l.quantity || 1) * rate, product_id: productId };
+        return { ...l, description: desc, rate, amount: (l.quantity || 1) * rate, product_id: productId };
       }));
     }
   };
@@ -488,6 +510,11 @@ const CreateInvoice = () => {
             <Button size="large" onClick={() => handleSave('Sent')} loading={saving}>
               {isEdit ? 'Update & Send' : 'Save & Send'}
             </Button>
+            {isEdit && (
+              <Button size="large" icon={<MailOutlined />} onClick={() => setEmailModalOpen(true)}>
+                Email
+              </Button>
+            )}
           </Space>
         </div>
       </Card>
@@ -509,7 +536,13 @@ const CreateInvoice = () => {
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="type" label="Type" initialValue="Product" rules={[{ required: true }]} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
-                <Select><Select.Option value="Product">Product</Select.Option><Select.Option value="Service">Service</Select.Option></Select>
+                <Select>
+                  <Select.Option value="Product">Product</Select.Option>
+                  <Select.Option value="Service">Service</Select.Option>
+                  <Select.Option value="Raw Material">Raw Material</Select.Option>
+                  <Select.Option value="Asset">Asset</Select.Option>
+                  <Select.Option value="Bundle">Bundle</Select.Option>
+                </Select>
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -521,11 +554,9 @@ const CreateInvoice = () => {
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="category" label="Category" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
-                <Select placeholder="Select category" allowClear>
-                  <Select.Option value="Goods">Goods</Select.Option>
-                  <Select.Option value="Services">Services</Select.Option>
-                  <Select.Option value="Consumables">Consumables</Select.Option>
-                  <Select.Option value="Material">Material</Select.Option>
+                <Select placeholder="Select category" allowClear
+                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Category</Button></>)}>
+                  {categories.map(c => <Select.Option key={c.id} value={c.name}>{c.name}</Select.Option>)}
                 </Select>
               </Form.Item>
             </Col>
@@ -557,7 +588,20 @@ const CreateInvoice = () => {
                 <Input placeholder="Brief description" />
               </Form.Item>
             </Col>
+            <Col span={12}>
+              <Form.Item name="stock" label="Stock Qty" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                <InputNumber style={{ width: '100%' }} min={0} step={1} />
+              </Form.Item>
+            </Col>
           </Row>
+        </Form>
+      </Modal>
+
+      <Modal title="Add New Category" visible={catModalOpen} onOk={handleAddCategory} onCancel={() => setCatModalOpen(false)} okText="Add" destroyOnClose>
+        <Form form={catForm} layout="vertical" preserve={false}>
+          <Form.Item name="cat_name" label="Category Name" rules={[{ required: true, message: 'Enter category name' }]}>
+            <Input placeholder="e.g. Electronics" />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -567,6 +611,17 @@ const CreateInvoice = () => {
           <Form.Item name="vat_percentage" label="Percentage (%)" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} max={100} step={0.5} /></Form.Item>
         </Form>
       </Modal>
+
+      <SendEmailModal
+        visible={emailModalOpen}
+        onClose={() => setEmailModalOpen(false)}
+        recipientEmail={form.getFieldValue('customer_email') || ''}
+        documentType="Invoice"
+        documentNumber={form.getFieldValue('number') || ''}
+        amount={`${cSym} ${lines.reduce((s, l) => s + Number(l.amount || 0), 0).toFixed(2)}`}
+        customerName={(() => { const c = customers.find(cu => cu.id === form.getFieldValue('customer')); return c ? (c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : ''; })()}
+        companyName={company.name || company.company_name || ''}
+      />
     </div>
   );
 };

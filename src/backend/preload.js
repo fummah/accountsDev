@@ -64,6 +64,7 @@ getInvoiceReport: () => ipcRenderer.invoke('get-invoice-report'),
 getFinancialReport: (start_date, last_date) => ipcRenderer.invoke('get-financial', start_date, last_date),
 getManagementReport: (start_date, last_date) => ipcRenderer.invoke('get-management', start_date, last_date),
 getInvoiceSummary: () => ipcRenderer.invoke('invoicesummary'),
+getSalesByProduct: (filters) => ipcRenderer.invoke('sales-by-product', filters),
 getDashboardSummary: () => ipcRenderer.invoke('dashboard'),
 getSingleInvoice: (invoice_id) => ipcRenderer.invoke('get-singleInvoice',invoice_id),
 getInitialInvoice: (invoice_id,type) => ipcRenderer.invoke('get-initinvoice',invoice_id, type),
@@ -73,7 +74,11 @@ insertInvoice: (customer,customer_email,islater, billing_address, terms,start_da
 getAllProducts: () => ipcRenderer.invoke('get-products'),
 getProductsPaginated: (page, pageSize, search, typeFilter) => ipcRenderer.invoke('get-products-paginated', page, pageSize, search, typeFilter),
 updateProduct: (productData) => ipcRenderer.invoke('updateproduct',productData),
-insertProduct: (type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by) => ipcRenderer.invoke('insert-product', type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by),
+insertProduct: (type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock) => ipcRenderer.invoke('insert-product', type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock),
+//Product Categories
+getProductCategories: () => ipcRenderer.invoke('get-product-categories'),
+insertProductCategory: (name) => ipcRenderer.invoke('insert-product-category', name),
+deleteProductCategory: (id) => ipcRenderer.invoke('delete-product-category', id),
 //Vat
 getAllVat: () => ipcRenderer.invoke('get-vat'),
 updateVat: (vatData) => ipcRenderer.invoke('updatevat',vatData),
@@ -386,6 +391,12 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   // Settings (generic)
   settingsGet: (key) => ipcRenderer.invoke('settings-get', key),
   settingsSet: (key, value) => ipcRenderer.invoke('settings-set', key, value),
+
+  // Email / SMTP
+  emailSettingsGet: () => ipcRenderer.invoke('email-settings-get'),
+  emailSettingsSet: (cfg) => ipcRenderer.invoke('email-settings-set', cfg),
+  emailTestConnection: () => ipcRenderer.invoke('email-test-connection'),
+  emailSend: (payload) => ipcRenderer.invoke('email-send', payload),
 
   // Invoice Template Customization
   getInvoiceTemplate: () => ipcRenderer.invoke('get-invoice-template'),

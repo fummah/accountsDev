@@ -12,11 +12,33 @@ import {
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import { useHistory } from 'react-router-dom';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
 
+// Map source_type to a route path for drill-down navigation
+const SOURCE_ROUTES = {
+  invoice:      '/inner/sales',
+  payment:      '/main/customers',
+  expense:      '/main/expenses',
+  bill:         '/main/vendors/bills',
+  bill_payment: '/main/vendors/bills',
+  deposit:      '/main/banking',
+  transaction:  '/main/accountant/journal-entries',
+  check:        '/main/accountant/checks',
+  transfer:     '/main/banking',
+  payroll:      '/main/employees',
+};
+
+const SOURCE_COLORS = {
+  invoice: 'blue', payment: 'green', expense: 'orange', bill: 'volcano',
+  bill_payment: 'magenta', deposit: 'cyan', transaction: 'geekblue',
+  check: 'purple', transfer: 'lime', payroll: 'gold', manual: 'default',
+};
+
 const JournalEntries = () => {
+  const history = useHistory();
   const { symbol: cSym } = useCurrency();
   const fmtC = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -30,7 +52,7 @@ const JournalEntries = () => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingEntry, setEditingEntry] = useState(null);
   const [searchText, setSearchText] = useState('');
-  const [dateFilter, setDateFilter] = useState(null);
+  const [dateFilter, setDateFilter] = useState([moment().startOf('month'), moment().endOf('month')]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [form] = Form.useForm();
 
@@ -76,14 +98,19 @@ const JournalEntries = () => {
     } catch { message.error('Failed to add class'); }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [dateFilter]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const safe = (fn) => fn?.()?.catch?.(() => null) || Promise.resolve(null);
+      const filters = {};
+      if (dateFilter && dateFilter[0] && dateFilter[1]) {
+        filters.from = dateFilter[0].format('YYYY-MM-DD');
+        filters.to = dateFilter[1].format('YYYY-MM-DD');
+      }
       const [journalData, accountsData, entitiesData, cls, locs, deps] = await Promise.all([
-        safe(() => window.electronAPI.getJournal()),
+        safe(() => window.electronAPI.journalList(filters)),
         safe(() => window.electronAPI.getChartOfAccounts()),
         safe(() => window.electronAPI.listEntities?.()),
         safe(() => window.electronAPI.listClasses?.()),
@@ -285,6 +312,16 @@ const JournalEntries = () => {
     { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true,
       render: v => v ? <Tag style={{ fontSize: 11, borderRadius: 4 }}>{v}</Tag> : <Text type="secondary">-</Text> },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    { title: 'Source', key: 'source', width: 110, render: (_, r) => {
+      const st = r.source_type || 'manual';
+      const label = st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const route = SOURCE_ROUTES[st];
+      if (route) {
+        return <Tag color={SOURCE_COLORS[st] || 'default'} style={{ cursor: 'pointer', borderRadius: 4 }}
+          onClick={() => history.push(route)}>{label}</Tag>;
+      }
+      return <Tag color="default" style={{ borderRadius: 4 }}>{label}</Tag>;
+    }},
     { title: 'Lines', dataIndex: 'lineCount', key: 'lineCount', width: 65, align: 'center',
       render: v => <Badge count={v || 0} style={{ backgroundColor: '#1890ff' }} overflowCount={99} /> },
     { title: 'Debit', dataIndex: 'debitTotal', key: 'debitTotal', width: 130, align: 'right',

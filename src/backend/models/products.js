@@ -1,39 +1,40 @@
-// src/backend/models/products.js
 const db = require('./dbmgr.js');
 
 const Products = {
-  // Create the Products table if it doesn't exist
   createTable: () => {
-    const stmt = `
+    db.prepare(`
       CREATE TABLE IF NOT EXISTS products (
-    id	INTEGER,
-	type	TEXT NOT NULL,
-	name	TEXT,
-	sku	TEXT,
-	category	TEXT,
-	description	TEXT,
-  price REAL NOT NULL,
-  income_account	TEXT,
-  tax_inclusive	TEXT,
-  tax	TEXT,
-  isfromsupplier	TEXT,
-	entered_by	TEXT,
-	date_entered DATETIME DEFAULT CURRENT_TIMESTAMP,
-	PRIMARY KEY(id AUTOINCREMENT)
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        name TEXT,
+        sku TEXT,
+        category TEXT,
+        description TEXT,
+        price REAL NOT NULL,
+        income_account TEXT,
+        tax_inclusive TEXT,
+        tax TEXT,
+        isfromsupplier TEXT,
+        stock INTEGER DEFAULT 0,
+        entered_by TEXT,
+        date_entered DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `;
-    db.prepare(stmt).run();
+    `).run();
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS product_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
   },
 
-  // Insert a new product
-  insertProduct: async (type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by) => {
+  insertProduct: async (type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock) => {
     try {
-    const stmt = db.prepare('INSERT INTO products (type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    const result = await stmt.run(type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by);
-   
-     
-    if (result.changes > 0) {
-        return { success: true };
+      const stmt = db.prepare('INSERT INTO products (type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      const result = await stmt.run(type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock != null ? stock : 0);
+      if (result.changes > 0) {
+        return { success: true, id: result.lastInsertRowid };
       } else {
         return { success: false };
       }
@@ -43,7 +44,6 @@ const Products = {
     }
   },
 
-  // Retrieve all products
   getAllProducts: () => {
     const stmt = db.prepare('SELECT * FROM products ORDER BY id DESC');
     return stmt.all();
@@ -76,23 +76,24 @@ const Products = {
     }
     return { data, total };
   },
-  updateProduct : async (productData) => {
+
+  updateProduct: async (productData) => {
     const { id, ...p } = productData;
     try {
-      db.prepare(`UPDATE products SET type = ?, name = ?, sku = ?, category = ?, description = ?, price = ?, income_account = ?, tax_inclusive = ?, tax = ?, isfromsupplier = ? WHERE id = ?`).run(
-          p.type || null,
-          p.name || null,
-          p.sku || null,
-          p.category || null,
-          p.description || null,
-          p.price != null ? p.price : (p.selling_price != null ? p.selling_price : null),
-          p.income_account || null,
-          p.tax_inclusive || null,
-          p.tax || null,
-          p.isfromsupplier || null,
-          id
+      db.prepare(`UPDATE products SET type = ?, name = ?, sku = ?, category = ?, description = ?, price = ?, income_account = ?, tax_inclusive = ?, tax = ?, isfromsupplier = ?, stock = ? WHERE id = ?`).run(
+        p.type || null,
+        p.name || null,
+        p.sku || null,
+        p.category || null,
+        p.description || null,
+        p.price != null ? p.price : (p.selling_price != null ? p.selling_price : null),
+        p.income_account || null,
+        p.tax_inclusive || null,
+        p.tax || null,
+        p.isfromsupplier || null,
+        p.stock != null ? p.stock : 0,
+        id
       );
-  
       return { success: true, message: 'Product updated successfully.' };
     } catch (error) {
       console.error('Error updating Product:', error);
@@ -109,9 +110,36 @@ const Products = {
       return { success: false, error: error.message };
     }
   },
+
+  getAllCategories: () => {
+    const stmt = db.prepare('SELECT * FROM product_categories ORDER BY name ASC');
+    return stmt.all();
+  },
+
+  insertCategory: (name) => {
+    try {
+      const result = db.prepare('INSERT INTO product_categories (name) VALUES (?)').run(name);
+      return { success: true, id: result.lastInsertRowid };
+    } catch (error) {
+      if (error.message && error.message.includes('UNIQUE')) {
+        return { success: false, error: 'Category already exists' };
+      }
+      console.error('Error inserting category:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  deleteCategory: (id) => {
+    try {
+      const result = db.prepare('DELETE FROM product_categories WHERE id = ?').run(id);
+      return { success: result.changes > 0 };
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      return { success: false, error: error.message };
+    }
+  },
 };
 
-// Ensure the Products table is created
 Products.createTable();
 
 module.exports = Products;

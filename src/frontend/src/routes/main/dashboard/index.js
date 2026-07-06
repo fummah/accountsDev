@@ -1,6 +1,7 @@
 import React from "react";
 import {Redirect, Route, Switch} from "react-router-dom";
 import asyncComponent from "util/asyncComponent";
+import CompanySettings from "../../../components/settings/CompanySettings";
 
 const Dashboard = ({match}) => (
   <Switch>
@@ -10,7 +11,7 @@ const Dashboard = ({match}) => (
     <Route exact path="/main/dashboard/flow" component={asyncComponent(() => import('./Flow/index'))}/>
     <Route exact path="/main/dashboard/accountant" component={asyncComponent(() => import('./Accountant/index'))}/>
     <Route exact path="/main/dashboard/customer" component={asyncComponent(() => import('./Customer/index'))}/>
-    <Route exact path="/main/dashboard/company" component={asyncComponent(() => import('./Company/index'))}/>
+    <Route exact path="/main/dashboard/company" render={(props) => <CompanySettings {...props} />}/>
   </Switch>
 );
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Table, Button, Form, DatePicker, Select, Modal, message, Card, Statistic, Tag, Space, Row, Col, Typography, InputNumber } from 'antd';
-import { PlusOutlined, FileTextOutlined, DollarOutlined, ExclamationCircleOutlined, SwapOutlined } from '@ant-design/icons';
+import { PlusOutlined, FileTextOutlined, DollarOutlined, ExclamationCircleOutlined, SwapOutlined, PrinterOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useHistory } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
@@ -128,6 +128,17 @@ const BillTracker = () => {
         });
         if (res && res.success) {
           message.success(`Payment recorded — ${payingBill.billNumber}`);
+          // Offer to print check
+          if (res.check) {
+            Modal.confirm({
+              title: 'Print Check?',
+              icon: <PrinterOutlined />,
+              content: `Check #${res.check.checkNumber} for ${cSym}${Number(res.check.amount).toFixed(2)} to ${res.check.payee}. Would you like to print this check?`,
+              okText: 'Print',
+              cancelText: 'Skip',
+              onOk: () => { history.push('/main/accountant/checks'); },
+            });
+          }
         } else {
           message.error(res?.error || 'Failed to pay bill');
           return;

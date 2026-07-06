@@ -1,15 +1,25 @@
 import React, { useState,forwardRef, useImperativeHandle, useEffect } from 'react';
-import { Button, Col, Select, Drawer, Form, Input, Row, Space,Dropdown, Checkbox } from 'antd';
-import { DownOutlined,IdcardOutlined } from '@ant-design/icons';
+import { Button, Col, Select, Drawer, Form, Input, Row, Space, Dropdown, Checkbox, Divider, Modal, InputNumber } from 'antd';
+import { DownOutlined, IdcardOutlined, PlusOutlined } from '@ant-design/icons';
 import Widget from "components/Widget/index";
 
 const { Option } = Select;
 const { TextArea } = Input;
 
 const AddProduct = forwardRef(({ onSaveUser, onUserClose, showDrawer, open, setShowError,setMessage, product }, ref) => {
- 
+  
   const [form] = Form.useForm();
   const [incomeAccounts, setIncomeAccounts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [catModalOpen, setCatModalOpen] = useState(false);
+  const [catForm] = Form.useForm();
+
+  const loadCategories = async () => {
+    try {
+      const c = await window.electronAPI.getProductCategories?.();
+      setCategories(Array.isArray(c) ? c : []);
+    } catch {}
+  };
 
   useEffect(() => {
     const fetchIncomeAccounts = async () => {
@@ -25,7 +35,7 @@ const AddProduct = forwardRef(({ onSaveUser, onUserClose, showDrawer, open, setS
         console.error('Failed to load income accounts:', e);
       }
     };
-    if (open) fetchIncomeAccounts();
+    if (open) { fetchIncomeAccounts(); loadCategories(); }
   }, [open]);
 
   const handleSave = () => {
@@ -41,6 +51,18 @@ const AddProduct = forwardRef(({ onSaveUser, onUserClose, showDrawer, open, setS
          
     });
   };
+
+  const handleAddCategory = async () => {
+    try {
+      const vals = await catForm.validateFields();
+      const res = await window.electronAPI.insertProductCategory?.(vals.cat_name);
+      if (res?.error) { setMessage(res.error); setShowError(true); return; }
+      setCatModalOpen(false);
+      catForm.resetFields();
+      loadCategories();
+    } catch (e) { if (!e?.errorFields) { setMessage('Failed to add category'); setShowError(true); } }
+  };
+
   useImperativeHandle(ref, () => ({
     resetForm() {
         form.resetFields();
@@ -119,6 +141,9 @@ useEffect(() => {
 <Select mode="single" placeholder="Please select type">
 <Option value="Product">Product</Option>
 <Option value="Service">Service</Option>
+<Option value="Raw Material">Raw Material</Option>
+<Option value="Asset">Asset</Option>
+<Option value="Bundle">Bundle</Option>
 </Select>
 </Form.Item>
      </Col>
@@ -137,10 +162,10 @@ useEffect(() => {
               </Col>
               <Col span={24}>
               <Form.Item name="category" label="Category">
-              <Select mode="single" placeholder="Enter category">
-<Option value="Internal">Internal</Option>
-<Option value="External">External</Option>
-</Select>
+              <Select mode="single" placeholder="Enter category"
+                dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Category</Button></>)}>
+                {categories.map(c => <Option key={c.id} value={c.name}>{c.name}</Option>)}
+              </Select>
               </Form.Item>
               </Col>
                       
@@ -153,6 +178,11 @@ useEffect(() => {
               <Col span={12}>
               <Form.Item name="price" label="Sales price/rate">
               <Input placeholder="Enter sales price / rate"/>
+              </Form.Item>
+              </Col>
+              <Col span={12}>
+              <Form.Item name="stock" label="Stock Qty">
+              <InputNumber min={0} step={1} style={{ width: '100%' }} />
               </Form.Item>
               </Col>
               <Col span={12}>
@@ -186,9 +216,16 @@ useEffect(() => {
               </Col>
               </Row>
 
-              </Widget>
-              </Form>
-        
+          </Widget>
+          </Form>
+
+          <Modal title="Add New Category" visible={catModalOpen} onOk={handleAddCategory} onCancel={() => setCatModalOpen(false)} okText="Add" destroyOnClose>
+            <Form form={catForm} layout="vertical" preserve={false}>
+              <Form.Item name="cat_name" label="Category Name" rules={[{ required: true, message: 'Enter category name' }]}>
+                <Input placeholder="e.g. Electronics" />
+              </Form.Item>
+            </Form>
+          </Modal>
       </Drawer>
     </>
   );

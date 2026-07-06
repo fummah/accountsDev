@@ -401,7 +401,8 @@ function createWindow() {
         { type: 'separator' },
         { label: 'Setup Wizard', click: () => { navigateTo('/main/settings/setup-wizard'); } },
         { label: 'Jurisdiction Tax Rules', click: () => { navigateTo('/main/settings/jurisdiction-tax'); } },
-        { label: 'Localisation / i18n', click: () => { navigateTo('/main/settings/localisation'); } }
+        { label: 'Localisation / i18n', click: () => { navigateTo('/main/settings/localisation'); } },
+        { label: 'Email / SMTP', click: () => { navigateTo('/main/settings/email'); } }
       ]
     },
   
@@ -485,6 +486,7 @@ const registerAllHandlers = async () => {
     { name: 'ExpenseCategories', register: require('./handlers/expenseCategoryHandlers') },
     { name: 'GapFeatures', register: require('./handlers/gapHandlers') },
     { name: 'Deposits', register: require('./handlers/depositHandlers').register },
+    { name: 'Email', register: require('./handlers/emailHandlers') },
     { name: 'IPC', register: registerIpcHandlers }              // Keep IPC handlers last
   ];
 

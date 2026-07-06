@@ -145,7 +145,7 @@ const Invoices = {
 
   // Retrieve all Invoices
   getAllInvoices: function () {
-    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id GROUP BY invoices.id ORDER BY invoices.id DESC");
+    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id GROUP BY invoices.id ORDER BY invoices.id DESC");
     const report = this.getInvoiceReport();
     return {all:stmt.all(), report:report};
   },
@@ -153,7 +153,7 @@ const Invoices = {
   getPaginated: function (page = 1, pageSize = 25, search = '', status = '', dueFrom = '', dueTo = '') {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
-    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id`;
+    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id`;
     const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
     const statusParam = status && status.trim() ? status.trim() : null;
     const whereParts = [];
@@ -971,6 +971,61 @@ const Invoices = {
       return { success: true, today, summary, byCustomer };
     } catch (e) {
       console.error('[invoices] getARAging error:', e);
+      return { success: false, error: e.message };
+    }
+  },
+
+  // ── Sales by Product report ─────────────────────────────────────────────
+  getSalesByProduct: function ({ from, to } = {}) {
+    try {
+      const dateFrom = from || '0000-01-01';
+      const dateTo   = to   || '9999-12-31';
+
+      // Aggregate by product
+      const rows = db.prepare(`
+        SELECT
+          COALESCE(p.name, il.description, 'Unitemized') AS productName,
+          p.id AS productId,
+          p.sku,
+          SUM(il.quantity) AS totalQty,
+          SUM(il.amount) AS totalSales,
+          COUNT(DISTINCT i.id) AS invoiceCount
+        FROM invoice_lines il
+        JOIN invoices i ON il.invoice_id = i.id
+        LEFT JOIN products p ON il.product = p.id
+        WHERE i.status NOT IN ('Draft','Cancelled','Void')
+          AND i.start_date BETWEEN ? AND ?
+        GROUP BY COALESCE(p.id, il.description)
+        ORDER BY totalSales DESC
+      `).all(dateFrom, dateTo);
+
+      // Drill-down: individual invoice lines per product
+      const detail = db.prepare(`
+        SELECT
+          il.id AS lineId,
+          il.invoice_id,
+          i.number AS invoiceNumber,
+          i.start_date AS invoiceDate,
+          i.status,
+          c.first_name || ' ' || c.last_name AS customerName,
+          COALESCE(p.name, il.description) AS productName,
+          p.id AS productId,
+          il.description,
+          il.quantity,
+          il.rate,
+          il.amount
+        FROM invoice_lines il
+        JOIN invoices i ON il.invoice_id = i.id
+        LEFT JOIN customers c ON i.customer = c.id
+        LEFT JOIN products p ON il.product = p.id
+        WHERE i.status NOT IN ('Draft','Cancelled','Void')
+          AND i.start_date BETWEEN ? AND ?
+        ORDER BY i.start_date DESC
+      `).all(dateFrom, dateTo);
+
+      return { success: true, summary: rows, detail };
+    } catch (e) {
+      console.error('[invoices] getSalesByProduct error:', e);
       return { success: false, error: e.message };
     }
   }

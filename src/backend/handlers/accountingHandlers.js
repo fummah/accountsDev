@@ -658,33 +658,65 @@ safeHandle('budget-periods', async () => {
       // snapshot before import
       try { COAVersions.createFromCurrent(note || 'Pre-import snapshot'); } catch {}
 
-      const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-      if (lines.length <= 1) throw new Error('CSV has no data rows');
-      const header = lines.shift();
-      const cols = header.split(',').map(h => h.trim().toLowerCase());
-      const idxNum     = cols.indexOf('number');
-      const idxName    = cols.indexOf('name');
-      const idxType    = cols.indexOf('type');
-      const idxSubType = cols.indexOf('subtype');
-      const idxStatus  = cols.indexOf('status');
+      // Proper CSV parsing (handles quoted fields with commas)
+      const parseLine = (line) => {
+        const out = []; let cur = ''; let q = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else { q = !q; } }
+          else if (ch === ',' && !q) { out.push(cur); cur = ''; }
+          else { cur += ch; }
+        }
+        out.push(cur);
+        return out.map(x => x.trim().replace(/^"|"$/g, ''));
+      };
+
+      const rawLines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      if (rawLines.length <= 1) throw new Error('CSV has no data rows');
+      const cols = parseLine(rawLines[0]).map(h => h.toLowerCase().trim());
+      const dataRows = rawLines.slice(1).map(parseLine);
+
+      const col = (name) => cols.indexOf(name);
+      const idxNum     = col('number') >= 0 ? col('number') : col('account number');
+      const idxName    = col('name') >= 0 ? col('name') : col('account name');
+      const idxType    = col('type') >= 0 ? col('type') : col('account type');
+      const idxSubType = col('subtype') >= 0 ? col('subtype') : col('sub type');
+      const idxStatus  = col('status');
+      const idxDesc    = col('description') >= 0 ? col('description') : col('desc');
+      const idxNormal  = col('normalbalance') >= 0 ? col('normalbalance') : col('normal balance');
+      const idxBalance = col('openingbalance') >= 0 ? col('openingbalance') : col('opening balance');
+
       const toInsert = [];
-      for (const line of lines) {
-        const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''));
-        const number  = idxNum     >= 0 ? (parts[idxNum]     || '').trim() || null : null;
-        const name    = idxName    >= 0 ? (parts[idxName]    || '').trim()         : null;
-        const rawType = idxType    >= 0 ? (parts[idxType]    || '').trim()         : '';
-        const type    = rawType || 'Expense'; // default to Expense if column absent or empty
-        const subType = idxSubType >= 0 ? (parts[idxSubType] || '').trim() || null : null;
-        const status  = idxStatus  >= 0 ? (parts[idxStatus]  || '').trim() || 'Active' : 'Active';
-        if (!name) continue; // only skip rows with no name
-        toInsert.push({ name, type, subType, number, status });
+      for (const parts of dataRows) {
+        const get = (i) => (i >= 0 && parts[i]) ? parts[i].trim() : '';
+        const name    = get(idxName);
+        if (!name) continue;
+        const rawType = get(idxType);
+        const type    = rawType || 'Expense';
+        const subType = get(idxSubType) || null;
+        const number  = get(idxNum) || null;
+        const status  = get(idxStatus) || 'Active';
+        const description   = get(idxDesc) || null;
+        const normalBalance = get(idxNormal) || null;
+        const openingBalance = parseFloat(get(idxBalance) || '0') || 0;
+        toInsert.push({ name, type, subType, number, status, description, normalBalance, openingBalance });
       }
+      let inserted = 0;
       for (const acc of toInsert) {
-        try { ChartOfAccounts.insertAccount({ name: acc.name, type: acc.type, subType: acc.subType || null, number: acc.number || null, status: acc.status || 'Active', entered_by: 'import' }); } catch {}
+        try {
+          ChartOfAccounts.insertAccount({
+            name: acc.name, type: acc.type, subType: acc.subType,
+            number: acc.number, status: acc.status,
+            description: acc.description, normalBalance: acc.normalBalance,
+            openingBalance: acc.openingBalance,
+            entered_by: 'import'
+          });
+          inserted++;
+        } catch {}
       }
       // snapshot after
       try { COAVersions.createFromCurrent(note || 'Post-import snapshot'); } catch {}
-      return { success: true, inserted: toInsert.length };
+      return { success: true, inserted };
     } catch (error) {
       return { error: error.message };
     }

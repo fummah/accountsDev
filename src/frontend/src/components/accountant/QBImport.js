@@ -67,13 +67,13 @@ const QBImport = () => {
       ]
     },
     coa: {
-      headers: ['number','name','type','subType','status'],
+      headers: ['number','name','type','subType','status','description','normalBalance','openingBalance'],
       rows: [
-        ['1100','Checking Account','Bank','Checking','Active'],
-        ['4000','Sales Revenue','Income','Sales','Active'],
-        ['6000','Office Supplies','Expense','Office Supplies','Active'],
-        ['2100','Visa Card','Credit Card','Visa','Active'],
-        ['2500','Equipment Loan','Loan','Equipment Loan','Active'],
+        ['1100','Checking Account','Bank','Checking','Active','Primary business checking','Debit','5000'],
+        ['4000','Sales Revenue','Income','Sales','Active','','Credit','0'],
+        ['6000','Office Supplies','Expense','Office Supplies','Active','','Debit','0'],
+        ['2100','Visa Card','Credit Card','Visa','Active','Company credit card','Credit','1200'],
+        ['2500','Equipment Loan','Long Term Liability','Equipment Loan','Active','','Credit','15000'],
       ]
     },
   };

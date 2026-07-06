@@ -69,13 +69,21 @@ const ProductsList = ({ products, loading = false, total = 0, page = 1, pageSize
   
     },
     {
-      title: 'Cost',
-      dataIndex: 'cost',
-      render: (text, record) => {
-        return <span className="gx-text-grey">{record.cost}</span>
-      },
+        title: 'Cost',
+        dataIndex: 'cost',
+        render: (text, record) => {
+          return <span className="gx-text-grey">{record.cost}</span>
+        },
 
-  },
+    },
+    {
+        title: 'Stock',
+        dataIndex: 'stock',
+        render: (text, record) => {
+          const qty = Number(record.stock) || 0;
+          return <span className="gx-text-grey" style={{ fontWeight: qty <= 0 ? 600 : 400, color: qty <= 0 ? '#ff4d4f' : '#52c41a' }}>{qty}</span>
+        },
+    },
     {
       title: 'Action',
       dataIndex: 'status',
@@ -135,6 +143,9 @@ const ProductsList = ({ products, loading = false, total = 0, page = 1, pageSize
         >
           <Select.Option value="Product">Product</Select.Option>
           <Select.Option value="Service">Service</Select.Option>
+          <Select.Option value="Raw Material">Raw Material</Select.Option>
+          <Select.Option value="Asset">Asset</Select.Option>
+          <Select.Option value="Bundle">Bundle</Select.Option>
         </Select>
       </Col>
       <Col xs={24} sm={8} md={10}>

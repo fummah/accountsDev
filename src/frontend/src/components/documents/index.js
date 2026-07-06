@@ -73,7 +73,7 @@ const DocumentCenter = () => {
   const openDoc = async (id) => {
     const res = await window.electronAPI.openDocument(id);
     if (!res?.success) {
-      message.error(res?.message || 'Unable to open file');
+      message.error(res?.error || res?.message || 'Unable to open file — it may have been moved or deleted');
     }
   };
 

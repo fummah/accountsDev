@@ -275,6 +275,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <span>Profile</span>
                   </Link>
                 </Menu.Item>
+                <Menu.Item key="main/dashboard/company">
+                  <Link to="/main/dashboard/company">
+                    <i className="icon icon-setting"/>
+                    <span>My Company Settings</span>
+                  </Link>
+                </Menu.Item>
               </SubMenu>
 
             </MenuItemGroup>

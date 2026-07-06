@@ -251,6 +251,35 @@ const SetupWizard = ({ onComplete, modal = false }) => {
         account_type: bankVals.account_type || 'Checking',
         opening_balance: Number(bankVals.opening_balance) || 0,
       });
+
+      // Persist all global settings (in case user jumped steps)
+      if (currVals.base_currency) {
+        await window.electronAPI?.currencySetBase?.(currVals.base_currency);
+        await window.electronAPI?.settingsSet?.('base_currency', currVals.base_currency);
+      }
+      if (currVals.date_format)        await window.electronAPI?.settingsSet?.('date_format', currVals.date_format);
+      if (currVals.jurisdiction)        await window.electronAPI?.settingsSet?.('tax_jurisdiction', currVals.jurisdiction);
+      if (currVals.fiscal_year_start)   await window.electronAPI?.settingsSet?.('fiscal_year_start', currVals.fiscal_year_start);
+      if (accentColor)                  await window.electronAPI?.settingsSet?.('accent_color', accentColor);
+      if (coaTemplate)                  await window.electronAPI?.settingsSet?.('coa_template', coaTemplate);
+
+      // Seed system accounts if not yet done
+      await window.electronAPI?.coaSeedSystemAccounts?.().catch(() => {});
+
+      // Create bank account in COA if provided
+      if (bankVals.account_name) {
+        try {
+          await window.electronAPI?.insertChartAccount?.({
+            name: bankVals.account_name, type: 'Bank',
+            number: bankVals.routing_number || null,
+            status: 'Active',
+            openingBalance: Number(bankVals.opening_balance) || 0,
+            normalBalance: 'Debit',
+            description: bankVals.bank_name || '',
+          });
+        } catch {} // may already exist
+      }
+
       await window.electronAPI?.setupWizardComplete?.({
         company: compVals,
         industry,

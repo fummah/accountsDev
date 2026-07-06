@@ -356,11 +356,13 @@ safeHandle('mark-expense-paid', async (event, id) => {
 });
 
 // Pay a bill: DR Accounts Payable / CR Bank account, then mark as Paid
-safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccount }) => {
+// Also creates a Check transaction record for printing
+safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccount, checkNumber }) => {
   try {
     const db = require('../models/dbmgr');
     const COA = require('../models/chartOfAccounts');
     const JournalEntries = require('../models/journalEntries');
+    const Transactions = require('../models/transactions');
 
     const ap = COA.getSystemAccount('Accounts Payable');
     if (!ap) return { success: false, error: 'Accounts Payable account not in COA' };
@@ -385,9 +387,28 @@ safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccou
     const newPaid = currentPaid + billAmt;
     const remaining = totalAmount - newPaid;
 
+    // Resolve vendor name
+    let vendorName = '';
+    try {
+      const vendor = db.prepare("SELECT display_name, first_name, last_name FROM suppliers WHERE id = ?").get(Number(expense.payee));
+      if (vendor) vendorName = vendor.display_name || `${vendor.first_name || ''} ${vendor.last_name || ''}`.trim();
+    } catch {}
+
+    // Determine check number: use provided or auto-generate
+    let checkNum = checkNumber || '';
+    if (!checkNum) {
+      try {
+        const lastCheck = db.prepare("SELECT reference FROM transactions WHERE type = 'Check' AND reference IS NOT NULL AND reference != '' ORDER BY id DESC LIMIT 1").get();
+        const lastNum = lastCheck ? parseInt(lastCheck.reference, 10) : 1000;
+        checkNum = String((isNaN(lastNum) ? 1000 : lastNum) + 1);
+      } catch { checkNum = '1001'; }
+    }
+
+    const pmtDate = paymentDate || new Date().toISOString().slice(0, 10);
+
     // Post DR AP / CR Bank (payment amount only)
     JournalEntries.post({
-      date: paymentDate || new Date().toISOString().slice(0, 10),
+      date: pmtDate,
       description: `Bill payment — expense #${expenseId}`,
       source_type: 'bill_payment',
       source_id: expenseId,
@@ -396,6 +417,23 @@ safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccou
         { account_id: bank.id, debit: 0,       credit: billAmt, description: 'Bank / Cash payment' },
       ],
     });
+
+    // Create a Check transaction record for the bank register and printing
+    let checkId = null;
+    try {
+      const txResult = Transactions.insert({
+        date: pmtDate,
+        type: 'Check',
+        amount: billAmt,
+        description: `Bill payment to ${vendorName} — Bill #${expenseId}`,
+        reference: checkNum,
+        accountId: bank.id,
+        debit: 0,
+        credit: billAmt,
+        entered_by: 'system',
+      });
+      checkId = txResult?.lastInsertRowid || null;
+    } catch (txErr) { console.warn('[bill-pay] check txn insert failed:', txErr.message); }
 
     // Determine new status
     let newStatus = 'Partially Paid';
@@ -412,7 +450,19 @@ safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccou
       }
     } catch (balErr) { console.error('[bill-pay] vendor balance update failed:', balErr); }
 
-    return { success: true, remainingBalance: Math.max(0, remaining) };
+    return {
+      success: true,
+      remainingBalance: Math.max(0, remaining),
+      check: {
+        id: checkId,
+        checkNumber: checkNum,
+        date: pmtDate,
+        payee: vendorName,
+        amount: billAmt,
+        bankAccount: bank.name,
+        memo: `Bill payment — Bill #${expenseId}`,
+      },
+    };
   } catch (e) {
     console.error('Error paying bill:', e);
     return { success: false, error: e.message };
@@ -493,9 +543,9 @@ safeHandle('get-products-paginated', async (event, page, pageSize, search, typeF
 });
 
 // Handler to insert an product
-safeHandle('insert-product', async (event, type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by) => {
+safeHandle('insert-product', async (event, type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock) => {
   try {
-    return await Products.insertProduct(type,name,sku, category, description,price,income_account,tax_inclusive,tax,isfromsupplier,entered_by);
+    return await Products.insertProduct(type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock);
   } catch (error) {
     console.error('Error inserting product:', error);
     return { error: error.message };
@@ -508,6 +558,34 @@ safeHandle('delete-product', async (event, id) => {
   } catch (error) {
     console.error('Error deleting product:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// Product categories
+safeHandle('get-product-categories', async () => {
+  try {
+    return await Products.getAllCategories();
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    return { error: error.message };
+  }
+});
+
+safeHandle('insert-product-category', async (event, name) => {
+  try {
+    return await Products.insertCategory(name);
+  } catch (error) {
+    console.error('Error inserting category:', error);
+    return { error: error.message };
+  }
+});
+
+safeHandle('delete-product-category', async (event, id) => {
+  try {
+    return await Products.deleteCategory(id);
+  } catch (error) {
+    console.error('Error deleting category:', error);
+    return { error: error.message };
   }
 });
 

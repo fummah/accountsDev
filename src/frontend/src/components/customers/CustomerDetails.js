@@ -4,6 +4,7 @@ import { ArrowLeftOutlined, EditOutlined, FileTextOutlined, DollarOutlined, Plus
 import { useParams, useHistory, Link } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import { formatPhone } from '../../utils/phone';
 import CustomerPaymentHistory from './payments/CustomerPaymentHistory';
 
 const { TabPane } = Tabs;
@@ -135,7 +136,7 @@ const CustomerDetails = () => {
         <Row gutter={16} align="middle">
           <Col flex="auto">
             <h2 style={{ margin: 0 }}>{custName}</h2>
-            <span style={{ color: '#888' }}>{(customer?.email && customer.email !== 'null') ? customer.email : ''} {(customer?.phone_number && customer.phone_number !== 'null') ? `• ${customer.phone_number}` : ''}</span>
+            <span style={{ color: '#888' }}>{(customer?.email && customer.email !== 'null') ? customer.email : ''} {(customer?.phone_number && customer.phone_number !== 'null') ? `• ${formatPhone(customer.phone_number)}` : ''}</span>
           </Col>
           <Col><Statistic title="Receivables" value={totalReceivables.toFixed(2)} prefix={cSym} valueStyle={{ fontSize: 18 }} /></Col>
           <Col><Statistic title="Paid" value={totalPaid.toFixed(2)} prefix={cSym} valueStyle={{ fontSize: 18, color: '#52c41a' }} /></Col>
@@ -180,7 +181,7 @@ const CustomerDetails = () => {
                 <Descriptions.Item label="Display Name">{custName}</Descriptions.Item>
                 <Descriptions.Item label="Company">{(customer?.company_name && customer.company_name !== 'null') ? customer.company_name : '-'}</Descriptions.Item>
                 <Descriptions.Item label="Email">{(customer?.email && customer.email !== 'null') ? customer.email : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Phone">{(customer?.phone_number && customer.phone_number !== 'null') ? customer.phone_number : ((customer?.mobile_number && customer.mobile_number !== 'null') ? customer.mobile_number : '-')}</Descriptions.Item>
+                <Descriptions.Item label="Phone">{(customer?.phone_number && customer.phone_number !== 'null') ? formatPhone(customer.phone_number) : ((customer?.mobile_number && customer.mobile_number !== 'null') ? formatPhone(customer.mobile_number) : '-')}</Descriptions.Item>
                 <Descriptions.Item label="Balance">{cSym} {Number(customer?.opening_balance || 0).toFixed(2)}</Descriptions.Item>
                 <Descriptions.Item label="Payment Terms">{(customer?.terms && customer.terms !== 'null') ? customer.terms : ((customer?.payment_method && customer.payment_method !== 'null') ? customer.payment_method : '-')}</Descriptions.Item>
                 <Descriptions.Item label="Billing Address" span={2}>{(customer?.address1 && customer.address1 !== 'null') ? customer.address1 : '-'}</Descriptions.Item>

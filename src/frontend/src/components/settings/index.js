@@ -16,8 +16,10 @@ import DatabaseShare from './DatabaseShare';
 import CurrencySettings from './CurrencySettings';
 import Accessibility from './Accessibility';
 import SetupWizard from './SetupWizard';
+import CompanySettings from './CompanySettings';
 import JurisdictionTax from './JurisdictionTax';
 import LocalisationSettings from './LocalisationSettings';
+import EmailSettings from './EmailSettings';
 
 const SettingsRoutes = ({ match }) => {
   return (
@@ -38,8 +40,10 @@ const SettingsRoutes = ({ match }) => {
       <Route path={`${match.path}/currencies`} component={CurrencySettings} />
       <Route path={`${match.path}/accessibility`} component={Accessibility} />
       <Route path={`${match.path}/setup-wizard`} component={SetupWizard} />
+      <Route path={`${match.path}/company`} component={CompanySettings} />
       <Route path={`${match.path}/jurisdiction-tax`} component={JurisdictionTax} />
       <Route path={`${match.path}/localisation`} component={LocalisationSettings} />
+      <Route path={`${match.path}/email`} component={EmailSettings} />
     </Switch>
   );
 };
