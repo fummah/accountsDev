@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, Descriptions, message, Button } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useParams, useHistory } from 'react-router-dom';
+import { formatPhone } from '../../utils/phone';
 
 const VendorDetails = ({ match }) => {
   const params = useParams();
@@ -33,8 +34,8 @@ const VendorDetails = ({ match }) => {
         <Descriptions.Item label="Name" span={2}>{vendor.display_name || `${vendor.first_name} ${vendor.last_name}`}</Descriptions.Item>
         <Descriptions.Item label="Company">{vendor.company_name || '-'}</Descriptions.Item>
         <Descriptions.Item label="Email">{vendor.email || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Phone">{vendor.phone_number || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Mobile">{vendor.mobile_number || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Phone">{formatPhone(vendor.phone_number) || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Mobile">{formatPhone(vendor.mobile_number) || '-'}</Descriptions.Item>
         <Descriptions.Item label="Fax">{vendor.fax || '-'}</Descriptions.Item>
         <Descriptions.Item label="Address" span={2}>{fullAddr || '-'}</Descriptions.Item>
         <Descriptions.Item label="Opening Balance">{Number(vendor.opening_balance || 0).toFixed(2)}</Descriptions.Item>

@@ -33,6 +33,11 @@ function headerIndex(headers, candidates) {
 	return -1;
 }
 
+function findUnmappedHeaders(headers, usedIdxs) {
+	const used = new Set(Object.values(usedIdxs).filter(i => i >= 0));
+	return headers.filter((_, i) => !used.has(i));
+}
+
 async function register() {
 	// Import Customers from QuickBooks CSV export
 	ipcMain.handle('import-customers-csv', async (_e, csvText, options = {}) => {
@@ -49,8 +54,8 @@ async function register() {
 				phone: headerIndex(headers, ['phone', 'phone number']),
 				mobile: headerIndex(headers, ['mobile', 'mobile phone']),
 				fax: headerIndex(headers, ['fax']),
-				address1: headerIndex(headers, ['billing address line 1', 'bill addr1', 'address1', 'address line 1']),
-				address2: headerIndex(headers, ['billing address line 2', 'bill addr2', 'address2', 'address line 2']),
+				address1: headerIndex(headers, ['billing address line 1', 'bill addr1', 'address1', 'address line 1', 'address', 'street address', 'street']),
+				address2: headerIndex(headers, ['billing address line 2', 'bill addr2', 'address2', 'address line 2', 'address 2', 'unit']),
 				city: headerIndex(headers, ['billing city', 'bill city', 'city']),
 				state: headerIndex(headers, ['billing state', 'bill state', 'state']),
 				postal: headerIndex(headers, ['billing postal code', 'bill postal code', 'zip', 'postal code']),
@@ -60,6 +65,8 @@ async function register() {
 				asOf: headerIndex(headers, ['open balance date', 'as of', 'as of date']),
 				taxNumber: headerIndex(headers, ['tax number', 'vat number', 'tax id']),
 			};
+
+			const unmapped = findUnmappedHeaders(headers, idx);
 
 			let inserted = 0;
 			for (const r of rows) {
@@ -116,7 +123,7 @@ async function register() {
 				if (res && res.success) inserted++;
 			}
 
-			return { success: true, inserted };
+			return { success: true, inserted, unmappedColumns: unmapped };
 		} catch (e) {
 			return { success: false, error: e.message };
 		}
@@ -178,7 +185,7 @@ async function register() {
 				email: headerIndex(headers, ['email', 'email address']),
 				date: headerIndex(headers, ['invoice date', 'date']),
 				dueDate: headerIndex(headers, ['due date']),
-				billingAddress1: headerIndex(headers, ['billing address line 1', 'bill addr1', 'billing address']),
+				billingAddress1: headerIndex(headers, ['billing address line 1', 'bill addr1', 'billing address', 'address1', 'address line 1', 'address', 'street address', 'street']),
 				itemName: headerIndex(headers, ['product/service', 'item', 'product', 'service']),
 				description: headerIndex(headers, ['description']),
 				qty: headerIndex(headers, ['qty', 'quantity']),
@@ -466,8 +473,8 @@ async function register() {
 				phone: headerIndex(headers, ['phone','phone number']),
 				mobile: headerIndex(headers, ['mobile','mobile phone']),
 				fax: headerIndex(headers, ['fax']),
-				address1: headerIndex(headers, ['billing address line 1','address1','address line 1']),
-				address2: headerIndex(headers, ['billing address line 2','address2','address line 2']),
+				address1: headerIndex(headers, ['billing address line 1','address1','address line 1','address','street address','street']),
+				address2: headerIndex(headers, ['billing address line 2','address2','address line 2','address 2','unit']),
 				city: headerIndex(headers, ['billing city','city']),
 				state: headerIndex(headers, ['billing state','state']),
 				postal: headerIndex(headers, ['billing postal code','postal code','zip']),

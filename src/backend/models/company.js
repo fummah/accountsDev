@@ -10,6 +10,12 @@ const Company = {
         industry TEXT,
         business_type TEXT,
         address TEXT,
+        address1 TEXT,
+        address2 TEXT,
+        city TEXT,
+        state TEXT,
+        postal_code TEXT,
+        country TEXT,
         email TEXT,
         phone TEXT,
         website TEXT,
@@ -46,6 +52,12 @@ const Company = {
       add('routing_number',  'TEXT');
       add('account_type',    'TEXT');
       add('opening_balance', 'REAL DEFAULT 0');
+      add('address1',        'TEXT');
+      add('address2',        'TEXT');
+      add('city',            'TEXT');
+      add('state',           'TEXT');
+      add('postal_code',     'TEXT');
+      add('country',         'TEXT');
     } catch (e) { console.error('[company] migration failed:', e); }
   },
   getInfo() {
@@ -69,6 +81,12 @@ const Company = {
       industry = @industry,
       business_type = @business_type,
       address = @address,
+      address1 = @address1,
+      address2 = @address2,
+      city = @city,
+      state = @state,
+      postal_code = @postal_code,
+      country = @country,
       email = @email,
       phone = @phone,
       website = @website,
@@ -94,6 +112,12 @@ const Company = {
       industry:        safe(data.industry || null),
       business_type:   safe(data.business_type || data.businessType || null),
       address:         safe(data.address || null),
+      address1:        safe(data.address1 || data.address || null),
+      address2:        safe(data.address2 || null),
+      city:            safe(data.city || null),
+      state:           safe(data.state || null),
+      postal_code:     safe(data.postal_code || data.postalCode || data.zip || null),
+      country:         safe(data.country || null),
       email:           safe(data.email || null),
       phone:           safe(data.phone || null),
       website:         safe(data.website || null),

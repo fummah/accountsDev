@@ -12,6 +12,8 @@ import {
   CheckOutlined, LoadingOutlined, StarOutlined
 } from '@ant-design/icons';
 import { useHistory } from 'react-router-dom';
+import COUNTRIES from '../../utils/countries';
+import { phoneInputHandler } from '../../utils/phone';
 
 const { Option } = Select;
 
@@ -144,10 +146,45 @@ const SetupWizard = ({ onComplete, modal = false }) => {
         const comp = await window.electronAPI?.getCompany?.();
         if (comp?.name) {
           companyForm.setFieldsValue({
-            name: comp.name, address: comp.address, phone: comp.phone,
-            email: comp.email, website: comp.website, tax_id: comp.tax_id,
+            name: comp.name, address1: comp.address1 || '', address2: comp.address2 || '',
+            city: comp.city || '', state: comp.state || '', postal_code: comp.postal_code || '', country: comp.country || '',
+            phone: comp.phone, email: comp.email, website: comp.website, tax_id: comp.tax_id,
+            reg_number: comp.reg_number, business_type: comp.business_type,
+          });
+          // Restore logo
+          if (comp.logo && typeof comp.logo === 'string' && comp.logo.startsWith('data:')) {
+            setLogo(comp.logo);
+          }
+          // Restore industry
+          if (comp.industry) setIndustry(comp.industry);
+          // Restore currency form fields
+          const dateFmt = await window.electronAPI?.settingsGet?.('date_format').catch(() => 'MM/DD/YYYY') || 'MM/DD/YYYY';
+          const juris = await window.electronAPI?.settingsGet?.('tax_jurisdiction').catch(() => 'US') || 'US';
+          currencyForm.setFieldsValue({
+            base_currency: comp.currency || 'USD',
+            tax_rate: comp.vat_rate != null ? comp.vat_rate : 0,
+            tax_name: comp.tax_name || 'VAT',
+            fiscal_year_start: comp.fy_start || 'january',
+            terms: comp.terms != null ? comp.terms : 30,
+            date_format: dateFmt,
+            jurisdiction: juris,
+          });
+          // Restore bank form fields
+          bankForm.setFieldsValue({
+            bank_name: comp.bank_name || '',
+            account_number: comp.account_number || '',
+            routing_number: comp.routing_number || '',
+            opening_balance: comp.opening_balance || 0,
+            account_type: comp.account_type || 'Checking',
           });
         }
+        // Restore saved settings
+        try {
+          const savedCoa = await window.electronAPI?.settingsGet?.('coa_template');
+          if (savedCoa) setCoaTemplate(savedCoa);
+          const savedColor = await window.electronAPI?.settingsGet?.('accent_color');
+          if (savedColor) setAccentColor(savedColor);
+        } catch {}
       } catch {}
     })();
   }, []);
@@ -162,19 +199,22 @@ const SetupWizard = ({ onComplete, modal = false }) => {
   /* ── Step navigation ── */
   const goNext = async () => {
     try {
+      // Always merge existing company data to avoid nulling out fields from other steps
+      const existing = await window.electronAPI?.getCompany?.() || {};
+
       if (step === 1) {
         await companyForm.validateFields();
         const vals = companyForm.getFieldsValue();
-        await window.electronAPI?.saveCompany?.({ ...vals, logo });
+        await window.electronAPI?.saveCompany?.({ ...existing, ...vals, logo });
       }
       if (step === 2) {
         const vals = companyForm.getFieldsValue();
-        await window.electronAPI?.saveCompany?.({ ...vals, logo });
+        await window.electronAPI?.saveCompany?.({ ...existing, ...vals, logo });
         await window.electronAPI?.settingsSet?.('accent_color', accentColor);
       }
       if (step === 3) {
         const vals = companyForm.getFieldsValue();
-        await window.electronAPI?.saveCompany?.({ ...vals, industry, logo });
+        await window.electronAPI?.saveCompany?.({ ...existing, ...vals, industry, logo });
       }
       if (step === 4) {
         await window.electronAPI?.coaSeedSystemAccounts?.();
@@ -188,11 +228,12 @@ const SetupWizard = ({ onComplete, modal = false }) => {
         await window.electronAPI?.settingsSet?.('fiscal_year_start', vals.fiscal_year_start || 'january');
         const compVals = companyForm.getFieldsValue();
         await window.electronAPI?.saveCompany?.({
-          ...compVals, industry, logo, currency: vals.base_currency || '',
-          vat_rate: vals.tax_rate != null ? vals.tax_rate : 0,
-          tax_name: vals.tax_name || 'VAT',
-          fy_start: vals.fiscal_year_start || '',
-          terms: vals.terms != null ? vals.terms : 30,
+          ...existing, ...compVals, industry, logo,
+          currency: vals.base_currency || existing.currency || '',
+          vat_rate: vals.tax_rate != null ? vals.tax_rate : (existing.vat_rate != null ? existing.vat_rate : 0),
+          tax_name: vals.tax_name || existing.tax_name || 'VAT',
+          fy_start: vals.fiscal_year_start || existing.fy_start || '',
+          terms: vals.terms != null ? vals.terms : (existing.terms != null ? existing.terms : 30),
         });
       }
       if (step === 6) {
@@ -209,13 +250,13 @@ const SetupWizard = ({ onComplete, modal = false }) => {
         }
         const compVals = companyForm.getFieldsValue();
         await window.electronAPI?.saveCompany?.({
-          ...compVals, industry, logo,
-          bank_name: vals.bank_name || '',
-          account_number: vals.account_number || '',
-          branch_code: vals.branch_code || '',
-          routing_number: vals.routing_number || '',
-          account_type: vals.account_type || 'Checking',
-          opening_balance: Number(vals.opening_balance) || 0,
+          ...existing, ...compVals, industry, logo,
+          bank_name: vals.bank_name || existing.bank_name || '',
+          account_number: vals.account_number || existing.account_number || '',
+          branch_code: vals.branch_code || existing.branch_code || '',
+          routing_number: vals.routing_number || existing.routing_number || '',
+          account_type: vals.account_type || existing.account_type || 'Checking',
+          opening_balance: Number(vals.opening_balance) || existing.opening_balance || 0,
         });
       }
       setStep(s => Math.min(s + 1, totalSteps - 1));
@@ -231,65 +272,66 @@ const SetupWizard = ({ onComplete, modal = false }) => {
   const finish = async () => {
     setSaving(true);
     try {
-      // Final comprehensive save of all company data
-      const compVals = companyForm.getFieldsValue();
-      const currVals = currencyForm.getFieldsValue();
-      const bankVals = bankForm.getFieldsValue();
-      await window.electronAPI?.saveCompany?.({
-        ...compVals,
+      // Each step's goNext already persists its data to the database.
+      // Read it back so we never rely on unmounted form getFieldsValue().
+      const existing = await window.electronAPI?.getCompany?.() || {};
+      // Also get settings that the individual steps may have saved
+      const dateFormat = await window.electronAPI?.settingsGet?.('date_format') || 'MM/DD/YYYY';
+      const jurisdiction = await window.electronAPI?.settingsGet?.('tax_jurisdiction') || 'US';
+      const fiscalYearStart = await window.electronAPI?.settingsGet?.('fiscal_year_start') || 'january';
+      await window.electronAPI?.saveCompany?.({ ...existing,
         industry,
-        logo,
-        currency: currVals.base_currency || '',
-        vat_rate: currVals.tax_rate || 0,
-        tax_name: currVals.tax_name || 'VAT',
-        fy_start: currVals.fiscal_year_start || '',
-        terms: currVals.terms != null ? currVals.terms : 30,
-        bank_name: bankVals.bank_name || '',
-        account_number: bankVals.account_number || '',
-        branch_code: bankVals.branch_code || '',
-        routing_number: bankVals.routing_number || '',
-        account_type: bankVals.account_type || 'Checking',
-        opening_balance: Number(bankVals.opening_balance) || 0,
+        logo: typeof logo === 'string' && logo.startsWith('data:') ? logo : existing.logo,
+        currency: existing.currency || 'USD',
+        vat_rate: existing.vat_rate != null ? existing.vat_rate : 0,
+        tax_name: existing.tax_name || 'VAT',
+        fy_start: existing.fy_start || fiscalYearStart,
+        terms: existing.terms != null ? existing.terms : 30,
+        bank_name: existing.bank_name || '',
+        account_number: existing.account_number || '',
+        branch_code: existing.branch_code || '',
+        routing_number: existing.routing_number || '',
+        account_type: existing.account_type || 'Checking',
+        opening_balance: existing.opening_balance || 0,
       });
 
-      // Persist all global settings (in case user jumped steps)
-      if (currVals.base_currency) {
-        await window.electronAPI?.currencySetBase?.(currVals.base_currency);
-        await window.electronAPI?.settingsSet?.('base_currency', currVals.base_currency);
-      }
-      if (currVals.date_format)        await window.electronAPI?.settingsSet?.('date_format', currVals.date_format);
-      if (currVals.jurisdiction)        await window.electronAPI?.settingsSet?.('tax_jurisdiction', currVals.jurisdiction);
-      if (currVals.fiscal_year_start)   await window.electronAPI?.settingsSet?.('fiscal_year_start', currVals.fiscal_year_start);
-      if (accentColor)                  await window.electronAPI?.settingsSet?.('accent_color', accentColor);
-      if (coaTemplate)                  await window.electronAPI?.settingsSet?.('coa_template', coaTemplate);
+      // Persist all global settings (read from the DB where the steps already saved them)
+      const baseCurrency = existing.currency || 'USD';
+      await window.electronAPI?.currencySetBase?.(baseCurrency).catch(() => {});
+      await window.electronAPI?.settingsSet?.('base_currency', baseCurrency);
+      await window.electronAPI?.settingsSet?.('date_format', dateFormat);
+      await window.electronAPI?.settingsSet?.('tax_jurisdiction', jurisdiction);
+      await window.electronAPI?.settingsSet?.('fiscal_year_start', fiscalYearStart);
+      if (accentColor) await window.electronAPI?.settingsSet?.('accent_color', accentColor);
+      if (coaTemplate) await window.electronAPI?.settingsSet?.('coa_template', coaTemplate);
 
       // Seed system accounts if not yet done
       await window.electronAPI?.coaSeedSystemAccounts?.().catch(() => {});
 
-      // Create bank account in COA if provided
-      if (bankVals.account_name) {
-        try {
-          await window.electronAPI?.insertChartAccount?.({
-            name: bankVals.account_name, type: 'Bank',
-            number: bankVals.routing_number || null,
-            status: 'Active',
-            openingBalance: Number(bankVals.opening_balance) || 0,
-            normalBalance: 'Debit',
-            description: bankVals.bank_name || '',
-          });
-        } catch {} // may already exist
-      }
+      // Create bank account in COA if provided (read from existing data)
+      const bankAcctName = existing.account_number || 'Business Checking';
+      try {
+        await window.electronAPI?.insertChartAccount?.({
+          name: bankAcctName, type: 'Bank',
+          number: existing.routing_number || null,
+          status: 'Active',
+          openingBalance: Number(existing.opening_balance) || 0,
+          normalBalance: 'Debit',
+          description: existing.bank_name || '',
+        });
+      } catch {} // may already exist
 
       await window.electronAPI?.setupWizardComplete?.({
-        company: compVals,
+        company: existing,
         industry,
         coaTemplate,
-        currency: currVals,
-        bank: bankVals,
+        currency: { base_currency: baseCurrency, date_format: dateFormat, jurisdiction, fiscal_year_start: fiscalYearStart },
+        bank: existing,
         logo,
         accentColor,
       });
       message.success('Setup complete! Welcome aboard 🎉');
+      window.dispatchEvent(new CustomEvent('company-updated'));
       setDone(true);
       if (onComplete) onComplete();
     } catch (e) {
@@ -343,7 +385,7 @@ const SetupWizard = ({ onComplete, modal = false }) => {
       /* 1 — Company Info */
       case 1:
         return (
-          <Form form={companyForm} layout="vertical">
+          <Form key="companyForm" form={companyForm} layout="vertical">
             <Row gutter={16}>
               <Col span={14}>
                 <Form.Item name="name" label="Company Name" rules={[{ required: true, message: 'Required' }]}>
@@ -356,18 +398,52 @@ const SetupWizard = ({ onComplete, modal = false }) => {
                 </Form.Item>
               </Col>
             </Row>
-            <Form.Item name="address" label="Business Address">
-              <Input.TextArea rows={2} placeholder="123 Main Street, City, State, ZIP" />
+            <Form.Item name="address1" label="Street Address" rules={[{ required: true, message: 'Required' }]}>
+              <Input placeholder="123 Main Street" />
+            </Form.Item>
+            <Form.Item name="address2" label="Address Line 2">
+              <Input placeholder="Suite 100" />
             </Form.Item>
             <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="city" label="City" rules={[{ required: true, message: 'Required' }]}>
+                  <Input placeholder="New York" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="state" label="State" rules={[{ required: true, message: 'Required' }]}>
+                  <Input placeholder="NY" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="postal_code" label="ZIP / Postal Code" rules={[{ required: true, message: 'Required' }]}>
+                  <Input placeholder="10001" />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={16}>
               <Col span={12}>
-                <Form.Item name="phone" label="Phone">
-                  <Input placeholder="+1 (555) 123-4567" />
+                <Form.Item name="country" label="Country">
+                  <Select showSearch placeholder="Select country" allowClear optionFilterProp="children">
+                    {COUNTRIES.map(c => <Option key={c} value={c}>{c}</Option>)}
+                  </Select>
                 </Form.Item>
               </Col>
               <Col span={12}>
+                <Form.Item name="phone" label="Phone">
+                  <Input placeholder="+1 (555) 123-4567" onChange={e => companyForm.setFieldsValue({ phone: phoneInputHandler(e.target.value) })} />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col span={12}>
                 <Form.Item name="email" label="Business Email">
                   <Input placeholder="info@yourbusiness.com" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="website" label="Website">
+                  <Input placeholder="www.yourbusiness.com" />
                 </Form.Item>
               </Col>
             </Row>
@@ -514,7 +590,7 @@ const SetupWizard = ({ onComplete, modal = false }) => {
       /* 5 — Currency & Tax */
       case 5:
         return (
-          <Form form={currencyForm} layout="vertical"
+          <Form key="currencyForm" form={currencyForm} layout="vertical"
             initialValues={{ base_currency: 'USD', jurisdiction: 'US', fiscal_year_start: 'january', date_format: 'MM/DD/YYYY', tax_rate: 0 }}>
             <Row gutter={16}>
               <Col span={12}>
@@ -586,7 +662,7 @@ const SetupWizard = ({ onComplete, modal = false }) => {
       /* 6 — Bank Account */
       case 6:
         return (
-          <Form form={bankForm} layout="vertical"
+          <Form key="bankForm" form={bankForm} layout="vertical"
             initialValues={{ account_name: 'Business Checking', opening_balance: 0 }}>
             <p style={{ color: '#666', marginBottom: 16 }}>Set up your primary bank account. This will be added to your Chart of Accounts. You can add more later.</p>
             <Row gutter={16}>
@@ -657,8 +733,9 @@ const SetupWizard = ({ onComplete, modal = false }) => {
             </div>
             <h2 style={{ margin: '0 0 6px', fontWeight: 700 }}>You're All Set!</h2>
             <p style={{ color: '#666', marginBottom: 24, maxWidth: 400, margin: '0 auto 24px' }}>
-              Your workspace has been configured. Here's what you can do next:
+              {done ? 'Here\'s what you can do next:' : 'Click "Complete Setup" below to finalise and unlock the next steps.'}
             </p>
+            {done && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, maxWidth: 480, margin: '0 auto 24px', textAlign: 'left' }}>
               {[
                 { icon: <FileTextOutlined />, label: 'Create Invoice',    route: '/inner/sales?tab=2',                    color: '#1890ff' },
@@ -683,6 +760,7 @@ const SetupWizard = ({ onComplete, modal = false }) => {
                 </div>
               ))}
             </div>
+            )}
           </div>
         );
 

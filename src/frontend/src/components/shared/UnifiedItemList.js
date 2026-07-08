@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Card, Table, Button, Modal, Form, Input, InputNumber, Select, Space, message, Tag, Row, Col, Tooltip, Popconfirm, Drawer } from 'antd';
+import { Card, Table, Button, Modal, Form, Input, InputNumber, Select, Space, message, Tag, Row, Col, Tooltip, Popconfirm, Drawer, Divider } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, FilterOutlined, CopyOutlined } from '@ant-design/icons';
 import { useCurrency } from '../../utils/currency';
 
@@ -48,6 +48,49 @@ const UnifiedItemList = () => {
 
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountForm] = Form.useForm();
+  const [categories, setCategories] = useState([]);
+  const [catModalOpen, setCatModalOpen] = useState(false);
+  const [catForm] = Form.useForm();
+  const [customTypes, setCustomTypes] = useState([]);
+  const [typeModalOpen, setTypeModalOpen] = useState(false);
+  const [typeForm] = Form.useForm();
+
+  const allTypes = useMemo(() => {
+    const defaults = ['Product', 'Service', 'Raw Material', 'Asset', 'Bundle'];
+    const merged = [...defaults];
+    customTypes.forEach(t => { if (!merged.includes(t)) merged.push(t); });
+    return merged;
+  }, [customTypes]);
+
+  const loadCategories = async () => {
+    try {
+      const c = await window.electronAPI.getProductCategories?.();
+      setCategories(Array.isArray(c) ? c : []);
+    } catch {}
+  };
+
+  const handleAddCategory = async () => {
+    try {
+      const vals = await catForm.validateFields();
+      const res = await window.electronAPI.insertProductCategory?.(vals.cat_name);
+      if (res?.error) { message.error(res.error); return; }
+      setCatModalOpen(false);
+      catForm.resetFields();
+      loadCategories();
+    } catch (e) { if (!e?.errorFields) message.error('Failed to add category'); }
+  };
+
+  const handleAddType = async () => {
+    try {
+      const vals = await typeForm.validateFields();
+      const name = vals.type_name?.trim();
+      if (!name) return;
+      setCustomTypes(prev => prev.includes(name) ? prev : [...prev, name]);
+      setTypeModalOpen(false);
+      typeForm.resetFields();
+      message.success('Type added');
+    } catch (e) { if (!e?.errorFields) message.error('Failed to add type'); }
+  };
 
   const handleAddAccount = async () => {
     try {
@@ -72,9 +115,9 @@ const UnifiedItemList = () => {
     } catch (e) { if (!e?.errorFields) message.error('Failed to create account'); }
   };
 
-  useEffect(() => { fetchItems(); fetchIncomeAccounts(); }, [fetchItems, fetchIncomeAccounts]);
+  useEffect(() => { fetchItems(); fetchIncomeAccounts(); loadCategories(); }, [fetchItems, fetchIncomeAccounts]);
 
-  const categories = useMemo(() => {
+  const uniqueCategories = useMemo(() => {
     const cats = new Set();
     items.forEach(i => { if (i.category) cats.add(i.category); });
     return Array.from(cats).sort();
@@ -208,7 +251,7 @@ const UnifiedItemList = () => {
             onSearch={v => setSearch(v)} onChange={e => { if (!e.target.value) setSearch(''); }} style={{ width: 280 }} />
           <Select value={categoryFilter} onChange={v => setCategoryFilter(v)} style={{ width: 160 }} placeholder="Category">
             <Option value="all">All Categories</Option>
-            {categories.map(c => <Option key={c} value={c}>{c}</Option>)}
+            {uniqueCategories.map(c => <Option key={c} value={c}>{c}</Option>)}
           </Select>
           <Select value={typeFilter} onChange={v => setTypeFilter(v)} style={{ width: 140 }} placeholder="Type">
             <Option value="all">All Types</Option>
@@ -226,7 +269,7 @@ const UnifiedItemList = () => {
         footer={<div style={{ textAlign: 'right' }}><Button onClick={() => { setDrawerOpen(false); setEditingItem(null); form.resetFields(); }} style={{ marginRight: 8 }}>Cancel</Button><Button type="primary" onClick={handleSave}>Save</Button></div>}>
         <Form form={form} layout="vertical">
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="type" label="Type" initialValue="Product"><Select><Option value="Product">Product</Option><Option value="Service">Service</Option><Option value="Material">Material</Option></Select></Form.Item></Col>
+            <Col span={12}><Form.Item name="type" label="Type" initialValue="Product"><Select dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setTypeModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Type</Button></>)}>{allTypes.map(t => <Option key={t} value={t}>{t}</Option>)}</Select></Form.Item></Col>
             <Col span={12}><Form.Item name="sku" label="SKU / Code"><Input /></Form.Item></Col>
           </Row>
           <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}><Input /></Form.Item>
@@ -234,11 +277,9 @@ const UnifiedItemList = () => {
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={12}>
               <Form.Item name="category" label="Category">
-                <Select allowClear placeholder="Select category">
-                  <Option value="goods">Goods</Option>
-                  <Option value="services">Services</Option>
-                  <Option value="materials">Materials</Option>
-                  <Option value="consumables">Consumables</Option>
+                <Select allowClear placeholder="Select category"
+                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Category</Button></>)}>
+                  {categories.map(c => <Option key={c.id} value={c.name}>{c.name}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
@@ -273,6 +314,24 @@ const UnifiedItemList = () => {
           </Form.Item>
           <Form.Item name="description" label="Description">
             <Input.TextArea rows={2} placeholder="Optional description" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Add New Category Modal */}
+      <Modal title="Add New Category" visible={catModalOpen} onOk={handleAddCategory} onCancel={() => setCatModalOpen(false)} okText="Add" destroyOnClose>
+        <Form form={catForm} layout="vertical" preserve={false}>
+          <Form.Item name="cat_name" label="Category Name" rules={[{ required: true, message: 'Enter category name' }]}>
+            <Input placeholder="e.g. Electronics" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Add New Type Modal */}
+      <Modal title="Add New Type" visible={typeModalOpen} onOk={handleAddType} onCancel={() => setTypeModalOpen(false)} okText="Add" destroyOnClose>
+        <Form form={typeForm} layout="vertical" preserve={false}>
+          <Form.Item name="type_name" label="Type Name" rules={[{ required: true, message: 'Enter type name' }]}>
+            <Input placeholder="e.g. Digital Service" />
           </Form.Item>
         </Form>
       </Modal>

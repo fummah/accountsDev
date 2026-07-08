@@ -115,22 +115,72 @@ const CheckPrinting = () => {
   const [watchMemo, setWatchMemo] = useState('');
   const [watchAccountId, setWatchAccountId] = useState(null);
   const [splitLines, setSplitLines] = useState([{ key: 1, account: '', description: '', amount: 0 }]);
-  const [fileList, setFileList] = useState([]);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [attachedDocs, setAttachedDocs] = useState([]);
   const [editingId, setEditingId] = useState(null);
 
   const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
 
-  // Auto-update the main amount field from split lines when there are multiple lines
+  // Auto-update the main amount field from split lines
   useEffect(() => {
-    if (splitLines.length > 1 && splitTotal > 0) {
+    if (splitTotal > 0) {
       setAmount(splitTotal);
       form.setFieldsValue({ amount: splitTotal });
     }
-  }, [splitTotal, splitLines.length]);
+  }, [splitTotal]);
 
   const addSplitLine = () => setSplitLines(prev => [...prev, { key: Date.now(), account: '', description: '', amount: 0 }]);
   const removeSplitLine = (key) => setSplitLines(prev => prev.length > 1 ? prev.filter(l => l.key !== key) : prev);
   const updateSplitLine = (key, field, value) => setSplitLines(prev => prev.map(l => l.key === key ? { ...l, [field]: value } : l));
+
+  /* ── File attachment helpers ── */
+  const handleFileSelect = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPendingFile({ name: file.name, mime: file.type, data: reader.result || '' });
+    };
+    reader.readAsDataURL(file);
+    return false;
+  };
+
+  const uploadPendingFile = async (transactionId) => {
+    if (!pendingFile) return;
+    try {
+      await window.electronAPI.uploadDocument({
+        name: pendingFile.name,
+        mime: pendingFile.mime,
+        data: pendingFile.data,
+        category: 'check',
+        linkedId: transactionId,
+      });
+      setPendingFile(null);
+    } catch (e) {
+      console.error('File upload failed:', e);
+    }
+  };
+
+  const loadDocuments = async (linkedId) => {
+    try {
+      const list = await window.electronAPI.getDocuments('check', String(linkedId));
+      setAttachedDocs(Array.isArray(list) ? list : []);
+    } catch { setAttachedDocs([]); }
+  };
+
+  const openDocument = async (id) => {
+    const res = await window.electronAPI.openDocument(id);
+    if (!res?.success) message.error(res?.error || 'Unable to open file');
+  };
+
+  const deleteDocument = async (id) => {
+    const res = await window.electronAPI.deleteDocument(id);
+    if (res?.success) {
+      setAttachedDocs(prev => prev.filter(d => d.id !== id));
+      message.success('File deleted');
+    } else {
+      message.error(res?.error || 'Delete failed');
+    }
+  };
+  /* ── end file helpers ── */
 
   const amountWords = useMemo(() => {
     const n = Number(amount || 0);
@@ -393,11 +443,11 @@ const CheckPrinting = () => {
       setLoading(true);
       const userAmt = Number(values.amount || 0);
       const totalAmt = splitLines.length > 1 ? splitTotal : userAmt;
-      // Validate split lines match check amount
+      // Validate split lines match check amount — auto-correct if mismatch
       if (splitLines.length > 1 && userAmt > 0 && Math.abs(splitTotal - userAmt) > 0.005) {
-        message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not match the check amount (${cSym}${userAmt.toFixed(2)}). Please correct before saving.`);
-        setLoading(false);
-        return;
+        message.warning(`Split lines total (${cSym}${splitTotal.toFixed(2)}) did not match the check amount — Amount auto-corrected to ${cSym}${splitTotal.toFixed(2)}.`);
+        setAmount(splitTotal);
+        form.setFieldsValue({ amount: splitTotal });
       }
       // Validate at least one split line has an account selected
       const validSplits = splitLines.filter(l => Number(l.amount) > 0);
@@ -422,7 +472,9 @@ const CheckPrinting = () => {
         entered_by: 'system',
         splitLines: splitLines.filter(l => Number(l.amount) > 0).map(l => ({ account: l.account, description: l.description, amount: Number(l.amount) })),
       };
-      await window.electronAPI.insertTransaction(payload);
+      const res = await window.electronAPI.insertTransaction(payload);
+      const txId = res?.lastInsertRowid || res?.id || res?.invoiceId || null;
+      if (txId) await uploadPendingFile(txId);
       message.success(`Check #${values.checkNumber} recorded successfully`);
       if (!recordOnlyFlag) {
         const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
@@ -430,6 +482,8 @@ const CheckPrinting = () => {
       }
       form.resetFields();
       setSplitLines([{ key: 1, account: '', description: '', amount: 0 }]);
+      setPendingFile(null);
+      setAttachedDocs([]);
       form.setFieldsValue({ date: moment(), checkNumber: String(Number(values.checkNumber || 0) + 1) });
       loadData();
     } catch (e) {
@@ -444,9 +498,9 @@ const CheckPrinting = () => {
       setLoading(true);
       const totalAmt = splitLines.length > 1 ? splitTotal : Number(values.amount || 0);
       if (splitLines.length > 1 && Math.abs(splitTotal - totalAmt) > 0.005) {
-        message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not match the check amount (${cSym}${totalAmt.toFixed(2)}).`);
-        setLoading(false);
-        return;
+        message.warning(`Split lines total (${cSym}${splitTotal.toFixed(2)}) did not match the check amount — Amount auto-corrected to ${cSym}${splitTotal.toFixed(2)}.`);
+        setAmount(splitTotal);
+        form.setFieldsValue({ amount: splitTotal });
       }
       const payload = {
         date: values.date.format('YYYY-MM-DD'),
@@ -459,6 +513,7 @@ const CheckPrinting = () => {
         splitLines: splitLines.filter(l => Number(l.amount) > 0).map(l => ({ account: l.account, description: l.description, amount: Number(l.amount) })),
       };
       await window.electronAPI.updateTransaction(editingId, payload);
+      await uploadPendingFile(editingId);
       message.success(`Check #${values.checkNumber} updated`);
       if (!updateOnly) {
         const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
@@ -475,6 +530,8 @@ const CheckPrinting = () => {
 
   const cancelEdit = () => {
     setEditingId(null);
+    setPendingFile(null);
+    setAttachedDocs([]);
     form.resetFields();
     setSplitLines([{ key: 1, account: '', description: '', amount: 0 }]);
     form.setFieldsValue({ date: moment(), checkNumber: suggestedCheckNum });
@@ -519,6 +576,7 @@ const CheckPrinting = () => {
       : [{ key: 1, account: '', description: '', amount: Number(record.amount || 0) }];
     setSplitLines(existingLines);
     setEditingId(record.id);
+    loadDocuments(record.id);
     form.setFieldsValue({
       date: record.date ? moment(record.date) : moment(),
       accountId: Number(record.accountId) || undefined,
@@ -690,9 +748,27 @@ const CheckPrinting = () => {
                 </Form.Item>
               </div>
 
-              <Upload fileList={fileList} onChange={({ fileList: fl }) => setFileList(fl)} beforeUpload={() => false} maxCount={1} style={{ marginBottom: 12 }}>
-                <Button icon={<UploadOutlined />} size="small"><PaperClipOutlined /> Attach Receipt</Button>
-              </Upload>
+              {/* File Attachments */}
+              <div style={{ marginBottom: 12 }}>
+                {attachedDocs.length > 0 && (
+                  <div style={{ marginBottom: 6 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>Attached files:</Text>
+                    {attachedDocs.map(doc => (
+                      <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        <span style={{ fontSize: 12 }}>{doc.document_name}</span>
+                        <Button size="small" type="link" onClick={() => openDocument(doc.id)}>Open</Button>
+                        <Button size="small" type="link" danger onClick={() => deleteDocument(doc.id)}>Delete</Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Upload beforeUpload={handleFileSelect} showUploadList={false} accept="*/*">
+                  <Button icon={<UploadOutlined />} size="small"><PaperClipOutlined /> {pendingFile ? 'Change File' : 'Attach Receipt'}</Button>
+                </Upload>
+                {pendingFile && (
+                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>{pendingFile.name} (pending)</Text>
+                )}
+              </div>
 
               <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0' }}>Split Lines (Expense Accounts)</Divider>
               <div style={{ marginBottom: 12 }}>

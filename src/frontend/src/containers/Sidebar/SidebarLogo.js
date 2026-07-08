@@ -18,7 +18,7 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
   const [companyName, setCompanyName] = useState('');
 
   useEffect(() => {
-    (async () => {
+    const loadCompany = async () => {
       try {
         const info = await window.electronAPI?.getCompany?.();
         if (info?.logo && typeof info.logo === 'string' && info.logo.startsWith('data:')) {
@@ -26,7 +26,11 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
         }
         if (info?.name) setCompanyName(info.name);
       } catch {}
-    })();
+    };
+    loadCompany();
+    const handler = () => loadCompany();
+    window.addEventListener('company-updated', handler);
+    return () => window.removeEventListener('company-updated', handler);
   }, []);
 
   const isMobile = width < TAB_SIZE;

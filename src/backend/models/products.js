@@ -27,6 +27,8 @@ const Products = {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `).run();
+    // Add stock column if missing (migration for existing databases)
+    try { db.prepare("ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0").run(); } catch {}
   },
 
   insertProduct: async (type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock) => {

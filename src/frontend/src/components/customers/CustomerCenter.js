@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Tag, Input, Modal, Form } from 'antd';
+import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Tag, Input, Modal, Form, Select } from 'antd';
 import { UserOutlined, DollarOutlined, FileDoneOutlined, ClockCircleOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import COUNTRIES from '../../utils/countries';
+import { formatPhone, phoneInputHandler } from '../../utils/phone';
 
 const { TabPane } = Tabs;
 const statusColors = { Draft: 'default', Sent: 'processing', Pending: 'warning', Unpaid: 'warning', Paid: 'success', 'Partially Paid': 'orange', Overdue: 'error', Cancelled: 'default', Open: 'blue', Accepted: 'success', Declined: 'error', Expired: 'default', Invoiced: 'purple' };
@@ -95,8 +97,8 @@ const CustomerCenter = () => {
       const res = await window.electronAPI.insertCustomer(
         '', values.first_name || '', '', values.last_name || '', '', values.email || '',
         display, values.company_name || '', values.phone_number || '', values.mobile_number || '',
-        '', '', '', values.address1 || '', '', values.city || '', values.state || '',
-        values.postal_code || '', '', '', '', '', 'system', 0, null, 'Email', 'en', ''
+        '', '', '', values.address1 || '', values.address2 || '', values.city || '', values.state || '',
+        values.postal_code || '', values.country || '', '', '', '', 'system', 0, null, 'Email', 'en', ''
       );
       if (res && res.success) {
         message.success('Customer added');
@@ -118,7 +120,7 @@ const CustomerCenter = () => {
     { title: 'Name', key: 'name', sorter: (a, b) => custName(a).localeCompare(custName(b)),
       render: (_, record) => <Link to={`/main/customers/details/${record.id}`}>{custName(record)}</Link> },
     { title: 'Email', dataIndex: 'email', key: 'email' },
-    { title: 'Phone', dataIndex: 'phone_number', key: 'phone' },
+    { title: 'Phone', dataIndex: 'phone_number', key: 'phone', render: v => formatPhone(v) || '-' },
     { title: 'Balance', key: 'balance',
       render: (_, record) => `${cSym} ${Number(record.opening_balance || 0).toFixed(2)}` },
     { title: 'Actions', key: 'actions', width: 200,
@@ -222,18 +224,25 @@ const CustomerCenter = () => {
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
             <Form.Item name="email" label="Email" style={{ flex: 1 }}><Input type="email" placeholder="email@example.com" /></Form.Item>
-            <Form.Item name="phone_number" label="Phone" style={{ flex: 1 }}><Input placeholder="(XXX) XXX-XXXX" /></Form.Item>
-            <Form.Item name="mobile_number" label="Mobile" style={{ flex: 1 }}><Input placeholder="(XXX) XXX-XXXX" /></Form.Item>
+            <Form.Item name="phone_number" label="Phone" style={{ flex: 1 }}><Input placeholder="(XXX) XXX-XXXX" onChange={e => custForm.setFieldsValue({ phone_number: phoneInputHandler(e.target.value) })} /></Form.Item>
+            <Form.Item name="mobile_number" label="Mobile" style={{ flex: 1 }}><Input placeholder="(XXX) XXX-XXXX" onChange={e => custForm.setFieldsValue({ mobile_number: phoneInputHandler(e.target.value) })} /></Form.Item>
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
             <Form.Item name="company_name" label="Company" style={{ flex: 1 }}><Input /></Form.Item>
             <Form.Item name="address1" label="Address" style={{ flex: 1 }}><Input placeholder="123 Main St" /></Form.Item>
-            <Form.Item name="city" label="City" style={{ flex: 1 }}><Input /></Form.Item>
+            <Form.Item name="address2" label="Address Line 2" style={{ flex: 1 }}><Input placeholder="Suite 100" /></Form.Item>
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
+            <Form.Item name="city" label="City" style={{ flex: 1 }}><Input /></Form.Item>
             <Form.Item name="state" label="State" style={{ flex: 1 }}><Input /></Form.Item>
             <Form.Item name="postal_code" label="ZIP" style={{ flex: 1 }}><Input /></Form.Item>
-            <div style={{ flex: 1 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
+            <Form.Item name="country" label="Country" style={{ flex: 1 }}>
+              <Select showSearch placeholder="Select country" allowClear optionFilterProp="children">
+                {COUNTRIES.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
+              </Select>
+            </Form.Item>
           </div>
         </Form>
       </Modal>

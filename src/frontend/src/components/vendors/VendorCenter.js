@@ -4,6 +4,7 @@ import { ArrowLeftOutlined, ShopOutlined, DollarOutlined, FileTextOutlined, Cloc
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import { formatPhone, phoneInputHandler } from '../../utils/phone';
 
 const { TabPane } = Tabs;
 
@@ -130,6 +131,7 @@ const VendorCenter = () => {
       title: 'Phone',
       dataIndex: 'phone_number',
       key: 'phone',
+      render: v => formatPhone(v) || '-',
     },
     {
       title: 'Balance',
@@ -302,20 +304,28 @@ const VendorCenter = () => {
                   <Form.Item name="address1" label="Street Address">
                     <Input placeholder="123 Main St" />
                   </Form.Item>
+                  <Form.Item name="address2" label="Address Line 2">
+                    <Input placeholder="Suite 100" />
+                  </Form.Item>
                   <Row gutter={16}>
-                    <Col span={10}>
+                    <Col span={8}>
                       <Form.Item name="city" label="City">
                         <Input placeholder="City" />
                       </Form.Item>
                     </Col>
-                    <Col span={7}>
+                    <Col span={6}>
                       <Form.Item name="state" label="State">
                         <Input placeholder="State" />
                       </Form.Item>
                     </Col>
-                    <Col span={7}>
+                    <Col span={6}>
                       <Form.Item name="zip" label="ZIP Code">
                         <Input placeholder="00000" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={4}>
+                      <Form.Item name="country" label="Country">
+                        <Input placeholder="US" />
                       </Form.Item>
                     </Col>
                   </Row>

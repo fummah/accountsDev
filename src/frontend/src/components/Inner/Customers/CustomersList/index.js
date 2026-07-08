@@ -3,6 +3,7 @@ import {Table,Dropdown,Menu,Col, Row} from "antd";
 import { useRedirectToItem } from 'util/navigation';
 import { Input, Space } from 'antd';
 import { SearchOutlined,PrinterOutlined } from '@ant-design/icons';
+import { formatPhone } from '../../../../utils/phone';
 
 const CustomersList = ({ customers, loading = false, total = 0, page = 1, pageSize = 25, onTableChange, onSearch, onSelectCustomer, setAddUserState, setDetails, onDelete }) => {
   const redirectToItem = useRedirectToItem();
@@ -32,7 +33,7 @@ const CustomersList = ({ customers, loading = false, total = 0, page = 1, pageSi
       dataIndex: 'transfer',
       sorter: (a, b) => a.phone_number - b.phone_number,
       render: (text, record) => {
-        return <span className="gx-text-grey">{record.phone_number}</span>
+        return <span className="gx-text-grey">{formatPhone(record.phone_number)}</span>
       },
   
     },

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, Table, Button, Modal, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Tabs, Statistic, Popconfirm, Badge } from 'antd';
 import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useCurrency } from '../../utils/currency';
-import { formatPhone } from '../../utils/phone';
+import { formatPhone, phoneInputHandler } from '../../utils/phone';
 import COUNTRIES from '../../utils/countries';
 
 const { Option } = Select;
@@ -256,8 +256,8 @@ const SupplierVendorList = () => {
       </Card>
 
       {/* Add/Edit Drawer */}
-      <Drawer title={editingSupplier ? 'Edit Supplier / Vendor' : 'Add Supplier / Vendor'} width={640}
-        visible={drawerOpen} onClose={() => setDrawerOpen(false)}
+      {drawerOpen && <Drawer title={editingSupplier ? 'Edit Supplier / Vendor' : 'Add Supplier / Vendor'} width={640}
+        visible onClose={() => setDrawerOpen(false)}
         footer={
           <div style={{ textAlign: 'right' }}>
             <Button onClick={() => setDrawerOpen(false)} style={{ marginRight: 8 }}>Cancel</Button>
@@ -276,10 +276,10 @@ const SupplierVendorList = () => {
           </Row>
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={12}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="phone_number" label="Phone"><Input /></Form.Item></Col>
+            <Col span={12}><Form.Item name="phone_number" label="Phone"><Input onChange={e => form.setFieldsValue({ phone_number: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
           </Row>
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="mobile_number" label="Mobile"><Input /></Form.Item></Col>
+            <Col span={12}><Form.Item name="mobile_number" label="Mobile"><Input onChange={e => form.setFieldsValue({ mobile_number: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
             <Col span={12}><Form.Item name="website" label="Website"><Input /></Form.Item></Col>
           </Row>
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -317,7 +317,7 @@ const SupplierVendorList = () => {
           </Row>
           <Form.Item name="notes" label="Notes"><TextArea rows={3} /></Form.Item>
         </Form>
-      </Drawer>
+      </Drawer>}
 
       {/* Detail Drawer */}
       <Drawer title="Supplier / Vendor Details" width={560} visible={detailDrawerOpen} onClose={() => setDetailDrawerOpen(false)}>

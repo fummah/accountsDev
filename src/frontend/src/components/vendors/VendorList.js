@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, message } from 'antd';
+import { formatPhone } from '../../utils/phone';
 
 const VendorList = () => {
   const [vendors, setVendors] = useState([]);
@@ -23,7 +24,7 @@ const VendorList = () => {
   const columns = [
     { title: 'Name', dataIndex: 'display_name', key: 'display_name' },
     { title: 'Email', dataIndex: 'email', key: 'email' },
-    { title: 'Phone', dataIndex: 'phone_number', key: 'phone_number' },
+    { title: 'Phone', dataIndex: 'phone_number', key: 'phone_number', render: v => formatPhone(v) || '-' },
   ];
 
   return (

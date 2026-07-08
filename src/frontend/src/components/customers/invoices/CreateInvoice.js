@@ -3,6 +3,8 @@ import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Table, Spac
 import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined, SettingOutlined, MailOutlined } from '@ant-design/icons';
 import { handleDocumentPDF } from '../shared/generateDocumentPDF';
 import SendEmailModal from '../shared/SendEmailModal';
+import COUNTRIES from '../../../utils/countries';
+import { phoneInputHandler } from '../../../utils/phone';
 import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
@@ -80,7 +82,7 @@ const CreateInvoice = () => {
       const display = `${vals.first_name || ''} ${vals.last_name || ''}`.trim() || vals.email || 'New Customer';
       await window.electronAPI.insertCustomer?.(
         '', vals.first_name || '', '', vals.last_name || '', '', vals.email || '', display,
-        vals.company || '', vals.phone || '', '', '', '', '', '', '', '', '', '', '', '', '', '', null, 0, '', '', '', ''
+        vals.company || '', vals.phone || '', '', '', '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '', vals.postal_code || '', vals.country || '', '', '', '', null, 0, '', '', '', ''
       );
       message.success('Customer added');
       setCustModalOpen(false);
@@ -519,15 +521,27 @@ const CreateInvoice = () => {
         </div>
       </Card>
 
-      <Modal title="Add New Customer" visible={custModalOpen} onOk={handleAddCustomer} onCancel={() => setCustModalOpen(false)} okText="Add" destroyOnClose>
+      <Modal title="Add New Customer" visible={custModalOpen} onOk={handleAddCustomer} onCancel={() => setCustModalOpen(false)} okText="Add" destroyOnClose width={520}>
         <Form form={custForm} layout="vertical" preserve={false}>
-          <Row gutter={12}>
-            <Col span={12}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="last_name" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="last_name" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="company" label="Company"><Input /></Form.Item></Col>
           </Row>
-          <Form.Item name="company" label="Company"><Input /></Form.Item>
-          <Form.Item name="email" label="Email"><Input type="email" /></Form.Item>
-          <Form.Item name="phone" label="Phone"><Input /></Form.Item>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="phone" label="Phone"><Input onChange={e => custForm.setFieldsValue({ phone: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="address1" label="Street Address"><Input placeholder="123 Main St" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="address2" label="Address Line 2"><Input placeholder="Suite 100" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="city" label="City"><Input placeholder="New York" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="state" label="State"><Input placeholder="NY" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={12}><Form.Item name="postal_code" label="ZIP / Postal Code"><Input placeholder="10001" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="country" label="Country"><Select showSearch placeholder="Select country" allowClear optionFilterProp="children">{COUNTRIES.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}</Select></Form.Item></Col>
+          </Row>
         </Form>
       </Modal>
 

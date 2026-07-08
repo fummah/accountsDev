@@ -10,6 +10,8 @@ import {
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
+import COUNTRIES from '../../../utils/countries';
+import { phoneInputHandler } from '../../../utils/phone';
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -165,13 +167,17 @@ const EnterBill = ({ history, location, match }) => {
       const display = `${vals.first_name || ''} ${vals.last_name || ''}`.trim() || vals.company || 'New Supplier';
       await window.electronAPI.insertSupplier?.(
         '', vals.first_name || '', '', vals.last_name || '', '', vals.email || '', display,
-        vals.company || '', vals.phone || '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 0, '', null, ''
+        vals.company || '', vals.phone || '', '', '', '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '', vals.postal_code || '', vals.country || '', '', '', '', '', 0, '', null, ''
       );
       message.success('Supplier added');
       setSupplierModalOpen(false);
       supplierForm.resetFields();
       loadVendors();
-    } catch (e) { if (!e?.errorFields) message.error('Failed to add supplier'); }
+    } catch (e) {
+      if (!e?.errorFields) message.error('Failed to add supplier');
+      setSupplierModalOpen(false);
+      supplierForm.resetFields();
+    }
   };
 
   const handleTermsChange = (val) => {
@@ -495,15 +501,27 @@ const EnterBill = ({ history, location, match }) => {
         </Collapse>
       )}
 
-      <Modal title="Add New Vendor" visible={supplierModalOpen} onOk={handleAddSupplier} onCancel={() => setSupplierModalOpen(false)} okText="Add" destroyOnClose>
+      <Modal title="Add New Vendor" visible={supplierModalOpen} onOk={handleAddSupplier} onCancel={() => { setSupplierModalOpen(false); supplierForm.resetFields(); }} okText="Add" destroyOnClose width={520}>
         <Form form={supplierForm} layout="vertical" preserve={false}>
-          <Row gutter={12}>
-            <Col span={12}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="last_name" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="last_name" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="company" label="Company"><Input /></Form.Item></Col>
           </Row>
-          <Form.Item name="company" label="Company"><Input /></Form.Item>
-          <Form.Item name="email" label="Email"><Input type="email" /></Form.Item>
-          <Form.Item name="phone" label="Phone"><Input /></Form.Item>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="phone" label="Phone"><Input onChange={e => supplierForm.setFieldsValue({ phone: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="address1" label="Street Address"><Input placeholder="123 Main St" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="address2" label="Address Line 2"><Input placeholder="Suite 100" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="city" label="City"><Input placeholder="New York" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="state" label="State"><Input placeholder="NY" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={12}><Form.Item name="postal_code" label="ZIP / Postal Code"><Input placeholder="10001" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="country" label="Country"><Select showSearch placeholder="Select country" allowClear optionFilterProp="children">{COUNTRIES.map(c => <Option key={c} value={c}>{c}</Option>)}</Select></Form.Item></Col>
+          </Row>
         </Form>
       </Modal>
 

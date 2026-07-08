@@ -6,6 +6,8 @@ import SendEmailModal from '../shared/SendEmailModal';
 import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
+import COUNTRIES from '../../../utils/countries';
+import { phoneInputHandler } from '../../../utils/phone';
 
 const CreateQuote = () => {
   const { symbol: cSym } = useCurrency();
@@ -30,6 +32,39 @@ const CreateQuote = () => {
   const [prodForm] = Form.useForm();
   const [vatForm] = Form.useForm();
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [productCategories, setProductCategories] = useState([]);
+  const [catModalOpen, setCatModalOpen] = useState(false);
+  const [catForm] = Form.useForm();
+  const [incomeAccounts, setIncomeAccounts] = useState([]);
+
+  useEffect(() => {
+    const fetchAccts = async () => {
+      try {
+        const accs = await window.electronAPI.getChartOfAccounts?.();
+        const list = Array.isArray(accs) ? accs : (accs?.data || []);
+        setIncomeAccounts(list.filter(a => (a.accountType || a.type || '').toLowerCase().includes('income')));
+      } catch {}
+    };
+    fetchAccts();
+  }, []);
+
+  const loadCategories = async () => {
+    try {
+      const c = await window.electronAPI.getProductCategories?.();
+      setProductCategories(Array.isArray(c) ? c : []);
+    } catch {}
+  };
+
+  const handleAddCategory = async () => {
+    try {
+      const vals = await catForm.validateFields();
+      const res = await window.electronAPI.insertProductCategory?.(vals.cat_name);
+      if (res?.error) { message.error(res.error); return; }
+      setCatModalOpen(false);
+      catForm.resetFields();
+      loadCategories();
+    } catch (e) { if (!e?.errorFields) message.error('Failed to add category'); }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -38,13 +73,15 @@ const CreateQuote = () => {
     }).finally(() => setLoading(false));
   }, [id]);
 
+  useEffect(() => { if (prodModalOpen) loadCategories(); }, [prodModalOpen]);
+
   const handleAddCustomer = async () => {
     try {
       const vals = await custForm.validateFields();
       const display = `${vals.first_name || ''} ${vals.last_name || ''}`.trim() || vals.email || 'New Customer';
       await window.electronAPI.insertCustomer?.(
         '', vals.first_name || '', '', vals.last_name || '', '', vals.email || '', display,
-        vals.company || '', vals.phone || '', '', '', '', '', '', '', '', '', '', '', '', '', '', null, 0, '', '', '', ''
+        vals.company || '', vals.phone || '', '', '', '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '', vals.postal_code || '', vals.country || '', '', '', '', null, 0, '', '', '', ''
       );
       message.success('Customer added');
       setCustModalOpen(false);
@@ -61,8 +98,8 @@ const CreateQuote = () => {
     try {
       const vals = await prodForm.validateFields();
       await window.electronAPI.insertProduct?.(
-        'Product', vals.name || '', vals.sku || '', '', vals.description || '',
-        Number(vals.price) || 0, '', 0, 0, 0, null
+        vals.type || 'Product', vals.name || '', vals.sku || '', vals.category || '', vals.description || '',
+        Number(vals.price) || 0, '', 0, 0, 0, null, Number(vals.stock) || 0
       );
       message.success('Product added');
       setProdModalOpen(false);
@@ -433,24 +470,70 @@ const CreateQuote = () => {
         </div>
       </Card>
 
-      <Modal title="Add New Customer" visible={custModalOpen} onOk={handleAddCustomer} onCancel={() => setCustModalOpen(false)} okText="Add" destroyOnClose>
+      <Modal title="Add New Customer" visible={custModalOpen} onOk={handleAddCustomer} onCancel={() => setCustModalOpen(false)} okText="Add" destroyOnClose width={520}>
         <Form form={custForm} layout="vertical" preserve={false}>
-          <Row gutter={12}>
-            <Col span={12}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="last_name" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="last_name" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="company" label="Company"><Input /></Form.Item></Col>
           </Row>
-          <Form.Item name="company" label="Company"><Input /></Form.Item>
-          <Form.Item name="email" label="Email"><Input type="email" /></Form.Item>
-          <Form.Item name="phone" label="Phone"><Input /></Form.Item>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="phone" label="Phone"><Input onChange={e => custForm.setFieldsValue({ phone: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
+            <Col span={8}><Form.Item name="address1" label="Street Address"><Input placeholder="123 Main St" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={8}><Form.Item name="address2" label="Address Line 2"><Input placeholder="Suite 100" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="city" label="City"><Input placeholder="New York" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="state" label="State"><Input placeholder="NY" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={12}><Form.Item name="postal_code" label="ZIP / Postal Code"><Input placeholder="10001" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="country" label="Country"><Select showSearch placeholder="Select country" allowClear optionFilterProp="children">{COUNTRIES.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}</Select></Form.Item></Col>
+          </Row>
         </Form>
       </Modal>
 
-      <Modal title="Add New Product" visible={prodModalOpen} onOk={handleAddProduct} onCancel={() => setProdModalOpen(false)} okText="Add" destroyOnClose>
+      <Modal title="Add New Product" visible={prodModalOpen} onOk={handleAddProduct} onCancel={() => setProdModalOpen(false)} okText="Add" destroyOnClose afterClose={() => prodForm.resetFields()}>
         <Form form={prodForm} layout="vertical" preserve={false}>
-          <Form.Item name="name" label="Product Name" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="sku" label="SKU"><Input /></Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="type" label="Type" initialValue="Product" rules={[{ required: true }]}>
+                <Select>
+                  <Select.Option value="Product">Product</Select.Option>
+                  <Select.Option value="Service">Service</Select.Option>
+                  <Select.Option value="Raw Material">Raw Material</Select.Option>
+                  <Select.Option value="Asset">Asset</Select.Option>
+                  <Select.Option value="Bundle">Bundle</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="name" label="Product Name" rules={[{ required: true }]}><Input /></Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="category" label="Category">
+                <Select allowClear placeholder="Select category"
+                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Category</Button></>)}>
+                  {productCategories.map(c => <Select.Option key={c.id} value={c.name}>{c.name}</Select.Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="sku" label="SKU"><Input /></Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="description" label="Description"><Input /></Form.Item>
-          <Form.Item name="price" label="Selling Price" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix={cSym} /></Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="price" label="Selling Price" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix={cSym} /></Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="stock" label="Stock Qty"><InputNumber style={{ width: '100%' }} min={0} step={1} /></Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Modal>
 
@@ -458,6 +541,14 @@ const CreateQuote = () => {
         <Form form={vatForm} layout="vertical" preserve={false}>
           <Form.Item name="vat_name" label="Tax Name" rules={[{ required: true }]}><Input placeholder="e.g. Standard Rate" /></Form.Item>
           <Form.Item name="vat_percentage" label="Percentage (%)" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} max={100} step={0.5} /></Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal title="Add New Category" visible={catModalOpen} onOk={handleAddCategory} onCancel={() => setCatModalOpen(false)} okText="Add" destroyOnClose>
+        <Form form={catForm} layout="vertical" preserve={false}>
+          <Form.Item name="cat_name" label="Category Name" rules={[{ required: true, message: 'Enter category name' }]}>
+            <Input placeholder="e.g. Electronics" />
+          </Form.Item>
         </Form>
       </Modal>
 

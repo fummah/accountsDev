@@ -136,8 +136,17 @@ const QBImport = () => {
       const fn = pickHandler();
       const res = await fn(csv, { enteredBy: 'qb-import' });
       setResult(res);
-      if (res?.success) message.success('Import completed');
-      else message.error(res?.error || 'Import failed');
+      if (res?.success) {
+        let msg = `Import completed — ${res.inserted || 0} records`;
+        if (res.unmappedColumns?.length) {
+          msg += `. Unrecognized columns: ${res.unmappedColumns.join(', ')}`;
+          message.warning(msg);
+        } else {
+          message.success(msg);
+        }
+      } else {
+        message.error(res?.error || 'Import failed');
+      }
     } finally {
       setLoading(false);
     }
