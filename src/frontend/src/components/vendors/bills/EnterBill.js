@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   Card, Form, Input, Button, DatePicker, Select, message, Divider, Modal,
-  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Spin, Collapse, Upload, Statistic
+  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Spin, Collapse, Statistic
 } from 'antd';
 import {
   ArrowLeftOutlined, PlusOutlined, MinusCircleOutlined, SaveOutlined,
   FileTextOutlined, DollarOutlined, SwapOutlined, CheckCircleOutlined,
-  PaperClipOutlined, UploadOutlined, BankOutlined, ShopOutlined, ReloadOutlined, DownloadOutlined
+  PaperClipOutlined, UploadOutlined, BankOutlined, ShopOutlined, ReloadOutlined, DownloadOutlined,
+  PrinterOutlined, EyeOutlined
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
@@ -62,7 +63,11 @@ const EnterBill = ({ history, location, match }) => {
   const [payAmount, setPayAmount] = useState(0);
   const [billData, setBillData] = useState(null);
   const [paying, setPaying] = useState(false);
-  const [fileList, setFileList] = useState([]);
+  const [paidCheck, setPaidCheck] = useState(null);
+  const [printModalVisible, setPrintModalVisible] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [billDocuments, setBillDocuments] = useState([]);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     loadVendors();
@@ -141,6 +146,11 @@ const EnterBill = ({ history, location, match }) => {
         if (data.lines && data.lines.length > 0) {
           setLines(data.lines.map((l, i) => ({ key: i, category: l.category || '', description: l.description || '', amount: Number(l.amount) || 0 })));
         }
+        // Load attached documents
+        try {
+          const docs = await window.electronAPI.getDocuments('bill', id);
+          setBillDocuments(Array.isArray(docs) ? docs : []);
+        } catch { setBillDocuments([]); }
       }
     } catch (e) {
       console.error('Failed to load bill for editing:', e);
@@ -203,6 +213,16 @@ const EnterBill = ({ history, location, match }) => {
     form.setFieldsValue({ dueDate: moment(billDate).add(val, 'days') });
   };
 
+  const handleOpenDocument = async (doc) => {
+    if (!doc) return;
+    try {
+      await window.electronAPI.openDocument(doc.id);
+    } catch (e) {
+      console.error('Failed to open document:', e);
+      message.error('Could not open file');
+    }
+  };
+
   const addLine = () => setLines([...lines, { key: Date.now(), category: '', description: '', amount: 0 }]);
   const removeLine = (key) => { if (lines.length > 1) setLines(lines.filter(l => l.key !== key)); };
   const updateLine = (key, field, value) => setLines(lines.map(l => l.key === key ? { ...l, [field]: value } : l));
@@ -247,13 +267,40 @@ const EnterBill = ({ history, location, match }) => {
       if (isEdit) {
         res = await window.electronAPI.updateExpense({ id: Number(editId), payee, payment_account, ref_no, category, payment_method, entered_by, payment_date, approval_status, memo, due_date, terms, lines: expenseLines });
       } else {
-        res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status, expenseLines);
+        res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status, expenseLines, due_date, memo, terms);
       }
       if (res && res.success) {
+        // Upload file attachment if present
+        const expenseId = Number(res.expenseId || res.id || (res.result && res.result.lastInsertRowid) || 0);
+        if (selectedFile && expenseId > 0) {
+          try {
+            const reader = new FileReader();
+            const base64 = await new Promise((resolve, reject) => {
+              reader.onload = () => resolve(reader.result);
+              reader.onerror = () => reject(new Error('FileReader failed'));
+              reader.readAsDataURL(selectedFile);
+            });
+            const uploadRes = await window.electronAPI.uploadDocument({
+              name: selectedFile.name,
+              mime: selectedFile.type || 'application/octet-stream',
+              data: base64,
+              category: 'bill',
+              linkedId: expenseId,
+              enteredBy: 'system',
+            });
+            if (!uploadRes?.success) {
+              console.warn('File upload returned failure:', uploadRes?.error);
+            }
+          } catch (uploadErr) {
+            console.warn('File upload failed (non-fatal):', uploadErr);
+          }
+        }
         message.success(isEdit ? 'Bill updated' : 'Bill saved — recorded as Accounts Payable');
         if (!isEdit) {
           form.resetFields();
           setLines([{ key: Date.now(), category: '', description: '', amount: 0 }]);
+          setSelectedFile(null);
+          setBillDocuments([]);
         }
         if (history && history.push) history.push('/main/vendors/bills/tracker');
       } else {
@@ -320,6 +367,7 @@ const EnterBill = ({ history, location, match }) => {
         if (!creditRes?.success) message.warning(creditRes?.error || 'Failed to apply credit');
       }
       const cashAmount = payAmount - creditAmt;
+      let checkResult = null;
       if (cashAmount > 0.005) {
         const res = await window.electronAPI.billPay({
           expenseId: Number(editId),
@@ -331,15 +379,34 @@ const EnterBill = ({ history, location, match }) => {
           message.error(res?.error || 'Failed to pay bill');
           return;
         }
+        if (res.check) checkResult = res.check;
       }
-      message.success('Payment recorded');
       setPayModalOpen(false);
       payForm.resetFields();
       setSelectedCredit(null);
       await loadBill(editId);
+      if (checkResult) {
+        setPaidCheck(checkResult);
+        setPrintModalVisible(true);
+      } else {
+        message.success('Payment recorded');
+      }
     } catch (err) {
       message.error('Failed to process payment');
     } finally { setPaying(false); }
+  };
+
+  const handlePrintNow = () => {
+    setPrintModalVisible(false);
+    if (paidCheck) {
+      history.push('/main/accountant/check-printing');
+    }
+  };
+
+  const handlePrintLater = () => {
+    setPrintModalVisible(false);
+    setPaidCheck(null);
+    message.success('Check saved. Print later from Check Printing screen.');
   };
 
   const allAccounts = accounts.filter(a => ACCOUNT_TYPES_ALLOWED.includes(a.accountType || a.type));
@@ -425,14 +492,23 @@ const EnterBill = ({ history, location, match }) => {
         {/* File Attachment */}
         <div style={{ marginBottom: 16 }}>
           <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}><PaperClipOutlined style={{ marginRight: 4 }} />Attachment (Vendor Invoice File)</Text>
-          <Upload
-            fileList={fileList}
-            onChange={({ fileList: fl }) => setFileList(fl)}
-            beforeUpload={() => false}
-            maxCount={1}
-          >
-            <Button icon={<UploadOutlined />}>Select File</Button>
-          </Upload>
+          <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={(e) => {
+            const file = e.target.files && e.target.files[0];
+            setSelectedFile(file || null);
+          }} />
+          <Space>
+            <Button icon={<UploadOutlined />} onClick={() => fileInputRef.current?.click()}>Select File</Button>
+            {selectedFile && <Tag closable onClose={() => setSelectedFile(null)}>{selectedFile.name}</Tag>}
+          </Space>
+          {billDocuments.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              {billDocuments.map(doc => (
+                <Tag key={doc.id} style={{ cursor: 'pointer' }} onClick={() => handleOpenDocument(doc)}>
+                  <EyeOutlined style={{ marginRight: 4 }} />{doc.document_name || doc.file_path || doc.random_number || 'View File'}
+                </Tag>
+              ))}
+            </div>
+          )}
         </div>
 
         <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0 16px' }}>
@@ -684,6 +760,30 @@ const EnterBill = ({ history, location, match }) => {
             })()}
           </div>
         </Form>
+      </Modal>
+
+      {/* Print Check Modal */}
+      <Modal
+        title={<span><PrinterOutlined style={{ marginRight: 8 }} />Print Check?</span>}
+        visible={printModalVisible}
+        onCancel={handlePrintLater}
+        footer={[
+          <Button key="later" onClick={handlePrintLater}>Print Later</Button>,
+          <Button key="now" type="primary" icon={<PrinterOutlined />} onClick={handlePrintNow}>Print Now</Button>,
+        ]}
+        width={460}
+        destroyOnClose
+      >
+        {paidCheck && (
+          <div>
+            <Text>Check <strong>#{paidCheck.checkNumber}</strong> for <strong>{cSym}{Number(paidCheck.amount).toFixed(2)}</strong> to <strong>{paidCheck.payee}</strong> was created.</Text>
+            <Divider />
+            <div style={{ fontSize: 12, color: '#666', lineHeight: 1.8 }}>
+              <div><strong>Print Now:</strong> Opens the check in the Check Printing screen where you can preview and print. Marks as Printed.</div>
+              <div style={{ marginTop: 6 }}><strong>Print Later:</strong> Saves the check as unprinted. Print later from Check Printing.</div>
+            </div>
+          </div>
+        )}
       </Modal>
       </Card>
     </div>

@@ -25,6 +25,8 @@ const MakeDeposits = () => {
   const [selectedPayments, setSelectedPayments] = useState([]);
   const [allAccounts, setAllAccounts] = useState([]);
   const [payors, setPayors] = useState([]);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [accountForm] = Form.useForm();
 
   useEffect(() => { loadData(); }, []);
 
@@ -67,6 +69,29 @@ const MakeDeposits = () => {
     } catch { setAccounts([]); setDepositHistory([]); }
   };
 
+  const handleAddAccount = async () => {
+    try {
+      const vals = await accountForm.validateFields();
+      const payload = {
+        name: vals.name,
+        type: vals.type || 'Bank',
+        number: vals.code || '',
+        description: vals.description || '',
+        status: 'Active',
+        entered_by: 'system',
+      };
+      const res = await window.electronAPI.insertChartAccount(payload);
+      if (res?.success) {
+        message.success('Account created');
+        setAccountModalOpen(false);
+        accountForm.resetFields();
+        loadData();
+      } else {
+        message.error(res?.error || 'Failed to create account');
+      }
+    } catch (e) { if (!e?.errorFields) message.error('Failed to create account'); }
+  };
+
   const onFormValuesChange = (_, allValues) => {
     const itms = allValues.items || [];
     setFormItems(itms);
@@ -90,18 +115,15 @@ const MakeDeposits = () => {
       if (activeTab === 'pending') {
         // Deposit existing payments from Undeposited Funds
         const totalAmt = selectedPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
-        const allocations = selectedPayments.map(p => ({
-          accountId: Number(values.depositToAccountId) || Number(values.accountId),
-          amount: Number(p.amount || 0),
-          description: p.description || `Payment from ${p.customerName || ''}`,
-        }));
+        // No per-payment allocations needed — each payment already has its category from origination.
+        // The backend credits Undeposited Funds when paymentIds is provided.
         const res = await window.electronAPI.createDeposit({
           bankAccountId: Number(values.accountId),
           date: values.date.format('YYYY-MM-DD'),
           reference: values.reference || '',
           memo: values.memo || 'Deposit — existing payments',
           paymentIds: selectedPayments.map(p => p.id),
-          allocations,
+          allocations: [],
         });
         if (res?.success) {
           message.success(`Deposited ${cSym} ${fmt(totalAmt)} (${selectedPayments.length} payment(s))`);
@@ -253,7 +275,18 @@ const MakeDeposits = () => {
                 <Col xs={24} sm={12}>
                   <Form.Item name="accountId" label="Deposit To (Bank Account)" rules={[{ required: true, message: 'Select bank account' }]}>
                     <Select showSearch optionFilterProp="children" placeholder="Select bank account"
-                      onChange={(val) => setSelectedAccountId(val)}>
+                      onChange={(val) => setSelectedAccountId(val)}
+                      dropdownRender={menu => (
+                        <>
+                          {menu}
+                          <Divider style={{ margin: '4px 0' }} />
+                          <Button type="link" size="small" icon={<PlusOutlined />}
+                            onMouseDown={e => { e.preventDefault(); setAccountModalOpen(true); }}
+                            style={{ width: '100%', textAlign: 'left' }}>
+                            Add New Bank Account
+                          </Button>
+                        </>
+                      )}>
                       {bankAccounts.map(a => (
                         <Option key={String(a.id)} value={String(a.id)}>{a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}</Option>
                       ))}
@@ -304,8 +337,8 @@ const MakeDeposits = () => {
                     {fields.map((field) => (
                       <Row key={field.key} gutter={8} style={{ marginBottom: 8 }} align="middle">
                         <Col xs={24} sm={4}>
-                          <Form.Item {...field} name={[field.name, 'receivedFrom']} noStyle>
-                            <Select showSearch optionFilterProp="children" placeholder="Customer/Vendor" allowClear style={{ width: '100%' }}>
+                          <Form.Item {...field} name={[field.name, 'receivedFrom']} noStyle rules={[{ required: true, message: 'Customer/Vendor required' }]}>
+                            <Select showSearch optionFilterProp="children" placeholder="Customer/Vendor" style={{ width: '100%' }}>
                               {payors.map(p => <Option key={p.id} value={p.name}>{p.name} ({p.type})</Option>)}
                             </Select>
                           </Form.Item>
@@ -369,7 +402,18 @@ const MakeDeposits = () => {
               <Row gutter={16}>
                 <Col xs={24} sm={12}>
                   <Form.Item name="accountId" label="Deposit To (Bank Account)" rules={[{ required: true, message: 'Select bank account' }]}>
-                    <Select showSearch optionFilterProp="children" placeholder="Select bank account">
+                    <Select showSearch optionFilterProp="children" placeholder="Select bank account" style={{ width: '100%' }}
+                      dropdownRender={menu => (
+                        <>
+                          {menu}
+                          <Divider style={{ margin: '4px 0' }} />
+                          <Button type="link" size="small" icon={<PlusOutlined />}
+                            onMouseDown={e => { e.preventDefault(); setAccountModalOpen(true); }}
+                            style={{ width: '100%', textAlign: 'left' }}>
+                            Add New Bank Account
+                          </Button>
+                        </>
+                      )}>
                       {bankAccounts.map(a => (
                         <Option key={String(a.id)} value={String(a.id)}>{a.accountName || a.name}</Option>
                       ))}
@@ -465,6 +509,35 @@ const MakeDeposits = () => {
           ) : null}
         />
       </Card>
+
+      <Modal title="New Account" visible={accountModalOpen} onOk={handleAddAccount} onCancel={() => setAccountModalOpen(false)} okText="Create" destroyOnClose>
+        <Form form={accountForm} layout="vertical" preserve={false}>
+          <Form.Item name="name" label="Account Name" rules={[{ required: true, message: 'Enter account name' }]}>
+            <Input placeholder="e.g. Checking Account" />
+          </Form.Item>
+          <Form.Item name="type" label="Type" initialValue="Bank" rules={[{ required: true }]}>
+            <Select>
+              <Option value="Bank">Bank</Option>
+              <Option value="Cash">Cash</Option>
+              <Option value="Expense">Expense</Option>
+              <Option value="Cost of Goods Sold">Cost of Goods Sold</Option>
+              <Option value="Other Expense">Other Expense</Option>
+              <Option value="Asset">Asset</Option>
+              <Option value="Inventory">Inventory</Option>
+              <Option value="Liability">Liability</Option>
+              <Option value="Income">Income</Option>
+              <Option value="Other Income">Other Income</Option>
+              <Option value="Equity">Equity</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="code" label="Account Code">
+            <Input placeholder="e.g. 1010" />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea rows={2} placeholder="Optional description" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

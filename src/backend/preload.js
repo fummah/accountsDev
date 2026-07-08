@@ -46,7 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getExpensesPaginated: (page, pageSize, search) => ipcRenderer.invoke('get-expenses-paginated', page, pageSize, search),
   getSingleExpense: (id) => ipcRenderer.invoke('get-single-expense', id),
   updateExpense: (expenseData) => ipcRenderer.invoke('updateexpense',expenseData),
-  insertExpense: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => ipcRenderer.invoke('insert-expense', payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines),
+  insertExpense: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines,due_date,memo,terms) => ipcRenderer.invoke('insert-expense', payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines,due_date,memo,terms),
   createExpenseWithApproval: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => 
     ipcRenderer.invoke('expense-create-with-approval', payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines),
   markExpensePaid: (id) => ipcRenderer.invoke('mark-expense-paid', id),

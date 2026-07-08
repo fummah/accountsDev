@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Divider, Alert, Tooltip, Modal, Statistic, Upload } from 'antd';
+import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Divider, Alert, Tooltip, Modal, Statistic, Spin, Upload } from 'antd';
 import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, StopOutlined, PlusOutlined, PaperClipOutlined, UploadOutlined, EditOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
@@ -85,7 +85,7 @@ const CheckPrinting = () => {
       const txns = Array.isArray(txnRes) ? txnRes : [];
       const checks = txns.filter(t => (t.type || '').toLowerCase() === 'check' || (t.reference || '').match(/^\d+$/))
         .map((t, i) => ({ ...t, key: t.id || i }))
-        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       // Enrich checks with split lines from journal entries (single API call)
       try {
         const journalEntries = await window.electronAPI.journalList?.().catch(() => []);
@@ -118,6 +118,7 @@ const CheckPrinting = () => {
   const [pendingFile, setPendingFile] = useState(null);
   const [attachedDocs, setAttachedDocs] = useState([]);
   const [editingId, setEditingId] = useState(null);
+  const [togglingPrintedId, setTogglingPrintedId] = useState(null);
 
   const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
 
@@ -612,10 +613,13 @@ const CheckPrinting = () => {
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: (v, r) => <Text strong>${fmt(v || r.debit || 0)}</Text> },
     { title: 'Printed', key: 'printed', width: 110, render: (_, r) => (
       <Tag color={r.printed ? 'green' : 'orange'} style={{ cursor: 'pointer' }} onClick={async () => {
+        if (togglingPrintedId === r.id) return;
+        setTogglingPrintedId(r.id);
         await window.electronAPI.markCheckPrinted?.(r.id, r.printed ? 0 : 1);
-        loadData();
+        await loadData();
+        setTogglingPrintedId(null);
       }}>
-        {r.printed ? 'Printed' : 'Not Printed'}
+        {togglingPrintedId === r.id ? <Spin size="small" /> : (r.printed ? 'Printed' : 'Not Printed')}
       </Tag>
     )},
     { title: 'Status', key: 'status', width: 80, render: (_, r) => {

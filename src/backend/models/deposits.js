@@ -40,8 +40,10 @@ const Deposits = {
     const COA = require('./chartOfAccounts');
     const JournalEntries = require('./journalEntries');
 
-    const totalAmount = (allocations || []).reduce((s, a) => s + Number(a.amount || 0), 0);
-    if (!totalAmount) throw new Error('Deposit must have at least one allocation');
+    const totalAmount = Array.isArray(paymentIds) && paymentIds.length > 0
+      ? db.prepare(`SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE id IN (${paymentIds.map(() => '?').join(',')})`).get(...paymentIds).total
+      : (allocations || []).reduce((s, a) => s + Number(a.amount || 0), 0);
+    if (!totalAmount) throw new Error('Deposit must have at least one allocation or payment');
 
     const result = db.transaction(() => {
       // 1. Create deposit record

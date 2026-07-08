@@ -163,6 +163,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <span>Bank Statements</span>
                   </Link>
                 </Menu.Item>
+                <Menu.Item key="main/banking/deposits">
+                  <Link to="/main/banking/deposits">
+                    <i className="icon icon-card"/>
+                    <span>Make Deposits</span>
+                  </Link>
+                </Menu.Item>
               </SubMenu>
 
               {/* Accounting sub-group */}

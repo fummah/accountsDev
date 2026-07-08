@@ -49,10 +49,10 @@ const Expenses = {
   }, 
   
   // Insert a new Expenses
-  insertExpense: async (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => {
+  insertExpense: async (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines,due_date,memo,terms) => {
     try {
-    const stmt = db.prepare('INSERT INTO expenses (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    const result = await stmt.run(payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status);
+    const stmt = db.prepare('INSERT INTO expenses (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,due_date,memo,terms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const result = await stmt.run(payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,due_date || null,memo || null,terms || 30);
 
     if (result.changes > 0) {
       const expenseId = result.lastInsertRowid;

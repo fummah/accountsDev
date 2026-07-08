@@ -223,7 +223,7 @@ const SupplierVendorList = () => {
           <Popconfirm title="Delete this supplier?" onConfirm={() => handleDelete(r.id)} okText="Yes" cancelText="No">
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
-          <Tooltip title="Enter Bill"><Button size="small" type="primary" ghost icon={<FileAddOutlined />} onClick={() => history.push(`/main/vendors/bills/new?vendor=${r.id}`)}>Bill</Button></Tooltip>
+          <Tooltip title="Enter Bill"><Button size="small" icon={<FileAddOutlined />} onClick={() => history.push(`/main/vendors/bills/new?vendor=${r.id}`)}>Bill</Button></Tooltip>
         </Space>
       )
     },

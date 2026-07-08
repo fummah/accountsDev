@@ -323,12 +323,12 @@ function detectCCReclassification(vendorId, expenseLines) {
 }
 
 // Handler to insert an expense (auto-applies approval policy when configured)
-safeHandle('insert-expense', async (event, payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => {
+safeHandle('insert-expense', async (event, payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines,due_date,memo,terms) => {
   try {
     const totalAmount = Array.isArray(expenseLines) ? expenseLines.reduce((s, l) => s + (Number(l.amount) || 0), 0) : 0;
     const policy = Approvals.findMatchingPolicy('expense', totalAmount);
     const statusToUse = policy ? 'Pending' : (approval_status || 'Approved');
-    const res = await Expenses.insertExpense(payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,statusToUse,expenseLines);
+    const res = await Expenses.insertExpense(payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,statusToUse,expenseLines,due_date,memo,terms);
     if (res && res.success && policy) {
       try {
         await Approvals.createApproval({

@@ -136,7 +136,7 @@ const BillTracker = () => {
               content: `Check #${res.check.checkNumber} for ${cSym}${Number(res.check.amount).toFixed(2)} to ${res.check.payee}. Would you like to print this check?`,
               okText: 'Print',
               cancelText: 'Skip',
-              onOk: () => { history.push('/main/accountant/checks'); },
+              onOk: () => { history.push('/main/accountant/check-printing'); },
             });
           }
         } else {
