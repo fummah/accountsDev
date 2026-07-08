@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useHistory } from 'react-router-dom';
 import { Card, Table, Button, Modal, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Tabs, Statistic, Popconfirm, Badge } from 'antd';
-import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, DollarOutlined, ClockCircleOutlined, FileTextOutlined, FileAddOutlined } from '@ant-design/icons';
+import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { formatPhone, phoneInputHandler } from '../../utils/phone';
 import COUNTRIES from '../../utils/countries';
@@ -10,6 +12,7 @@ const { TabPane } = Tabs;
 const { TextArea } = Input;
 
 const SupplierVendorList = () => {
+  const history = useHistory();
   const { symbol: cSym } = useCurrency();
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -20,6 +23,26 @@ const SupplierVendorList = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [form] = Form.useForm();
+  const [billStats, setBillStats] = useState({ totalPayables: 0, overdueAmount: 0, unpaidBills: 0 });
+
+  const loadBillStats = useCallback(async () => {
+    try {
+      const data = await window.electronAPI.getAllExpenses();
+      const all = Array.isArray(data) ? data : (data?.data || data?.all || []);
+      // Filter to bill/supplier expenses only
+      const bills = all.filter(e => (e.category || '').toLowerCase() === 'bill' || (e.category || '').toLowerCase() === 'supplier');
+      const unpaid = bills.filter(b => (b.approval_status || '').toLowerCase() !== 'paid' && (b.approval_status || '').toLowerCase() !== 'draft');
+      const totalPayables = unpaid.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+      const unpaidBills = unpaid.length;
+      const overdueAmount = unpaid.reduce((s, b) => {
+        const due = b.due_date || b.payment_date;
+        return s + (due && moment(due).isBefore(moment(), 'day') ? (Number(b.amount) || 0) : 0);
+      }, 0);
+      setBillStats({ totalPayables, overdueAmount, unpaidBills });
+    } catch (_) {
+      setBillStats({ totalPayables: 0, overdueAmount: 0, unpaidBills: 0 });
+    }
+  }, []);
 
   const loadSuppliers = useCallback(async () => {
     setLoading(true);
@@ -35,7 +58,7 @@ const SupplierVendorList = () => {
     }
   }, []);
 
-  useEffect(() => { loadSuppliers(); }, [loadSuppliers]);
+  useEffect(() => { loadSuppliers(); loadBillStats(); }, [loadSuppliers, loadBillStats]);
 
   const filtered = useMemo(() => {
     let list = suppliers;
@@ -127,7 +150,7 @@ const SupplierVendorList = () => {
           '', '', vals.website || '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '',
           vals.postal_code || '', vals.country || '', vals.supplier_terms || '', vals.business_number || '',
           vals.account_number || '', vals.expense_category || '', Number(vals.opening_balance) || 0,
-          vals.as_of || null, 'system', vals.notes || ''
+          vals.as_of || null, 'system', vals.notes || '', vals.vendor_type || 'Regular'
         );
         message.success('Supplier/Vendor added');
       }
@@ -189,7 +212,7 @@ const SupplierVendorList = () => {
       render: (v) => <Tag color={(v || 'Active') === 'Active' ? 'green' : 'red'}>{v || 'Active'}</Tag>
     },
     {
-      title: 'Actions', key: 'actions', width: 180,
+      title: 'Actions', key: 'actions', width: 260,
       render: (_, r) => (
         <Space size="small">
           <Tooltip title="View"><Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(r)} /></Tooltip>
@@ -200,6 +223,7 @@ const SupplierVendorList = () => {
           <Popconfirm title="Delete this supplier?" onConfirm={() => handleDelete(r.id)} okText="Yes" cancelText="No">
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
+          <Tooltip title="Enter Bill"><Button size="small" type="primary" ghost icon={<FileAddOutlined />} onClick={() => history.push(`/main/vendors/bills/new?vendor=${r.id}`)}>Bill</Button></Tooltip>
         </Space>
       )
     },
@@ -235,6 +259,23 @@ const SupplierVendorList = () => {
           <Col span={6}>
             <Card size="small" style={{ textAlign: 'center' }}>
               <Statistic title="Filtered" value={filtered.length} />
+            </Card>
+          </Col>
+        </Row>
+        <Row gutter={16} style={{ marginBottom: 16, flexDirection: 'row', flexWrap: 'wrap' }}>
+          <Col span={8}>
+            <Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #722ed1' }}>
+              <Statistic title="Total Payables" value={billStats.totalPayables} precision={2} prefix={cSym} valueStyle={{ color: '#722ed1' }} />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #cf1322' }}>
+              <Statistic title="Overdue Amount" value={billStats.overdueAmount} precision={2} prefix={cSym} valueStyle={{ color: '#cf1322' }} />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #fa8c16' }}>
+              <Statistic title="Unpaid Bills" value={billStats.unpaidBills} prefix={<FileTextOutlined />} valueStyle={{ color: '#fa8c16' }} />
             </Card>
           </Col>
         </Row>
@@ -311,6 +352,8 @@ const SupplierVendorList = () => {
                   <Option value="1099">1099 Vendor</Option>
                   <Option value="Contractor">Contractor</Option>
                   <Option value="Government">Government</Option>
+                  <Option value="Credit Card">Credit Card</Option>
+                  <Option value="Loan Lender">Loan Lender</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -340,7 +383,7 @@ const SupplierVendorList = () => {
                 <p><strong>Address:</strong> {[viewingSupplier.address1, viewingSupplier.city, viewingSupplier.state, viewingSupplier.postal_code, viewingSupplier.country].filter(Boolean).join(', ') || '-'}</p>
                 <p><strong>Payment Terms:</strong> {viewingSupplier.supplier_terms || '-'}</p>
                 <p><strong>Business #:</strong> {viewingSupplier.business_number || '-'}</p>
-                <p><strong>Vendor Type:</strong> <Tag color={viewingSupplier.vendor_type === '1099' ? 'red' : viewingSupplier.vendor_type === 'Contractor' ? 'blue' : 'default'}>{viewingSupplier.vendor_type || 'Regular'}</Tag></p>
+                <p><strong>Vendor Type:</strong> <Tag color={viewingSupplier.vendor_type === '1099' ? 'red' : viewingSupplier.vendor_type === 'Contractor' ? 'blue' : viewingSupplier.vendor_type === 'Credit Card' ? 'purple' : viewingSupplier.vendor_type === 'Loan Lender' ? 'volcano' : 'default'}>{viewingSupplier.vendor_type || 'Regular'}</Tag></p>
                 <p><strong>Notes:</strong> {viewingSupplier.notes || '-'}</p>
               </TabPane>
               <TabPane tab="Expenses" key="2">

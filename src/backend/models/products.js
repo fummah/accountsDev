@@ -29,6 +29,14 @@ const Products = {
     `).run();
     // Add stock column if missing (migration for existing databases)
     try { db.prepare("ALTER TABLE products ADD COLUMN stock INTEGER DEFAULT 0").run(); } catch {}
+    // Create product_types table
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS product_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
   },
 
   insertProduct: async (type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock) => {
@@ -137,6 +145,34 @@ const Products = {
       return { success: result.changes > 0 };
     } catch (error) {
       console.error('Error deleting category:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  getAllTypes: () => {
+    const stmt = db.prepare('SELECT * FROM product_types ORDER BY name ASC');
+    return stmt.all();
+  },
+
+  insertType: (name) => {
+    try {
+      const result = db.prepare('INSERT INTO product_types (name) VALUES (?)').run(name);
+      return { success: true, id: result.lastInsertRowid };
+    } catch (error) {
+      if (error.message && error.message.includes('UNIQUE')) {
+        return { success: false, error: 'Type already exists' };
+      }
+      console.error('Error inserting type:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  deleteType: (id) => {
+    try {
+      const result = db.prepare('DELETE FROM product_types WHERE id = ?').run(id);
+      return { success: result.changes > 0 };
+    } catch (error) {
+      console.error('Error deleting type:', error);
       return { success: false, error: error.message };
     }
   },

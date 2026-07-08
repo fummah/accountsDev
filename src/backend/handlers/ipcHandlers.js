@@ -264,10 +264,10 @@ const registerIpcHandlers = () => {
 
   // Handler to insert a supplier
 safeHandle('insert-supplier', async (event, title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-    fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes) => {
+    fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes,vendor_type) => {
     try {
       return await Suppliers.insertSupplier(title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-        fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes);
+        fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes,vendor_type);
     } catch (error) {
       console.error('Error inserting supplier:', error);
       return { error: error.message };
@@ -301,6 +301,27 @@ safeHandle('get-single-expense', async (event, id) => {
   }
 });
 
+// ── Helper: detect Credit Card / Loan Reclassification Bill ─────────────
+// Returns true when ALL conditions are met:
+//   1. Vendor vendor_type is 'Credit Card' or 'Loan Lender'
+//   2. All expense lines use a COA account of type 'Credit Card' or 'Loan'
+//   3. No expense/asset accounts are used
+function detectCCReclassification(vendorId, expenseLines) {
+  const db = require('../models/dbmgr');
+  const vendor = db.prepare("SELECT vendor_type FROM suppliers WHERE id = ?").get(Number(vendorId));
+  if (!vendor || (vendor.vendor_type !== 'Credit Card' && vendor.vendor_type !== 'Loan Lender')) return false;
+  let hasValidLine = false;
+  for (const line of expenseLines) {
+    const amt = Number(line.amount) || 0;
+    if (amt <= 0) continue;
+    if (!line.category) return false;
+    const acct = db.prepare("SELECT type FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status = 'Active' LIMIT 1").get(line.category);
+    if (!acct || (acct.type !== 'Credit Card' && acct.type !== 'Loan')) return false;
+    hasValidLine = true;
+  }
+  return hasValidLine;
+}
+
 // Handler to insert an expense (auto-applies approval policy when configured)
 safeHandle('insert-expense', async (event, payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => {
   try {
@@ -320,20 +341,33 @@ safeHandle('insert-expense', async (event, payee,payment_account,payment_date, p
         });
       } catch {}
     }
-    // ── Auto-post to COA: DR Expense / CR Accounts Payable ────────────────
+    // ── Auto-post to COA ──────────────────────────────────────────────
     // Skip journal posting for Draft — they'll be posted when moved to Unpaid
     const isDraft = (statusToUse || '').toLowerCase() === 'draft';
     const isBill = (category || '').toLowerCase() === 'bill';
     if (res && res.success && !isDraft && (isBill || statusToUse !== 'Pending')) {
       try {
-        JournalEntries.postExpense({
-          id: res.expenseId,
-          amount: totalAmount,
-          date: payment_date,
-          description: category || ref_no || '',
-          category,
-          reference: ref_no,
-        });
+        // Detect Credit Card / Loan Reclassification Bill
+        const isReclassification = detectCCReclassification(payee, expenseLines);
+        if (isReclassification) {
+          JournalEntries.postExpenseReclassification({
+            id: res.expenseId,
+            amount: totalAmount,
+            date: payment_date,
+            description: category || ref_no || '',
+            category,
+            reference: ref_no,
+          });
+        } else {
+          JournalEntries.postExpense({
+            id: res.expenseId,
+            amount: totalAmount,
+            date: payment_date,
+            description: category || ref_no || '',
+            category,
+            reference: ref_no,
+          });
+        }
       } catch (jErr) { console.warn('Journal auto-post (expense) failed:', jErr.message); }
     }
     return res;
@@ -589,6 +623,29 @@ safeHandle('delete-product-category', async (event, id) => {
   }
 });
 
+// Product Types
+safeHandle('get-product-types', async () => {
+  return await Products.getAllTypes();
+});
+
+safeHandle('insert-product-type', async (event, name) => {
+  try {
+    return await Products.insertType(name);
+  } catch (error) {
+    console.error('Error inserting type:', error);
+    return { error: error.message };
+  }
+});
+
+safeHandle('delete-product-type', async (event, id) => {
+  try {
+    return await Products.deleteType(id);
+  } catch (error) {
+    console.error('Error deleting type:', error);
+    return { error: error.message };
+  }
+});
+
 // Handler to get all Vat
 safeHandle('get-vat', async () => {
   try {
@@ -676,14 +733,27 @@ safeHandle('updateexpense', async (event,expenseData) => {
           }
           const totalAmount = Array.isArray(expenseData.lines) ? expenseData.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) : 0;
           if (totalAmount > 0) {
-            JournalEntries.postExpense({
-              id: expenseData.id,
-              amount: totalAmount,
-              date: expenseData.payment_date || new Date().toISOString().slice(0, 10),
-              description: expenseData.category || expenseData.ref_no || '',
-              category: expenseData.category,
-              reference: expenseData.ref_no,
-            });
+            // Detect Credit Card / Loan Reclassification Bill
+            const isReclassification = detectCCReclassification(expenseData.payee, expenseData.lines || []);
+            if (isReclassification) {
+              JournalEntries.postExpenseReclassification({
+                id: expenseData.id,
+                amount: totalAmount,
+                date: expenseData.payment_date || new Date().toISOString().slice(0, 10),
+                description: expenseData.category || expenseData.ref_no || '',
+                category: expenseData.category,
+                reference: expenseData.ref_no,
+              });
+            } else {
+              JournalEntries.postExpense({
+                id: expenseData.id,
+                amount: totalAmount,
+                date: expenseData.payment_date || new Date().toISOString().slice(0, 10),
+                description: expenseData.category || expenseData.ref_no || '',
+                category: expenseData.category,
+                reference: expenseData.ref_no,
+              });
+            }
           }
         } catch (jErr) { console.warn('Journal re-post (expense update) failed:', jErr.message); }
       }

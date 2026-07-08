@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Card, Form, Input, Button, DatePicker, Select, message, Divider, Modal,
   Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Spin, Collapse, Upload, Statistic
@@ -47,6 +47,11 @@ const EnterBill = ({ history, location, match }) => {
   const [lines, setLines] = useState([{ key: Date.now(), category: '', description: '', amount: 0 }]);
   const editId = match?.params?.id;
   const isEdit = !!editId;
+  const preSelectedVendorId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const vid = params.get('vendor');
+    return vid ? Number(vid) : null;
+  }, [location.search]);
 
   // Payment & credit state
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -66,6 +71,19 @@ const EnterBill = ({ history, location, match }) => {
     loadBankAccounts();
     if (editId) loadBill(editId);
   }, [editId]);
+
+  useEffect(() => {
+    if (preSelectedVendorId && vendors.length > 0 && !editId) {
+      const exists = vendors.some(v => v.id === preSelectedVendorId);
+      if (exists) {
+        form.setFieldsValue({ vendorId: preSelectedVendorId });
+        const vendor = vendors.find(v => v.id === preSelectedVendorId);
+        if (vendor?.vendor_type === 'Credit Card' || vendor?.vendor_type === 'Loan Lender') {
+          message.info(`Vendor type "${vendor.vendor_type}" — if all line accounts use a Credit Card/Loan account, this bill will reclassify the balance to AP instead of recording an expense.`);
+        }
+      }
+    }
+  }, [vendors, preSelectedVendorId, editId, form]);
 
   const accountTypeLabel = (type) => {
     const map = {
@@ -328,6 +346,22 @@ const EnterBill = ({ history, location, match }) => {
   const isPaid = billData && (billData.approval_status || '').toLowerCase() === 'paid';
 
   const vendorName = vendors.find(v => v.id === form.getFieldValue('vendorId'))?.display_name || '';
+  const vendorType = vendors.find(v => v.id === form.getFieldValue('vendorId'))?.vendor_type || '';
+  // Check if this looks like a Credit Card / Loan Reclassification
+  const looksLikeReclassification = (() => {
+    if (vendorType !== 'Credit Card' && vendorType !== 'Loan Lender') return false;
+    let hasValidLine = false;
+    for (const line of lines) {
+      const amt = Number(line.amount) || 0;
+      if (amt <= 0) continue;
+      if (!line.category) return false;
+      const acct = accounts.find(a => (a.accountName || a.name) === line.category);
+      const acctType = acct ? (acct.accountType || acct.type) : '';
+      if (acctType !== 'Credit Card' && acctType !== 'Loan') return false;
+      hasValidLine = true;
+    }
+    return hasValidLine;
+  })();
 
   return (
     <div style={{ padding: 24 }}>
@@ -367,7 +401,14 @@ const EnterBill = ({ history, location, match }) => {
           <div style={{ flex: '2 1 200px', minWidth: 160 }}>
             <Form.Item name="vendorId" label="Vendor" rules={[{ required: true, message: 'Select a vendor' }]}>
               <Select showSearch optionFilterProp="children" placeholder="Vendor"
-                dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setSupplierModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>New Vendor</Button></>)}>
+                dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setSupplierModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>New Vendor</Button></>)}
+                onChange={(v) => {
+                  const selected = vendors.find(x => x.id === v);
+                  const vt = selected?.vendor_type;
+                  if (vt === 'Credit Card' || vt === 'Loan Lender') {
+                    message.info(`Vendor type "${vt}" — if all line accounts use a Credit Card/Loan account, this bill will reclassify the balance to AP instead of recording an expense.`);
+                  }
+                }}>
                 {vendors.map(v => (
                   <Option key={v.id} value={v.id}>{v.display_name || `${v.first_name} ${v.last_name}`}</Option>
                 ))}
@@ -457,6 +498,11 @@ const EnterBill = ({ history, location, match }) => {
             <div style={{ marginBottom: 8 }}>
               <Tag color="green" style={{ fontSize: 11 }}><CheckCircleOutlined /> Paid: {cSym} {paidAmount.toFixed(2)}</Tag>
               {remaining > 0.005 && <Tag color="orange" style={{ fontSize: 11 }}>Remaining: {cSym} {remaining.toFixed(2)}</Tag>}
+            </div>
+          )}
+          {looksLikeReclassification && (
+            <div style={{ marginBottom: 8 }}>
+              <Tag color="purple" style={{ fontSize: 11 }}><SwapOutlined /> Credit Card / Loan Reclassification — DR Credit Card/Loan / CR Accounts Payable</Tag>
             </div>
           )}
           <Text style={{ fontSize: 13, marginRight: 16 }}>Total:</Text>

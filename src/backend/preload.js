@@ -30,7 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSuppliersPaginated: (page, pageSize, search) => ipcRenderer.invoke('get-suppliers-paginated', page, pageSize, search),
   getSingleSupplier: (supplier_id) => ipcRenderer.invoke('get-singleSupplier',supplier_id),
   updateSupplier: (supplierData) => ipcRenderer.invoke('updatesupplier',supplierData),
-  insertSupplier: (title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes) => ipcRenderer.invoke('insert-supplier', title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes),
+  insertSupplier: (title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes, vendor_type) => ipcRenderer.invoke('insert-supplier', title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes, vendor_type),
   supplierToggleStatus: (id, status) => ipcRenderer.invoke('supplier-toggle-status', id, status),
   deleteSupplier: (id) => ipcRenderer.invoke('delete-supplier', id),
 
@@ -79,6 +79,10 @@ insertProduct: (type, name, sku, category, description, price, income_account, t
 getProductCategories: () => ipcRenderer.invoke('get-product-categories'),
 insertProductCategory: (name) => ipcRenderer.invoke('insert-product-category', name),
 deleteProductCategory: (id) => ipcRenderer.invoke('delete-product-category', id),
+//Product Types
+getProductTypes: () => ipcRenderer.invoke('get-product-types'),
+insertProductType: (name) => ipcRenderer.invoke('insert-product-type', name),
+deleteProductType: (id) => ipcRenderer.invoke('delete-product-type', id),
 //Vat
 getAllVat: () => ipcRenderer.invoke('get-vat'),
 updateVat: (vatData) => ipcRenderer.invoke('updatevat',vatData),

@@ -286,7 +286,7 @@ function createWindow() {
         {
           label: 'Vendors',
           submenu: [
-            { label: 'Vendor Center', click: () => { navigateTo('/main/vendors/center'); }  },
+            { label: 'Vendor Center', click: () => { navigateTo('/main/vendors/list'); }  },
             { type: 'separator' },
             { label: 'Bill Tracker', click: () => { navigateTo('/main/vendors/bills/tracker'); } },
             { label: 'Enter Bills', click: () => { navigateTo('/main/vendors/bills/new'); } },

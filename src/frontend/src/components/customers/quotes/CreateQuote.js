@@ -207,7 +207,7 @@ const CreateQuote = () => {
       setLines(prev => prev.map(l => {
         if (l.key !== key) return l;
         const rate = Number(prod.selling_price || prod.price || 0);
-        return { ...l, description: prod.name || prod.description, rate, amount: (l.quantity || 1) * rate, product_id: productId };
+        return { ...l, description: prod.description || prod.name, rate, amount: (l.quantity || 1) * rate, product_id: productId };
       }));
     }
   };

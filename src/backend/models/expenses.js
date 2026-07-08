@@ -199,13 +199,39 @@ const Expenses = {
         }
         const exp = db.prepare(`SELECT * FROM expenses WHERE id = ?`).get(Number(id));
         if (exp) {
-          JournalEntries.postExpense({
-            id: Number(id),
-            date: exp.payment_date,
-            category: exp.category,
-            description: exp.category || '',
-            reference: exp.ref_no || String(id),
-          });
+          // Detect Credit Card / Loan Reclassification Bill
+          let isReclassification = false;
+          try {
+            const vendorRow = db.prepare("SELECT vendor_type FROM suppliers WHERE id = ?").get(Number(expenseDetails.payee));
+            const isCCVendor = vendorRow && (vendorRow.vendor_type === 'Credit Card' || vendorRow.vendor_type === 'Loan Lender');
+            if (isCCVendor && Array.isArray(lines) && lines.length > 0) {
+              let allCCorLoan = true;
+              let hasValid = false;
+              for (const line of lines) {
+                const amt = Number(line.amount) || 0;
+                if (amt <= 0) continue;
+                if (!line.category) { allCCorLoan = false; break; }
+                const acct = db.prepare("SELECT type FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status = 'Active' LIMIT 1").get(line.category);
+                if (!acct || (acct.type !== 'Credit Card' && acct.type !== 'Loan')) { allCCorLoan = false; break; }
+                hasValid = true;
+              }
+              isReclassification = allCCorLoan && hasValid;
+            }
+          } catch (reclassErr) { isReclassification = false; }
+          if (isReclassification) {
+            JournalEntries.postExpenseReclassification({
+              id: Number(id), date: exp.payment_date, category: exp.category,
+              description: exp.category || '', reference: exp.ref_no || String(id),
+            });
+          } else {
+            JournalEntries.postExpense({
+              id: Number(id),
+              date: exp.payment_date,
+              category: exp.category,
+              description: exp.category || '',
+              reference: exp.ref_no || String(id),
+            });
+          }
         }
       } catch (glErr) {
         console.error('[expenses] GL re-post on update failed (non-fatal):', glErr);

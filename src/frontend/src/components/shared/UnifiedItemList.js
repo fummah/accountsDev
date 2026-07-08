@@ -62,6 +62,13 @@ const UnifiedItemList = () => {
     return merged;
   }, [customTypes]);
 
+  const loadTypes = async () => {
+    try {
+      const t = await window.electronAPI.getProductTypes?.();
+      setCustomTypes(Array.isArray(t) ? t.map(x => x.name) : []);
+    } catch {}
+  };
+
   const loadCategories = async () => {
     try {
       const c = await window.electronAPI.getProductCategories?.();
@@ -85,9 +92,11 @@ const UnifiedItemList = () => {
       const vals = await typeForm.validateFields();
       const name = vals.type_name?.trim();
       if (!name) return;
-      setCustomTypes(prev => prev.includes(name) ? prev : [...prev, name]);
+      const res = await window.electronAPI.insertProductType?.(name);
+      if (res?.error) { message.error(res.error); return; }
       setTypeModalOpen(false);
       typeForm.resetFields();
+      loadTypes();
       message.success('Type added');
     } catch (e) { if (!e?.errorFields) message.error('Failed to add type'); }
   };
@@ -115,7 +124,7 @@ const UnifiedItemList = () => {
     } catch (e) { if (!e?.errorFields) message.error('Failed to create account'); }
   };
 
-  useEffect(() => { fetchItems(); fetchIncomeAccounts(); loadCategories(); }, [fetchItems, fetchIncomeAccounts]);
+  useEffect(() => { fetchItems(); fetchIncomeAccounts(); loadCategories(); loadTypes(); }, [fetchItems, fetchIncomeAccounts]);
 
   const uniqueCategories = useMemo(() => {
     const cats = new Set();

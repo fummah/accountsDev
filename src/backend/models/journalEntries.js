@@ -357,6 +357,61 @@ const JournalEntries = {
     } catch (e) { return { error: e.message }; }
   },
 
+  // ── POST FROM CREDIT CARD / LOAN RECLASSIFICATION BILL ─────────────
+  // DR Credit Card / Loan account(s) / CR Accounts Payable
+  // Used when a bill from a Credit Card vendor or Loan lender uses
+  // the same credit card or loan account as its distribution line,
+  // with no expense/asset accounts involved.
+  postExpenseReclassification: (expense) => {
+    if (JournalEntries.hasPosting('expense', expense.id)) return { skipped: true };
+    const COA = require('./chartOfAccounts');
+    const ap = COA.getSystemAccount('Accounts Payable');
+    if (!ap) return { error: 'Accounts Payable account not found in COA' };
+
+    let expenseLines = [];
+    try {
+      expenseLines = db.prepare(
+        `SELECT amount, description, category FROM expense_lines WHERE expense_id = ?`
+      ).all(Number(expense.id));
+    } catch { expenseLines = []; }
+
+    const debitLines = [];
+    let totalDebit = 0;
+
+    for (const line of expenseLines) {
+      const lineAmt = Number(line.amount) || 0;
+      if (lineAmt <= 0) continue;
+      let acctId = null;
+      if (line.category) {
+        const matched = db.prepare(
+          `SELECT id FROM chart_of_accounts
+           WHERE LOWER(name) = LOWER(?) AND status = 'Active'
+           LIMIT 1`
+        ).get(line.category);
+        if (matched) acctId = matched.id;
+      }
+      if (!acctId) continue;
+      debitLines.push({ account_id: acctId, debit: lineAmt, credit: 0, description: `Reclassify to AP: ${line.description || line.category || ''}` });
+      totalDebit += lineAmt;
+    }
+
+    if (!debitLines.length) return { error: 'No valid credit card / loan account lines found' };
+    if (totalDebit <= 0) return { error: 'Expense has zero amount' };
+
+    try {
+      return JournalEntries.post({
+        date: expense.date || new Date().toISOString().slice(0, 10),
+        reference: expense.reference || String(expense.id),
+        description: `Reclassify to AP: ${expense.description || expense.category || ''}`,
+        source_type: 'expense', source_id: expense.id,
+        lines: [
+          ...debitLines,
+          { account_id: ap.id, debit: 0, credit: totalDebit, description: 'Accounts Payable' },
+        ],
+      });
+    } catch (e) { return { error: e.message }; }
+  },
+
   // ── POST FROM TRANSACTION (checks, credit card charges, bank txns) ────
   // DR each split-line expense account / CR the bank/cash account
   postTransaction: (tx) => {
