@@ -59,7 +59,8 @@ insertQuote: (status,customer,customer_email, islater, billing_address,start_dat
 convertToInvoice: (quote_id) => ipcRenderer.invoke('convertquote', quote_id),
 //Invoices 
 getAllInvoices: () => ipcRenderer.invoke('get-invoices'),
-  getInvoicesPaginated: (page, pageSize, search, status, dueFrom, dueTo) => ipcRenderer.invoke('get-invoices-paginated', page, pageSize, search, status, dueFrom, dueTo),
+  getInvoicesPaginated: (page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId) => ipcRenderer.invoke('get-invoices-paginated', page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId),
+  getSalesSummary: (filters) => ipcRenderer.invoke('sales-summary', filters),
 getInvoiceReport: () => ipcRenderer.invoke('get-invoice-report'),
 getFinancialReport: (start_date, last_date) => ipcRenderer.invoke('get-financial', start_date, last_date),
 getManagementReport: (start_date, last_date) => ipcRenderer.invoke('get-management', start_date, last_date),
@@ -401,6 +402,12 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   emailSettingsSet: (cfg) => ipcRenderer.invoke('email-settings-set', cfg),
   emailTestConnection: () => ipcRenderer.invoke('email-test-connection'),
   emailSend: (payload) => ipcRenderer.invoke('email-send', payload),
+  emailLogList: () => ipcRenderer.invoke('email-log-list'),
+  emailOAuthStart: (opts) => ipcRenderer.invoke('email-oauth-start', opts),
+  emailOAuthStatus: (provider) => ipcRenderer.invoke('email-oauth-status', provider),
+  emailOAuthRevoke: (provider) => ipcRenderer.invoke('email-oauth-revoke', provider),
+  emailSendExternal: (payload) => ipcRenderer.invoke('email-send-external', payload),
+  emailMarkSent: (payload) => ipcRenderer.invoke('email-mark-sent', payload),
 
   // Invoice Template Customization
   getInvoiceTemplate: () => ipcRenderer.invoke('get-invoice-template'),

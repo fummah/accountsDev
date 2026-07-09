@@ -13,6 +13,7 @@ import {
   SafetyOutlined, BookOutlined, UploadOutlined, ThunderboltOutlined
 } from '@ant-design/icons';
 import { useCurrency } from '../../utils/currency';
+import { history } from '../../appRedux/store';
 
 const { Option } = Select;
 const { Search } = Input;
@@ -58,6 +59,49 @@ const fmtNum = (v) => Number(v || 0).toLocaleString(undefined, { minimumFraction
 const csvEscape = (v) => {
   const s = String(v ?? '');
   return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+/* ─── Source type → route / label / colour ─── */
+const SOURCE_ROUTES = {
+  expense:            id => `/main/vendors/bills/edit/${id}`,
+  bill_payment:       id => `/main/vendors/bills/edit/${id}`,
+  invoice:            id => `/main/customers/invoices/edit/${id}`,
+  payment:            () => '/main/customers/payments',
+  deposit:            () => '/main/banking/deposits',
+  transaction:        () => '/main/accountant/journal-entries',
+  check:              () => '/main/accountant/check-printing',
+  transfer:           () => '/main/banking/transfers',
+  credit_note:        () => '/main/customers/credit-notes',
+  vendor_credit:      () => '/main/vendors/credits',
+  reversal:           () => '/main/accountant/journal-entries',
+};
+
+const SOURCE_LABELS = {
+  expense:            'Bill',
+  bill_payment:       'Bill Payment',
+  invoice:            'Invoice',
+  payment:            'Payment',
+  deposit:            'Deposit',
+  transaction:        'Journal Entry',
+  check:              'Check',
+  transfer:           'Transfer',
+  credit_note:        'Credit Note',
+  vendor_credit:      'Vendor Credit',
+  reversal:           'Reversal',
+};
+
+const SOURCE_COLORS = {
+  expense:       'orange',
+  bill_payment:  'magenta',
+  invoice:       'blue',
+  payment:       'green',
+  deposit:       'cyan',
+  transaction:   'geekblue',
+  check:         'purple',
+  transfer:      'lime',
+  credit_note:   'gold',
+  vendor_credit: 'volcano',
+  reversal:      'default',
 };
 
 const buildTree = (flat) => {
@@ -404,6 +448,15 @@ const ChartOfAccounts = () => {
       setDrawerTxns(Array.isArray(txns) ? txns : []);
     } catch { setDrawerTxns([]); }
     setDrawerTxnLoading(false);
+  };
+
+  /* ─── Navigate to source transaction ─── */
+  const navigateToSource = (r) => {
+    const routeFn = SOURCE_ROUTES[r.source_type];
+    if (routeFn) {
+      const path = routeFn(r.source_id);
+      history.push(path);
+    }
   };
 
   const subAccounts = useMemo(() => {
@@ -1216,16 +1269,36 @@ const ChartOfAccounts = () => {
                       const totC = rows.reduce((s, r) => s + (Number(r.credit) || 0), 0);
                       return (
                         <Table.Summary.Row>
-                          <Table.Summary.Cell index={0} colSpan={2}><strong>Totals</strong></Table.Summary.Cell>
-                          <Table.Summary.Cell index={2} align="right"><strong>{cSym} {fmtNum(totD)}</strong></Table.Summary.Cell>
-                          <Table.Summary.Cell index={3} align="right"><strong>{cSym} {fmtNum(totC)}</strong></Table.Summary.Cell>
+                          <Table.Summary.Cell index={0} colSpan={3}><strong>Totals</strong></Table.Summary.Cell>
+                          <Table.Summary.Cell index={3} align="right"><strong>{cSym} {fmtNum(totD)}</strong></Table.Summary.Cell>
+                          <Table.Summary.Cell index={4} align="right"><strong>{cSym} {fmtNum(totC)}</strong></Table.Summary.Cell>
                         </Table.Summary.Row>
                       );
                     }}
                     columns={[
                       { title: 'Date', dataIndex: 'date', width: 100, render: d => d || '-' },
+                      { title: 'Type', dataIndex: 'source_type', width: 110,
+                        render: (t) => {
+                          const label = SOURCE_LABELS[t] || t || '-';
+                          return <Tag color={SOURCE_COLORS[t] || 'default'} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{label}</Tag>;
+                        },
+                      },
                       { title: 'Description / Ref', dataIndex: 'description', ellipsis: true,
-                        render: (d, r) => <span>{r.reference ? <Text code style={{fontSize:10}}>{r.reference}</Text> : null} {d || r.lineDesc || '-'}</span> },
+                        render: (d, r) => {
+                          const routeFn = SOURCE_ROUTES[r.source_type];
+                          return (
+                            <span>
+                              {r.reference ? <Text code style={{fontSize:10}}>{r.reference}</Text> : null}
+                              {' '}
+                              {routeFn ? (
+                                <a onClick={() => navigateToSource(r)} style={{ cursor: 'pointer' }}>
+                                  {d || r.lineDesc || '-'}
+                                </a>
+                              ) : (d || r.lineDesc || '-')}
+                            </span>
+                          );
+                        },
+                      },
                       { title: 'Debit',  dataIndex: 'debit',  width: 110, align: 'right', render: v => Number(v) ? <Text style={{color:'#1890ff'}}>{cSym} {fmtNum(v)}</Text> : <Text type="secondary">—</Text> },
                       { title: 'Credit', dataIndex: 'credit', width: 110, align: 'right', render: v => Number(v) ? <Text style={{color:'#52c41a'}}>{cSym} {fmtNum(v)}</Text> : <Text type="secondary">—</Text> },
                     ]}

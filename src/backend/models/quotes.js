@@ -28,6 +28,12 @@ const Quotes = {
 
 
     db.prepare(stmt).run();
+    try {
+      const colNames = db.prepare("PRAGMA table_info(quotes)").all().map(c => c.name);
+      if (!colNames.includes('sent_date'))   db.prepare("ALTER TABLE quotes ADD COLUMN sent_date TEXT").run();
+      if (!colNames.includes('sent_method')) db.prepare("ALTER TABLE quotes ADD COLUMN sent_method TEXT DEFAULT 'Not Sent'").run();
+      if (!colNames.includes('sent_status')) db.prepare("ALTER TABLE quotes ADD COLUMN sent_status TEXT DEFAULT 'Not Sent'").run();
+    } catch {}
   }, 
   createQuoteItem: () => {
     const stmt = `
@@ -353,6 +359,10 @@ const Quotes = {
       throw error;
     }
   
+  },
+  markQuoteSent: (id, method, status) => {
+    const date = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    return db.prepare('UPDATE quotes SET sent_date=?, sent_method=?, sent_status=? WHERE id=?').run(date, method, status, id);
   },
 };
 

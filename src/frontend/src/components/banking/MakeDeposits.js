@@ -237,7 +237,7 @@ const MakeDeposits = () => {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <Title level={3} style={{ margin: 0 }}><BankOutlined style={{ marginRight: 8 }} />Make Deposits</Title>
+          <Title level={3} style={{ margin: 0 }}><BankOutlined style={{ marginRight: 8 }} />Make Deposits <Tag color="blue">v2</Tag></Title>
           <Text type="secondary">Record bank deposits &middot; {depositHistory.length} deposits on file</Text>
         </div>
       </div>

@@ -45,6 +45,9 @@ function resolveDbPath() {
 
 const dbPath = resolveDbPath();
 
+// Detect if this is a brand-new database file (doesn't exist before opening)
+const isNewDatabase = !fs.existsSync(dbPath);
+
 // Initialize the database connection
 const options = {};
 // Enable verbose logging only in development
@@ -111,4 +114,6 @@ const wrap = {
     transaction: (fn) => db.transaction(fn),
 };
 
+// Export the db wrapper as the primary export
+wrap.isNewDatabase = isNewDatabase;
 module.exports = wrap;

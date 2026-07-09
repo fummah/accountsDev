@@ -22,12 +22,30 @@ const Deposits = () => {
   const [historySearch, setHistorySearch] = useState('');
   const [activeTab, setActiveTab] = useState('1');
   const [viewDeposit, setViewDeposit] = useState(null);
-  const [depositMode, setDepositMode] = useState('payments'); // 'payments' or 'manual'
+  const [payors, setPayors] = useState([]);
+  const [depositMode, setDepositMode] = useState('payments');
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [accountForm] = Form.useForm();
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
-    await Promise.all([loadAccounts(), loadHistory(), loadPendingPayments()]);
+    await Promise.all([loadAccounts(), loadHistory(), loadPendingPayments(), loadPayors()]);
+  };
+
+  const loadPayors = async () => {
+    try {
+      const [custRes, vendRes] = await Promise.all([
+        window.electronAPI.getAllCustomers().catch(() => ({ all: [] })),
+        window.electronAPI.getAllSuppliers().catch(() => []),
+      ]);
+      const customers = Array.isArray(custRes?.all) ? custRes.all : (Array.isArray(custRes) ? custRes : []);
+      const vendors = Array.isArray(vendRes) ? vendRes : (vendRes?.data || vendRes?.all || []);
+      setPayors([
+        ...customers.map(c => ({ id: `c-${c.id}`, name: c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim(), type: 'Customer' })),
+        ...vendors.map(v => ({ id: `v-${v.id}`, name: v.display_name || `${v.first_name || ''} ${v.last_name || ''}`.trim(), type: 'Vendor' })),
+      ].filter(p => p.name));
+    } catch {}
   };
 
   const loadAccounts = async () => {
@@ -75,6 +93,29 @@ const Deposits = () => {
     } catch { }
   };
 
+  const handleAddAccount = async () => {
+    try {
+      const vals = await accountForm.validateFields();
+      const payload = {
+        name: vals.name,
+        type: vals.type || 'Bank',
+        number: vals.code || '',
+        description: vals.description || '',
+        status: 'Active',
+        entered_by: 'system',
+      };
+      const res = await window.electronAPI.insertChartAccount(payload);
+      if (res?.success) {
+        message.success('Account created');
+        setAccountModalOpen(false);
+        accountForm.resetFields();
+        loadAccounts();
+      } else {
+        message.error(res?.error || 'Failed to create account');
+      }
+    } catch (e) { if (!e?.errorFields) message.error('Failed to create account'); }
+  };
+
   const getAccountName = (id) => {
     if (!id) return '-';
     const a = allAccounts.find(x => String(x.id) === String(id));
@@ -86,7 +127,6 @@ const Deposits = () => {
     .reduce((s, p) => s + Number(p.amount || 0), 0);
 
   const allocationsTotal = allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
-  const isBalanced = Math.abs(selectedTotal - allocationsTotal) < 0.01;
 
   const togglePayment = (id) => {
     setSelectedPaymentIds(prev =>
@@ -95,7 +135,7 @@ const Deposits = () => {
   };
 
   const addAllocation = () => {
-    setAllocations([...allocations, { id: Date.now(), accountId: null, amount: 0, description: '' }]);
+    setAllocations([...allocations, { id: Date.now(), accountId: null, amount: 0, description: '', receivedFrom: '' }]);
   };
 
   const updateAllocation = (id, field, value) => {
@@ -114,14 +154,6 @@ const Deposits = () => {
         message.error('Please select at least one payment to deposit');
         return;
       }
-      if (allocations.length === 0) {
-        message.error('Please add at least one allocation line');
-        return;
-      }
-      if (!isBalanced) {
-        message.error('Split amounts must equal the total deposit amount');
-        return;
-      }
     } else {
       // Manual deposit mode
       if (allocations.length === 0 || manualTotal <= 0) {
@@ -138,10 +170,10 @@ const Deposits = () => {
         reference: values.reference || null,
         memo: values.memo || null,
         paymentIds: depositMode === 'payments' ? selectedPaymentIds : [],
-        allocations: allocations.map(a => ({
+        allocations: depositMode === 'payments' ? [] : allocations.map(a => ({
           accountId: a.accountId || null,
           amount: Number(a.amount || 0),
-          description: a.description || null,
+          description: [a.receivedFrom, a.description].filter(Boolean).join(' — ') || 'Manual deposit',
         })),
       });
       if (res && res.error) throw new Error(res.error);
@@ -271,7 +303,18 @@ const Deposits = () => {
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <Form.Item name="bankAccountId" label="Deposit To" rules={[{ required: true, message: 'Select bank account' }]}
                   style={{ minWidth: 250, flex: 2 }}>
-                  <Select placeholder="Select bank account" showSearch optionFilterProp="children">
+                  <Select placeholder="Select bank account" showSearch optionFilterProp="children"
+                    dropdownRender={menu => (
+                      <>
+                        {menu}
+                        <Divider style={{ margin: '4px 0' }} />
+                        <Button type="link" size="small" icon={<PlusOutlined />}
+                          onMouseDown={e => { e.preventDefault(); setAccountModalOpen(true); }}
+                          style={{ width: '100%', textAlign: 'left' }}>
+                          Add New Bank Account
+                        </Button>
+                      </>
+                    )}>
                     {bankAccounts.map(a => (
                       <Option key={a.id} value={a.id}>{a.accountName || a.name}</Option>
                     ))}
@@ -316,14 +359,25 @@ const Deposits = () => {
                 </>
               )}
 
-              {(depositMode === 'manual' || selectedPaymentIds.length > 0) && (
+              {depositMode === 'manual' && (
                 <>
-                  <Divider orientation="left" style={{ fontSize: 13 }}>{depositMode === 'manual' ? 'Deposit Lines' : 'Split Allocation (Categories)'}</Divider>
+                  <Divider orientation="left" style={{ fontSize: 13 }}>Deposit Lines</Divider>
 
                   {allocations.map(a => (
                     <div key={a.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
                       <Select
-                        style={{ flex: 2 }}
+                        style={{ flex: 1.5 }}
+                        value={a.receivedFrom || undefined}
+                        onChange={(v) => updateAllocation(a.id, 'receivedFrom', v)}
+                        placeholder="Customer/Vendor *"
+                        showSearch optionFilterProp="children"
+                      >
+                        {payors.filter(p => p.name).map(p => (
+                          <Option key={p.id} value={p.name}>{p.name} ({p.type})</Option>
+                        ))}
+                      </Select>
+                      <Select
+                        style={{ flex: 1.5 }}
                         value={a.accountId || undefined}
                         onChange={(v) => updateAllocation(a.id, 'accountId', v)}
                         placeholder="Select category/account"
@@ -331,9 +385,6 @@ const Deposits = () => {
                       >
                         {incomeAccounts.map(ac => (
                           <Option key={ac.id} value={ac.id}>{ac.accountName || ac.name}</Option>
-                        ))}
-                        {bankAccounts.map(ac => (
-                          <Option key={`ba-${ac.id}`} value={ac.id}>{ac.accountName || ac.name}</Option>
                         ))}
                       </Select>
                       <InputNumber
@@ -345,7 +396,7 @@ const Deposits = () => {
                         parser={v => v.replace(/\$\s?|(,*)/g, '')}
                       />
                       <Input
-                        style={{ flex: 2 }}
+                        style={{ flex: 1.5 }}
                         value={a.description}
                         onChange={(e) => updateAllocation(a.id, 'description', e.target.value)}
                         placeholder="Description (optional)"
@@ -359,22 +410,10 @@ const Deposits = () => {
 
                   <div style={{ marginBottom: 16, padding: '12px 16px', background: '#f6f8fa', borderRadius: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                      {depositMode === 'payments' && (
-                        <Text style={{ fontSize: 13 }}>
-                          <span style={{ fontWeight: 500 }}>Selected Payments:</span> $ {fmt(selectedTotal)}
-                        </Text>
-                      )}
                       <Text style={{ fontSize: 13 }}>
-                        <span style={{ fontWeight: 500 }}>{depositMode === 'manual' ? 'Deposit Total:' : 'Allocation Total:'}</span>{' '}
-                        <span style={{ color: depositMode === 'manual' ? '#1890ff' : (isBalanced ? '#52c41a' : '#f5222d'), fontWeight: 700 }}>
-                          $ {fmt(allocationsTotal)}
-                        </span>
+                        <span style={{ fontWeight: 500 }}>Deposit Total:</span>{' '}
+                        <span style={{ color: '#1890ff', fontWeight: 700 }}>$ {fmt(manualTotal)}</span>
                       </Text>
-                      {depositMode === 'payments' && !isBalanced && allocationsTotal > 0 && (
-                        <Text style={{ color: '#f5222d', fontSize: 12, fontWeight: 500 }}>
-                          Split amounts must equal the total deposit amount
-                        </Text>
-                      )}
                     </div>
                   </div>
                 </>
@@ -386,7 +425,7 @@ const Deposits = () => {
                     Reset
                   </Button>
                   <Button type="primary" icon={<SaveOutlined />} htmlType="submit" loading={loading}
-                    disabled={depositMode === 'payments' ? (selectedPaymentIds.length === 0 || allocations.length === 0 || !isBalanced) : (allocations.length === 0 || manualTotal <= 0)}>
+                    disabled={depositMode === 'payments' ? selectedPaymentIds.length === 0 : (allocations.length === 0 || manualTotal <= 0)}>
                     Save Deposit
                   </Button>
                 </Space>
@@ -459,6 +498,31 @@ const Deposits = () => {
             )}
           </div>
         )}
+      </Modal>
+
+      <Modal title="New Bank Account" visible={accountModalOpen} onOk={handleAddAccount} onCancel={() => setAccountModalOpen(false)} okText="Create" destroyOnClose>
+        <Form form={accountForm} layout="vertical" preserve={false}>
+          <Form.Item name="name" label="Account Name" rules={[{ required: true, message: 'Enter account name' }]}>
+            <Input placeholder="e.g. Checking Account" />
+          </Form.Item>
+          <Form.Item name="type" label="Type" initialValue="Bank" rules={[{ required: true }]}>
+            <Select>
+              <Option value="Bank">Bank</Option>
+              <Option value="Cash">Cash</Option>
+              <Option value="Expense">Expense</Option>
+              <Option value="Asset">Asset</Option>
+              <Option value="Liability">Liability</Option>
+              <Option value="Income">Income</Option>
+              <Option value="Equity">Equity</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="code" label="Account Code">
+            <Input placeholder="e.g. 1010" />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea rows={2} placeholder="Optional description" />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

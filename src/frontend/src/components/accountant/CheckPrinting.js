@@ -301,31 +301,23 @@ const CheckPrinting = () => {
       .co-addr     { font-size: 10px; color: #333; }
 
       /* ---------- DATE row ---------- */
-      .date-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 4px; gap: 8px; }
-      .date-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 1px 6px; color: #555; }
-      .date-val   { font-size: 12px; font-weight: 700; min-width: 100px; border-bottom: 1px solid #555; text-align: center; padding-bottom: 1px; }
+      .date-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 4px; }
+      .date-val { font-size: 12px; font-weight: 700; min-width: 100px; border-bottom: 1px solid #555; text-align: center; padding-bottom: 1px; }
 
       /* ---------- PAY TO row ---------- */
       .payto-row { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
-      .payto-label { font-size: 9px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
-      .payto-name  { font-size: 13px; font-weight: 700; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
-      .amt-box     { font-size: 14px; font-weight: 700; padding: 2px 12px; white-space: nowrap; min-width: 100px; text-align: center; }
+      .payto-name { font-size: 13px; font-weight: 700; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
 
       /* ---------- written amount row ---------- */
-      .words-row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
-      .words-text { font-size: 11px; letter-spacing: 0.02em; flex: 1; border-bottom: 1px solid #555; padding-bottom: 1px; }
-      .dollars-vert { font-size: 9px; font-weight: 700; letter-spacing: 2px; writing-mode: vertical-rl; text-orientation: upright; padding: 3px 1px; line-height: 1; color: #555; }
+      .words-row { margin-top: 6px; }
+      .words-text { font-size: 11px; letter-spacing: 0.02em; border-bottom: 1px solid #555; padding-bottom: 1px; display: block; }
 
       /* ---------- address window ---------- */
       .addr-window { margin-top: 8px; padding-left: 40px; font-size: 11px; line-height: 1.45; min-height: 40px; }
       .addr-name   { font-weight: 700; font-size: 12px; }
 
-      /* ---------- memo + signature ---------- */
-      .memo-sig-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 8px; }
-      .memo-block   { display: flex; align-items: baseline; gap: 6px; }
-      .memo-label   { font-size: 9px; font-weight: 700; letter-spacing: 1px; }
-      .memo-val     { font-size: 10px; min-width: 200px; border-bottom: 1px solid #555; padding-bottom: 1px; }
-      .sig-block    { font-size: 9px; font-weight: 700; letter-spacing: 1px; min-width: 200px; border-top: 1px solid #555; text-align: center; padding-top: 2px; }
+      /* ---------- memo ---------- */
+      .memo-sig-row { margin-top: 8px; }
 
       /* ---------- stubs ---------- */
       .stub-wrap { border-bottom: 1px dashed #999; }
@@ -344,23 +336,19 @@ const CheckPrinting = () => {
             <div style="text-align:right; font-size:11px; color:#888;"></div>
           </div>
 
-          <!-- DATE -->
+          <!-- DATE value only -->
           <div class="date-row">
-            <span class="date-label">DATE</span>
             <span class="date-val">${dateStr}</span>
           </div>
 
-          <!-- PAY TO THE ORDER OF | **Amount Box -->
+          <!-- Payee name only -->
           <div class="payto-row">
-            <span class="payto-label">PAY TO THE<br>ORDER OF</span>
             <span class="payto-name">${payeeName}</span>
-            <span class="amt-box">**${amtStr}</span>
           </div>
 
-          <!-- Written amount + DOLLARS -->
+          <!-- Written amount only -->
           <div class="words-row">
             <span class="words-text">${dotFill}</span>
-            <span class="dollars-vert">DOLLARS</span>
           </div>
 
           <!-- Address Window (for envelope window alignment) -->
@@ -368,13 +356,9 @@ const CheckPrinting = () => {
             ${payeeAddrLines.map(l => `<div>${l}</div>`).join('')}
           </div>
 
-          <!-- Memo + Authorized Signature -->
+          <!-- Memo value only -->
           <div class="memo-sig-row">
-            <div class="memo-block">
-              <span class="memo-label">MEMO</span>
-              <span class="memo-val">${memoLine}</span>
-            </div>
-            <div class="sig-block">AUTHORIZED SIGNATURE</div>
+            <span class="memo-val">${memoLine}</span>
           </div>
 
         </div>

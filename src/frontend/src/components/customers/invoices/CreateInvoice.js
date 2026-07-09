@@ -36,6 +36,7 @@ const CreateInvoice = () => {
   const [catForm] = Form.useForm();
   const [vatForm] = Form.useForm();
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [savedInvoiceId, setSavedInvoiceId] = useState(null);
 
   const calcDueDate = (invoiceDate, terms) => {
     if (!invoiceDate || !terms) return;
@@ -302,12 +303,15 @@ const CreateInvoice = () => {
         });
         if (res?.error) { message.error(res.error); setSaving(false); return; }
         message.success('Invoice updated');
+        setSavedInvoiceId(Number(id));
       } else {
         const res = await window.electronAPI.insertInvoice?.(
           customer, customer_email, false, billing_address, terms,
           start_date, last_date, msg, statement_message, number,
           null, vat, finalStatus, invoiceLines
         );
+        const invId = res?.invoiceId || res?.invoice_id || res?.id;
+        if (invId) setSavedInvoiceId(Number(invId));
         if (res?.error) { message.error(typeof res.error === 'string' ? res.error : 'Insert failed'); setSaving(false); return; }
         if (res?.success === false) { message.error('Failed to create invoice'); setSaving(false); return; }
         if (res?.glWarning) {
@@ -635,6 +639,7 @@ const CreateInvoice = () => {
         amount={`${cSym} ${lines.reduce((s, l) => s + Number(l.amount || 0), 0).toFixed(2)}`}
         customerName={(() => { const c = customers.find(cu => cu.id === form.getFieldValue('customer')); return c ? (c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : ''; })()}
         companyName={company.name || company.company_name || ''}
+        invoiceId={savedInvoiceId || (id ? Number(id) : null)}
       />
     </div>
   );

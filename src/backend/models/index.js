@@ -35,6 +35,12 @@ const POS = require('./pos');
 const CRM = require('./crm');
 const ParsedStatements = require('./parsedStatements');
 const Settings = require('./settings');
+const Email = require('./email');
+
+// Run database migrations after all models have created their tables
+const Migration = require('./migration');
+const migrationResult = Migration.runMigrations();
+
 module.exports = {
   Customers,
   Invoices,
@@ -69,6 +75,7 @@ module.exports = {
   CRM,
   ParsedStatements,
   Settings,
+  Email,
   Transactions,
   Journal,
   Ledger

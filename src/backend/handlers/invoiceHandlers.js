@@ -17,9 +17,9 @@ const registerInvoiceHandlers = () => {
   });
 
   // Get Invoices (server-side pagination)
-  ipcMain.handle('get-invoices-paginated', async (event, page, pageSize, search, status, dueFrom, dueTo) => {
+  ipcMain.handle('get-invoices-paginated', async (event, page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId) => {
     try {
-      return await Invoices.getPaginated(page, pageSize, search || '', status || '', dueFrom || '', dueTo || '');
+      return await Invoices.getPaginated(page, pageSize, search || '', status || '', dueFrom || '', dueTo || '', startFrom || '', startTo || '', customerId || '');
     } catch (error) {
       console.error('Error fetching invoices (paginated):', error);
       return { error: error.message };
@@ -72,6 +72,16 @@ const registerInvoiceHandlers = () => {
       return Invoices.getSalesByProduct(filters || {});
     } catch (error) {
       console.error('Error fetching sales by product:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Sales Report summary (KPI, byCustomer, byIncomeAccount)
+  ipcMain.handle('sales-summary', async (_event, filters) => {
+    try {
+      return Invoices.getSalesSummary(filters || {});
+    } catch (error) {
+      console.error('Error fetching sales summary:', error);
       return { success: false, error: error.message };
     }
   });

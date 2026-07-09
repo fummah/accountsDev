@@ -88,7 +88,7 @@ const Journal = {
     }
     return entries;
   },
-  insert({ date, description, lines, entered_by, entity_id, class: classTag, location, department }) {
+  insert({ date, description, lines, entered_by, entity_id, class: classTag, location, department, reference }) {
     // Safety: ensure required columns exist (in case migration was skipped)
     try {
       const cols = new Set(db.prepare("PRAGMA table_info('journal_entries')").all().map(c => c.name.toLowerCase()));
@@ -126,8 +126,8 @@ const Journal = {
       throw new Error('Journal lines must not contain negative amounts');
     }
 
-    const entry = db.prepare("INSERT INTO journal_entries (date, description, entered_by, created_by, entity_id, class, location, department, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Posted', datetime('now'))")
-      .run(date, description, entered_by, entered_by, entity_id || null, classTag || null, location || null, department || null);
+    const entry = db.prepare("INSERT INTO journal_entries (date, description, entered_by, created_by, entity_id, class, location, department, reference, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Posted', datetime('now'))")
+      .run(date, description, entered_by, entered_by, entity_id || null, classTag || null, location || null, department || null, reference || null);
     const entry_id = entry.lastInsertRowid;
     for (const line of sanitizedLines) {
       let accountId = line.account_id;

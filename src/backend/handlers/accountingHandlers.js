@@ -228,8 +228,12 @@ safeHandle('budget-periods', async () => {
   });
 
   safeHandle('journal-list', async (_e, filters) => {
-    try { return JournalEntries.getAll(filters || {}); }
-    catch (e) { return []; }
+    try {
+      const result = JournalEntries.getAll(filters || {});
+      console.log('[journal-list] returning', result.length, 'entries with filters:', JSON.stringify(filters));
+      return result;
+    }
+    catch (e) { console.error('[journal-list] error:', e); return []; }
   });
 
   safeHandle('journal-by-account', async (_e, accountId, opts) => {

@@ -125,9 +125,9 @@ const JournalEntries = {
   getAll: ({ from, to, source_type, limit = 500 } = {}) => {
     let where = '1=1';
     const params = [];
-    if (from) { where += ' AND je.date >= ?'; params.push(from); }
-    if (to)   { where += ' AND je.date <= ?'; params.push(to); }
-    if (source_type) { where += ' AND je.source_type = ?'; params.push(source_type); }
+    if (from) { where += ' AND date >= ?'; params.push(from); }
+    if (to)   { where += ' AND date <= ?'; params.push(to); }
+    if (source_type) { where += ' AND source_type = ?'; params.push(source_type); }
     const entries = db.prepare(`
       SELECT * FROM journal_entries WHERE ${where}
       ORDER BY date DESC, id DESC LIMIT ${Number(limit)}

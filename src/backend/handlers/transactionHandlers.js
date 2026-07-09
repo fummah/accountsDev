@@ -200,7 +200,9 @@ const registerTransactionHandlers = () => {
   ipcMain.handle('insert-journal', async (event, entry) => {
     try {
       const ctx = authorize(event, { permissions: 'write:journal' });
+      console.log('[insert-journal] received entry:', JSON.stringify({ ...entry, lines: entry.lines?.length }));
       const id = Journal.insert(entry);
+      console.log('[insert-journal] inserted with id:', id);
       if (id) {
         AuditLog.log({
           userId: ctx.userId,
