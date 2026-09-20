@@ -48,10 +48,12 @@ const DocumentCenter = () => {
           message.success('Uploaded');
           await load();
         } else {
-          message.error(res?.error || 'Upload failed');
+          console.error('[attachments] document upload failed:', res?.error);
+          message.error('The file could not be stored. Please try attaching it again.');
         }
       } catch (e) {
-        message.error(String(e?.message || e));
+        console.error('[attachments] document upload threw:', e);
+        message.error('The file could not be stored. Please try attaching it again.');
       }
     };
     reader.readAsDataURL(file);
@@ -146,7 +148,7 @@ const DocumentCenter = () => {
           <p className="ant-upload-drag-icon">Drop files here to upload</p>
           <p className="ant-upload-text">Drag & drop documents to attach them to the selected category and linked record.</p>
         </Dragger>
-        <Table rowKey="id" dataSource={Array.isArray(docs) ? docs : []} columns={columns} size="small" style={{ marginTop: 12 }} pagination={{ pageSize: 20, showSizeChanger: true }} />
+        <Table rowKey="id" dataSource={Array.isArray(docs) ? docs : []} columns={columns} size="small" style={{ marginTop: 12 }} pagination={{ defaultPageSize: 20, showSizeChanger: true }} />
       </Card>
     </div>
   );

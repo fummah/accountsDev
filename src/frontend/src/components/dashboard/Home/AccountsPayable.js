@@ -4,6 +4,7 @@ import {Table,Select,Row,Col,Button} from "antd";
 import {PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer} from "recharts";
 import { Link } from "react-router-dom/cjs/react-router-dom.min";
 import { useRedirectToItem } from 'util/navigation';
+import { useCurrency } from '../../../utils/currency';
 
 
 // Colors for each section of the pie chart
@@ -16,6 +17,7 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
 
 const AccountsPayable = ({ Expensed, ExpenseList }) => {
   const redirectToItem = useRedirectToItem();
+  const { symbol: cSym } = useCurrency();
   return (
       <Widget
       title={
@@ -28,7 +30,7 @@ const AccountsPayable = ({ Expensed, ExpenseList }) => {
         <Col lg={12} md={12} sm={12} xs={24}>
 
           <div className="ant-row-flex">
-            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">${formattedNumber(Expensed)}</h2>
+            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">{cSym}{formattedNumber(Expensed)}</h2>
           </div>
           <p className="gx-text-grey">Total A/P Amount</p>
          

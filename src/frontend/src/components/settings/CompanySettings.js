@@ -120,6 +120,18 @@ const CompanySettings = () => {
       if (vals.fy_start) await window.electronAPI?.settingsSet?.('fiscal_year_start', vals.fy_start);
       if (vals.vat_rate != null) await window.electronAPI?.settingsSet?.('default_tax_rate', String(vals.vat_rate));
       if (vals.tax_name) await window.electronAPI?.settingsSet?.('tax_name', vals.tax_name);
+      // Ensure the default tax rate exists in vat_rates so it appears on invoices
+      if (vals.vat_rate != null && Number(vals.vat_rate) > 0) {
+        const existingRates = await window.electronAPI?.getAllVat?.() || [];
+        const match = existingRates.find(r => Number(r.vat_percentage) === Number(vals.vat_rate));
+        if (!match) {
+          await window.electronAPI?.insertVat?.(
+            vals.tax_name || 'Default Tax',
+            Number(vals.vat_rate),
+            null
+          );
+        }
+      }
       if (vals.terms != null) await window.electronAPI?.settingsSet?.('default_invoice_terms', String(vals.terms));
       if (vals.currency) {
         await window.electronAPI?.settingsSet?.('base_currency', vals.currency);
@@ -241,8 +253,15 @@ const CompanySettings = () => {
                   <Option value="ngo">Non-Profit</Option>
                 </Select>
               </Form.Item>
-              <Form.Item name="terms" label="Default Invoice Terms (Days)" style={{ flex: 1 }}>
-                <InputNumber min={0} max={365} style={{ width: '100%' }} />
+              <Form.Item name="terms" label="Default Payment Terms" style={{ flex: 1 }}>
+                <Select allowClear>
+                  <Select.Option value="Net 7">Net 7</Select.Option>
+                  <Select.Option value="Net 15">Net 15</Select.Option>
+                  <Select.Option value="Net 30">Net 30</Select.Option>
+                  <Select.Option value="Net 45">Net 45</Select.Option>
+                  <Select.Option value="Net 60">Net 60</Select.Option>
+                  <Select.Option value="Due on Receipt">Due on Receipt</Select.Option>
+                </Select>
               </Form.Item>
             </div>
           </Card>

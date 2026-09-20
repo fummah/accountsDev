@@ -1,18 +1,28 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   Card, Form, Input, Button, DatePicker, Select, message, Divider, Modal,
-  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Spin, Collapse, Statistic
+  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Collapse, Statistic, Badge, Table
 } from 'antd';
 import {
-  ArrowLeftOutlined, PlusOutlined, MinusCircleOutlined, SaveOutlined,
-  FileTextOutlined, DollarOutlined, SwapOutlined, CheckCircleOutlined,
-  PaperClipOutlined, UploadOutlined, BankOutlined, ShopOutlined, ReloadOutlined, DownloadOutlined,
-  PrinterOutlined, EyeOutlined
+  PlusOutlined, MinusCircleOutlined, SaveOutlined,
+  FileTextOutlined, DollarOutlined, SwapOutlined,
+  PaperClipOutlined, UploadOutlined, ReloadOutlined, DownloadOutlined,
+  PrinterOutlined, EyeOutlined, BookOutlined
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
 import COUNTRIES from '../../../utils/countries';
 import { phoneInputHandler } from '../../../utils/phone';
+import { dedupeAccounts, getBillLineAccounts, BILL_LINE_ACCOUNT_TYPES } from '../../../utils/accounts';
+import { getInventoryProducts } from '../../../utils/products';
+import AccountSelect from '../../shared/AccountSelect';
+import ContactIdentityNote from '../../shared/ContactIdentityNote';
+import { deriveDisplayName, identityRule } from '../../../utils/contactIdentity';
+import JournalEntryDetailModal from '../../accountant/JournalEntryDetailModal';
+import {
+  FormSection, FormGrid, FormCol, DocumentActionBar, TotalsBlock, FORM_ITEM_STYLE,
+  PAGE_WRAPPER_STYLE,
+} from '../../shared/FormSection';
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -27,17 +37,73 @@ const TERMS_OPTIONS = [
   { value: 90, label: 'Net 90' },
 ];
 
-const ACCOUNT_TYPES_ALLOWED = [
-  'Expense', 'Cost of Goods Sold', 'Other Expense',
-  'Asset', 'Inventory', 'Bank', 'Cash', 'Liability',
-  'Credit Card', 'Long Term Liability', 'Other Current Liability',
-  'Income', 'Other Income', 'Equity'
-];
+// NOTE: which accounts may appear on a bill line is derived from each
+// account's real Type/classification (see utils/accounts.js → isBillLineAccount),
+// never from a hand-maintained name list. BILL_LINE_ACCOUNT_TYPES is only used
+// to populate the "Add New Account" modal so it offers bill-usable types.
+
+// ── Bill Date + Terms → Due Date ─────────────────────────────────────────
+// The ONE shared calculation for this screen. The mount initialiser, the Bill
+// Date handler, the Terms handler and the vendor default-terms path all call
+// it, so every path produces exactly the same Due Date.
+const calculateDueDate = (billDate, terms) => {
+  const base = billDate ? moment(billDate) : null;
+  if (!base || !base.isValid()) return null;
+  const days = Number(terms);
+  return base.clone().add(Number.isFinite(days) ? days : 30, 'days');
+};
+
+// A vendor's stored terms may be a number (30), a numeric string ("30") or a
+// label ("Net 30", "Due on receipt"). Normalise it to a day offset so it can
+// drive both the Terms select and the Due Date calculation.
+const normalizeTerms = (raw) => {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const exact = Number(s);
+  if (Number.isFinite(exact)) return exact;
+  if (/receipt|immediate|due\s+now/i.test(s)) return 0;
+  const net = s.match(/net\s*(\d{1,3})/i);
+  if (net) return Number(net[1]);
+  const any = s.match(/\d{1,3}/);
+  return any ? Number(any[0]) : null;
+};
+
+// ── Bill lines ───────────────────────────────────────────────────────────
+// A bill line is one of two shapes, and the Type column switches between them:
+//
+//   'account' — an account plus a hand-typed amount. This is the original
+//               behaviour, and it is what every pre-existing bill line is.
+//   'item'    — an inventory product plus quantity x rate. The amount is
+//               COMPUTED from qty x rate and is never typed, so the line total
+//               can never disagree with the quantity it claims.
+//
+// The stored value matches what the backend writes (`expense_lines.line_type`),
+// and a NULL/legacy value reads as 'account'.
+const LINE_ACCOUNT = 'account';
+const LINE_ITEM = 'item';
+
+const makeBillLine = (overrides = {}) => ({
+  key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  line_type: LINE_ACCOUNT,
+  category: '',
+  accountId: undefined,
+  productId: undefined,
+  description: '',
+  quantity: undefined,
+  rate: undefined,
+  amount: 0,
+  warehouseId: undefined,
+  ...overrides,
+});
 
 const EnterBill = ({ history, location, match }) => {
   const { symbol: cSym } = useCurrency();
   const [vendors, setVendors] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  // Accounts that are valid on a BILL LINE (server-filtered via context:'bill').
+  const [billAccounts, setBillAccounts] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
@@ -45,7 +111,22 @@ const EnterBill = ({ history, location, match }) => {
   const [supplierForm] = Form.useForm();
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountForm] = Form.useForm();
-  const [lines, setLines] = useState([{ key: Date.now(), category: '', description: '', amount: 0 }]);
+  const [accountSubTypes, setAccountSubTypes] = useState({});
+  const [selectedAccType, setSelectedAccType] = useState(null);
+  const [accountLineKey, setAccountLineKey] = useState(null);
+  const [lines, setLines] = useState([makeBillLine()]);
+  // Warehouses back the per-line Warehouse select on inventory item lines.
+  const [warehouses, setWarehouses] = useState([]);
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState(null);
+  // Inline "Add New Inventory Item" modal — the same pattern CreateInvoice and
+  // CreateQuote already use, so a new item can be created without leaving the
+  // bill (and without a second product form existing anywhere).
+  const [prodModalOpen, setProdModalOpen] = useState(false);
+  const [prodForm] = Form.useForm();
+  // The item line that opened the Add New Inventory Item modal, so the created
+  // item can be selected back onto it.
+  const [productLineKey, setProductLineKey] = useState(null);
+  const [journalDetailId, setJournalDetailId] = useState(null);
   const editId = match?.params?.id;
   const isEdit = !!editId;
   const preSelectedVendorId = useMemo(() => {
@@ -68,14 +149,81 @@ const EnterBill = ({ history, location, match }) => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [billDocuments, setBillDocuments] = useState([]);
   const fileInputRef = useRef(null);
+  // Vendor id whose default terms have already been applied, so a vendor-list
+  // refresh cannot overwrite terms the user picked by hand afterwards.
+  const vendorTermsAppliedRef = useRef(null);
+
+  // ── Due Date helpers ──────────────────────────────────────────────────
+  // Write the Due Date only when it actually differs from the current value.
+  // This is what stops the mount initialiser, the change handlers and the
+  // vendor-defaults path from fighting each other (no render/effect loop).
+  const applyDueDate = (billDate, terms) => {
+    const next = calculateDueDate(billDate, terms);
+    if (!next) return;
+    const current = form.getFieldValue('dueDate');
+    if (current && moment(current).isSame(next, 'day')) return;
+    form.setFieldsValue({ dueDate: next });
+  };
+
+  const termsOrDefault = (terms) => (terms === null || terms === undefined ? 30 : terms);
+
+  // Bill Date drives Due Date (Due Date = Bill Date + Terms).
+  const handleBillDateChange = (val) => {
+    applyDueDate(val, form.getFieldValue('terms'));
+  };
+
+  // Terms drives Due Date.
+  const handleTermsChange = (val) => {
+    applyDueDate(form.getFieldValue('billDate'), val);
+  };
+
+  // Apply a vendor's stored default payment terms (suppliers.supplier_terms)
+  // and recompute the Due Date from them. Only terms representable in the
+  // Terms dropdown are applied, so the select can never show a blank value.
+  const applyVendorDefaultTerms = (vendor) => {
+    if (!vendor) return;
+    const days = normalizeTerms(vendor.supplier_terms);
+    if (days === null) return;
+    if (!TERMS_OPTIONS.some(t => t.value === days)) return;
+    if (Number(form.getFieldValue('terms')) === Number(days)) return;
+    form.setFieldsValue({ terms: days });
+    applyDueDate(form.getFieldValue('billDate'), days);
+  };
+
+  // Clear the form and re-apply the Bill Date + Terms → Due Date rule so a
+  // freshly cleared screen opens with a calculated Due Date, not a blank one.
+  const resetForm = () => {
+    form.resetFields();
+    setLines([makeBillLine()]);
+    const billDate = form.getFieldValue('billDate') || moment();
+    applyDueDate(billDate, termsOrDefault(form.getFieldValue('terms')));
+  };
+
+  // Cancel never saves. This screen has no unsaved-changes guard today, so
+  // Cancel simply returns where the user came from (falling back to the bill
+  // tracker) — no new warning system is introduced.
+  const handleCancel = () => {
+    if (history && history.length > 1) history.goBack();
+    else if (history && history.push) history.push('/main/vendors/bills/tracker');
+  };
 
   useEffect(() => {
     loadVendors();
     loadAccounts();
     loadProducts();
     loadBankAccounts();
+    loadWarehouses();
     if (editId) loadBill(editId);
   }, [editId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const st = await window.electronAPI.coaGetSubtypes?.();
+        if (st && typeof st === 'object') setAccountSubTypes(st);
+      } catch {}
+    })();
+  }, []);
 
   useEffect(() => {
     if (preSelectedVendorId && vendors.length > 0 && !editId) {
@@ -86,55 +234,39 @@ const EnterBill = ({ history, location, match }) => {
         if (vendor?.vendor_type === 'Credit Card' || vendor?.vendor_type === 'Loan Lender') {
           message.info(`Vendor type "${vendor.vendor_type}" — if all line accounts use a Credit Card/Loan account, this bill will reclassify the balance to AP instead of recording an expense.`);
         }
+        // A pre-selected vendor's default terms drive Terms + Due Date too —
+        // but only once per vendor, so reloading the vendor list (Refresh)
+        // can't overwrite terms the user has since chosen by hand.
+        if (vendorTermsAppliedRef.current !== preSelectedVendorId) {
+          vendorTermsAppliedRef.current = preSelectedVendorId;
+          applyVendorDefaultTerms(vendor);
+        }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendors, preSelectedVendorId, editId, form]);
 
-  const accountTypeLabel = (type) => {
-    const map = {
-      'Expense': 'Expense',
-      'Cost of Goods Sold': 'COGS',
-      'Other Expense': 'Other',
-      'Asset': 'Asset',
-      'Inventory': 'Inventory',
-      'Bank': 'Bank',
-      'Cash': 'Cash',
-      'Liability': 'Liability',
-      'Credit Card': 'Credit Card',
-      'Long Term Liability': 'LT Liab',
-      'Other Current Liability': 'Cur Liab',
-      'Income': 'Income',
-      'Other Income': 'Oth Inc',
-      'Equity': 'Equity',
-    };
-    return map[type] || type;
-  };
-
-  const typeColor = (type) => {
-    const map = {
-      'Expense': '#faad14',
-      'Cost of Goods Sold': '#eb2f96',
-      'Other Expense': '#d48806',
-      'Asset': '#1890ff',
-      'Inventory': '#52c41a',
-      'Bank': '#722ed1',
-      'Cash': '#13c2c2',
-      'Liability': '#f5222d',
-      'Credit Card': '#cf1322',
-      'Long Term Liability': '#ad4e00',
-      'Other Current Liability': '#d46b08',
-      'Income': '#52c41a',
-      'Other Income': '#389e0d',
-      'Equity': '#1890ff',
-    };
-    return map[type] || '#999';
-  };
+  // Populate Due Date as soon as the screen opens. For a NEW bill the Due Date
+  // must be calculated immediately from Bill Date + Terms (previously it stayed
+  // blank until Terms was touched by hand). For an EXISTING bill the stored Due
+  // Date is authoritative and must NOT be overwritten while the record loads
+  // (see loadBill), so this initialiser is skipped in edit mode.
+  useEffect(() => {
+    if (isEdit) return;
+    const billDate = form.getFieldValue('billDate') || moment();
+    applyDueDate(billDate, termsOrDefault(form.getFieldValue('terms')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit]);
 
   const loadBill = async (id) => {
     try {
       const data = await window.electronAPI.getSingleExpense?.(id);
       if (data) {
         setBillData(data);
+        // NOTE: the stored Due Date is authoritative when editing — it is
+        // loaded as-is and never recalculated on mount, so opening a bill can
+        // never silently move its due date. Changing Bill Date or Terms later
+        // does recalculate it.
         form.setFieldsValue({
           vendorId: data.payee,
           billNumber: data.ref_no,
@@ -144,7 +276,22 @@ const EnterBill = ({ history, location, match }) => {
           memo: data.memo || '',
         });
         if (data.lines && data.lines.length > 0) {
-          setLines(data.lines.map((l, i) => ({ key: i, category: l.category || '', description: l.description || '', amount: Number(l.amount) || 0 })));
+          setLines(data.lines.map((l, i) => makeBillLine({
+            key: i,
+            line_type: l.line_type === LINE_ITEM ? LINE_ITEM : LINE_ACCOUNT,
+            category: l.category || '',
+            description: l.description || '',
+            amount: Number(l.amount) || 0,
+            // Carry the stored account id through instead of re-resolving the
+            // account by name — account names are not unique across parents.
+            accountId: l.account_id != null ? Number(l.account_id) : undefined,
+            // Item-line fields. NULL on every historical row, so an old bill
+            // opens as account lines exactly as before.
+            productId: l.product_id != null ? Number(l.product_id) : undefined,
+            quantity: l.quantity != null ? Number(l.quantity) : undefined,
+            rate: l.rate != null ? Number(l.rate) : undefined,
+            warehouseId: l.warehouse_id != null ? Number(l.warehouse_id) : undefined,
+          })));
         }
         // Load attached documents
         try {
@@ -169,8 +316,21 @@ const EnterBill = ({ history, location, match }) => {
 
   const loadAccounts = async () => {
     try {
-      const data = await window.electronAPI.getChartOfAccounts?.();
-      setAccounts(Array.isArray(data) ? data.filter(a => a.status === 'Active') : []);
+      // Two lists on purpose:
+      //   • `accounts`     — every active account. Used to resolve an account id
+      //                      for legacy lines, to evaluate the Credit-Card/Loan
+      //                      reclassification, and as Parent-Account options.
+      //   • `billAccounts` — only accounts valid on a BILL LINE, requested
+      //                      server-side via context:'bill'. Because the picker
+      //                      (and therefore its search index) is built from this
+      //                      list, an Income account can never be surfaced —
+      //                      not by browsing and not by searching.
+      const [all, billOnly] = await Promise.all([
+        window.electronAPI.getChartOfAccounts?.(),
+        window.electronAPI.getChartOfAccounts?.({ context: 'bill' }),
+      ]);
+      setAccounts(Array.isArray(all) ? dedupeAccounts(all.filter(a => a.status === 'Active')) : []);
+      setBillAccounts(Array.isArray(billOnly) ? dedupeAccounts(billOnly.filter(a => a.status === 'Active')) : []);
     } catch {}
   };
 
@@ -185,18 +345,59 @@ const EnterBill = ({ history, location, match }) => {
     try {
       const accs = await window.electronAPI.getChartOfAccounts?.();
       const list = Array.isArray(accs) ? accs : [];
-      setBankAccounts(list.filter(a => ['Bank', 'Cash', 'bank', 'cash'].includes(a.accountType || a.type || '')));
+      setBankAccounts(dedupeAccounts(list.filter(a => ['Bank', 'Cash', 'bank', 'cash'].includes(a.accountType || a.type || ''))));
     } catch {}
+  };
+
+  // Warehouses drive the per-line Warehouse select. The default (flagged by
+  // isDefault, else the lowest id — see Warehouses.getDefault()) is preselected
+  // so the common single-warehouse case needs no interaction at all.
+  const loadWarehouses = async () => {
+    try {
+      const list = await window.electronAPI.getWarehouses?.();
+      const arr = Array.isArray(list) ? list : (list?.data || []);
+      setWarehouses(arr);
+      const def = arr.find(w => Number(w.isDefault) === 1) || arr[0];
+      setDefaultWarehouseId(def ? Number(def.id) : null);
+    } catch { setWarehouses([]); }
   };
 
   const handleAddSupplier = async () => {
     try {
       const vals = await supplierForm.validateFields();
-      const display = `${vals.first_name || ''} ${vals.last_name || ''}`.trim() || vals.company || 'New Supplier';
-      await window.electronAPI.insertSupplier?.(
-        '', vals.first_name || '', '', vals.last_name || '', '', vals.email || '', display,
-        vals.company || '', vals.phone || '', '', '', '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '', vals.postal_code || '', vals.country || '', '', '', '', '', 0, '', null, ''
+      // Shared rule: explicit -> personal name -> company. `'New Supplier'` is
+      // gone — the validator above already refuses a record with neither field.
+      // This form names the company field `company`, hence the alias.
+      const display = deriveDisplayName({
+        first_name: vals.first_name,
+        last_name: vals.last_name,
+        company_name: vals.company,
+      });
+      // Arguments are POSITIONAL and there are 31 of them. This call used to
+      // pass only 26, which silently shifted every address field one slot left
+      // (the street address landed in `website`) and left `notes`/`vendor_type`
+      // undefined. Keep one argument per parameter, in order.
+      //
+      // The trailing tax trio is explicit: this is a QUICK-ADD that captures
+      // only identity + address, so the vendor gets the column defaults —
+      // taxable, no default rate. Passing them explicitly (rather than stopping
+      // short) keeps the positional contract auditable; the full Add/Edit Vendor
+      // forms are where a Default Tax Rate is chosen.
+      const res = await window.electronAPI.insertSupplier?.(
+        /* title */ '', vals.first_name || '', /* middle_name */ '', vals.last_name || '',
+        /* suffix */ '', vals.email || '', display,
+        /* company_name */ vals.company || '', /* phone_number */ vals.phone || '',
+        /* mobile_number */ '', /* fax */ '', /* other */ '', /* website */ '',
+        /* address1 */ vals.address1 || '', /* address2 */ vals.address2 || '',
+        /* city */ vals.city || '', /* state */ vals.state || '',
+        /* postal_code */ vals.postal_code || '', /* country */ vals.country || '',
+        /* supplier_terms */ '', /* business_number */ '', /* account_number */ '',
+        /* expense_category */ '', /* opening_balance */ 0, /* as_of */ null,
+        /* entered_by */ 'system', /* notes */ '', /* vendor_type */ 'Regular',
+        /* taxable */ true, /* default_tax_rate */ null, /* default_tax_rate_id */ null
       );
+      if (res && res.error) { message.error(res.error); return; }
+      if (res && res.success === false) { message.error('Failed to add supplier'); return; }
       message.success('Supplier added');
       setSupplierModalOpen(false);
       supplierForm.resetFields();
@@ -206,11 +407,6 @@ const EnterBill = ({ history, location, match }) => {
       setSupplierModalOpen(false);
       supplierForm.resetFields();
     }
-  };
-
-  const handleTermsChange = (val) => {
-    const billDate = form.getFieldValue('billDate') || moment();
-    form.setFieldsValue({ dueDate: moment(billDate).add(val, 'days') });
   };
 
   const handleOpenDocument = async (doc) => {
@@ -223,27 +419,90 @@ const EnterBill = ({ history, location, match }) => {
     }
   };
 
-  const addLine = () => setLines([...lines, { key: Date.now(), category: '', description: '', amount: 0 }]);
-  const removeLine = (key) => { if (lines.length > 1) setLines(lines.filter(l => l.key !== key)); };
-  const updateLine = (key, field, value) => setLines(lines.map(l => l.key === key ? { ...l, [field]: value } : l));
+  const addLine = () => setLines(prev => [...prev, makeBillLine()]);
+  const removeLine = (key) => { if (lines.length > 1) setLines(prev => prev.filter(l => l.key !== key)); };
 
-  const selectLineProduct = (key, productId) => {
-    const prod = products.find(p => p.id === productId);
-    if (!prod) return;
-    const price = Number(prod.selling_price || prod.price || 0);
-    setLines(lines.map(l => {
-      if (l.key !== key) return l;
-      const category = (prod.type || '').toLowerCase() === 'inventory' ? 'Inventory' : 'Cost of Goods Sold';
-      return { ...l, description: prod.name || prod.description || '', amount: price, category };
-    }));
+  // One place recomputes a line's amount, so an item line's total can never
+  // drift from its quantity x rate.
+  const recomputeAmount = (line) =>
+    line.line_type === LINE_ITEM
+      ? (Number(line.quantity) || 0) * (Number(line.rate) || 0)
+      : (Number(line.amount) || 0);
+
+  const updateLine = (key, field, value) => setLines(prev => prev.map(l => {
+    if (l.key !== key) return l;
+    const next = { ...l, [field]: value };
+    next.amount = recomputeAmount(next);
+    return next;
+  }));
+
+  // Switching Type must not leave the other shape's values behind, or a line
+  // could submit an item AND an account at once.
+  const setLineType = (key, type) => setLines(prev => prev.map(l => {
+    if (l.key !== key) return l;
+    if (type === LINE_ITEM) {
+      return { ...l, line_type: LINE_ITEM, category: '', accountId: undefined, amount: recomputeAmount({ ...l, line_type: LINE_ITEM }) };
+    }
+    return {
+      ...l, line_type: LINE_ACCOUNT,
+      productId: undefined, quantity: undefined, rate: undefined, warehouseId: undefined,
+    };
+  }));
+
+  // Resolve an account id from its name (for legacy bill lines stored as names)
+  const resolveAccountId = (name) => {
+    if (!name) return undefined;
+    const a = accounts.find(x => (x.accountName || x.name) === name);
+    return a ? Number(a.id) : undefined;
   };
 
-  const totalAmount = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  // Select by account ID; keep both the name (category) and the unique ID.
+  const updateLineAccount = (key, id) => {
+    const a = accounts.find(x => Number(x.id) === Number(id));
+    setLines(prev => prev.map(l => l.key === key ? {
+      ...l,
+      category: a ? (a.accountName || a.name) : (l.category || ''),
+      accountId: id,
+    } : l));
+  };
+
+  // Pick the inventory product for an item line.
+  //
+  // The Rate is deliberately NOT prefilled from products.price: that column is
+  // the SELLING price, and this is a purchase. Prefilling it would silently
+  // overstate both the inventory value and the AP balance with a number the
+  // user never chose, so the rate starts empty and must be typed.
+  const selectLineItem = (key, productId) => setLines(prev => prev.map(l => {
+    if (l.key !== key) return l;
+    if (productId == null) {
+      return { ...l, productId: undefined, description: '', amount: recomputeAmount({ ...l, productId: undefined, description: '' }) };
+    }
+    const prod = products.find(p => Number(p.id) === Number(productId));
+    const next = {
+      ...l,
+      productId: Number(productId),
+      description: prod ? (prod.description || prod.name || '') : l.description,
+      quantity: l.quantity != null ? l.quantity : 1,
+      warehouseId: l.warehouseId != null ? l.warehouseId : (defaultWarehouseId ?? undefined),
+    };
+    next.amount = recomputeAmount(next);
+    return next;
+  }));
+
+  const totalAmount = lines.reduce((s, l) => s + recomputeAmount(l), 0);
   const paidAmount = Number(billData?.paid_amount) || 0;
   const remaining = totalAmount - paidAmount;
 
   const handleSubmit = async (values) => {
     if (totalAmount <= 0) return message.warning('Bill must have at least one line with an amount');
+    // An inventory line is a quantity AND a rate — never one without the other.
+    // The rate is not prefilled, so it is easy to leave blank; catching it here
+    // keeps a $0 inventory line (which would silently post nothing to Inventory
+    // Asset while still being saved) out of the ledger.
+    const itemLineMissingItem = lines.find(l => l.line_type === LINE_ITEM && (Number(l.quantity) || 0) > 0 && l.productId == null);
+    if (itemLineMissingItem) return message.warning('Select an item for the inventory line');
+    const itemLineMissingRate = lines.find(l => l.line_type === LINE_ITEM && (Number(l.quantity) || 0) > 0 && !(Number(l.rate) > 0));
+    if (itemLineMissingRate) return message.warning('An inventory item line needs a quantity and a rate');
     try {
       setLoading(true);
       const payee = values.vendorId;
@@ -257,11 +516,24 @@ const EnterBill = ({ history, location, match }) => {
       const approval_status = 'Unpaid';
       const memo = values.memo || '';
       const terms = values.terms || 30;
-      const expenseLines = lines.filter(l => Number(l.amount) > 0).map(l => ({
-        category: l.category || 'General',
-        description: l.description || '',
-        amount: Number(l.amount) || 0,
-      }));
+      const expenseLines = lines.filter(l => recomputeAmount(l) > 0).map(l => {
+        const isItem = l.line_type === LINE_ITEM;
+        return {
+          line_type: isItem ? LINE_ITEM : LINE_ACCOUNT,
+          category: l.category || (isItem ? 'Inventory' : 'General'),
+          description: l.description || '',
+          amount: recomputeAmount(l),
+          // An item line's account is Inventory Asset. The backend resolves it
+          // authoritatively too, so the accounting is correct either way.
+          accountId: isItem ? (l.accountId ?? undefined) : (l.accountId ?? resolveAccountId(l.category)),
+          product_id: isItem ? Number(l.productId) : null,
+          quantity: isItem ? (Number(l.quantity) || 0) : null,
+          rate: isItem ? (Number(l.rate) || 0) : null,
+          warehouse_id: isItem
+            ? (l.warehouseId != null ? Number(l.warehouseId) : (defaultWarehouseId ?? null))
+            : null,
+        };
+      });
 
       let res;
       if (isEdit) {
@@ -271,7 +543,7 @@ const EnterBill = ({ history, location, match }) => {
       }
       if (res && res.success) {
         // Upload file attachment if present
-        const expenseId = Number(res.expenseId || res.id || (res.result && res.result.lastInsertRowid) || 0);
+        const expenseId = Number(res.expenseId || res.id || editId || (res.result && res.result.lastInsertRowid) || 0);
         if (selectedFile && expenseId > 0) {
           try {
             const reader = new FileReader();
@@ -289,16 +561,17 @@ const EnterBill = ({ history, location, match }) => {
               enteredBy: 'system',
             });
             if (!uploadRes?.success) {
-              console.warn('File upload returned failure:', uploadRes?.error);
+              console.error('[attachments] bill attachment upload failed:', uploadRes?.error);
+              message.error('The bill was saved, but the attachment could not be stored. Please try attaching the file again.');
             }
           } catch (uploadErr) {
-            console.warn('File upload failed (non-fatal):', uploadErr);
+            console.error('[attachments] bill attachment upload threw:', uploadErr);
+            message.error('The bill was saved, but the attachment could not be stored. Please try attaching the file again.');
           }
         }
         message.success(isEdit ? 'Bill updated' : 'Bill saved — recorded as Accounts Payable');
         if (!isEdit) {
-          form.resetFields();
-          setLines([{ key: Date.now(), category: '', description: '', amount: 0 }]);
+          resetForm();
           setSelectedFile(null);
           setBillDocuments([]);
         }
@@ -318,23 +591,61 @@ const EnterBill = ({ history, location, match }) => {
     try {
       const vals = await accountForm.validateFields();
       const payload = {
-        name: vals.name,
-        type: vals.type || 'Expense',
-        number: vals.code || '',
-        description: vals.description || '',
-        status: 'Active',
-        entered_by: 'system',
+        name:             vals.accountName,
+        type:             vals.accountType || 'Expense',
+        subType:          vals.subType || null,
+        number:           vals.accountCode || null,
+        description:      vals.description || '',
+        status:           vals.status || 'Active',
+        normalBalance:    vals.normalBalance || undefined,
+        openingBalance:   Number(vals.openingBalance) || 0,
+        taxLine:          vals.taxLine || null,
+        parentId:         vals.parentId || null,
+        entered_by:       'system',
       };
       const res = await window.electronAPI.insertChartAccount(payload);
       if (res?.success) {
         message.success('Account created');
+        if (accountLineKey != null) {
+          const newId = res?.account?.id || res?.id || res?.data?.id;
+          updateLine(accountLineKey, 'category', vals.accountName);
+          if (newId != null) updateLine(accountLineKey, 'accountId', Number(newId));
+        }
         setAccountModalOpen(false);
         accountForm.resetFields();
+        setSelectedAccType(null);
+        setAccountLineKey(null);
         loadAccounts();
       } else {
         message.error(res?.error || 'Failed to create account');
       }
     } catch (e) { if (!e?.errorFields) message.error('Failed to create account'); }
+  };
+
+  // ── Add New Inventory Item ────────────────────────────────────────────────
+  // Reuses the SAME inline product modal shape CreateInvoice/CreateQuote use,
+  // so there is exactly one way to create a product from a document screen and
+  // no second product form to keep in step. On success the new item is
+  // auto-selected on the line that opened the modal.
+  const handleAddProduct = async () => {
+    try {
+      const vals = await prodForm.validateFields();
+      const res = await window.electronAPI.insertProduct?.(
+        vals.type || 'Product', vals.name || '', vals.sku || '', vals.category || '',
+        vals.description || '', Number(vals.price) || 0,
+        '', '', '', '', 'system', Number(vals.stock) || 0, null
+      );
+      if (res && res.success === false) { message.error(res?.error || 'Failed to add item'); return; }
+      message.success('Item added');
+      setProdModalOpen(false);
+      prodForm.resetFields();
+      const p = await window.electronAPI.getAllProducts?.();
+      const arr = Array.isArray(p) ? p : (p?.all || []);
+      setProducts(arr);
+      const newProd = arr.find(pr => (pr.name || '') === (vals.name || ''));
+      if (newProd && productLineKey != null) selectLineItem(productLineKey, newProd.id);
+      setProductLineKey(null);
+    } catch (e) { if (!e?.errorFields) message.error('Failed to add item'); }
   };
 
   // ── Payment & Credit ──────────────────────────────────────────────
@@ -344,7 +655,7 @@ const EnterBill = ({ history, location, match }) => {
     setSelectedCredit(null);
     payForm.setFieldsValue({
       paymentDate: moment(),
-      bankAccount: bankAccounts[0]?.accountName || bankAccounts[0]?.name || undefined,
+      bankAccount: bankAccounts[0]?.id != null ? Number(bankAccounts[0].id) : (bankAccounts[0]?.accountName || bankAccounts[0]?.name || undefined),
       amount: remaining > 0 ? remaining : totalAmount,
     });
     if (vendorId) {
@@ -399,7 +710,7 @@ const EnterBill = ({ history, location, match }) => {
   const handlePrintNow = () => {
     setPrintModalVisible(false);
     if (paidCheck) {
-      history.push('/main/accountant/check-printing');
+      history.push(`/main/accountant/check-printing?checkId=${paidCheck.id || ''}`);
     }
   };
 
@@ -409,8 +720,26 @@ const EnterBill = ({ history, location, match }) => {
     message.success('Check saved. Print later from Check Printing screen.');
   };
 
-  const allAccounts = accounts.filter(a => ACCOUNT_TYPES_ALLOWED.includes(a.accountType || a.type));
+  // Bill-line accounts only. Revenue (Income / Other Income) accounts are
+  // excluded by the account's classification, never by its name, so an account
+  // called "Egg Sales" is filtered out while an expense called "Loan Fees"
+  // stays in. The client-side guard keeps the guarantee even if the backend
+  // response arrives unfiltered (e.g. an older main process).
+  const allAccounts = getBillLineAccounts(billAccounts.length ? billAccounts : accounts);
+  // Only inventory-tracking products may appear on an item line. A Service is
+  // never offered, and an unclassified product fails safe to "not inventory"
+  // (see utils/products.js), so a service can never move stock from a bill.
+  const inventoryItems = getInventoryProducts(products);
   const isPaid = billData && (billData.approval_status || '').toLowerCase() === 'paid';
+
+  const openPaidJournal = async () => {
+    if (!editId) return;
+    try {
+      const res = await window.electronAPI.journalGetBySource?.('bill_payment', Number(editId));
+      if (res && !res.error && res.id) setJournalDetailId(res.id);
+      else message.info('No journal entry posted for this bill payment');
+    } catch { message.error('Failed to load journal entry'); }
+  };
 
   const vendorName = vendors.find(v => v.id === form.getFieldValue('vendorId'))?.display_name || '';
   const vendorType = vendors.find(v => v.id === form.getFieldValue('vendorId'))?.vendor_type || '';
@@ -430,8 +759,103 @@ const EnterBill = ({ history, location, match }) => {
     return hasValidLine;
   })();
 
+  // Type | Item/Account | Description | Qty | Rate | Amount | Warehouse | Actions
+  //
+  // Qty / Rate / Warehouse belong to an item line only, and Amount is read-only
+  // there (computed from qty × rate) so a line's total can never disagree with
+  // the quantity it claims. On an account line the shape is exactly what it was
+  // before: an account picker and a typed amount.
+  const dash = <span style={{ color: '#bfbfbf' }}>—</span>;
+  const lineColumns = [
+    {
+      title: 'Type', key: 'type', width: 130,
+      render: (_, r) => (
+        <Select size="small" style={{ width: '100%' }}
+          value={r.line_type || LINE_ACCOUNT}
+          onChange={v => setLineType(r.key, v)}>
+          <Option value={LINE_ACCOUNT}>Account</Option>
+          <Option value={LINE_ITEM}>Inventory Item</Option>
+        </Select>
+      ),
+    },
+    {
+      title: 'Item / Account', key: 'target', width: 230,
+      render: (_, r) => (r.line_type === LINE_ITEM ? (
+        <Select size="small" showSearch allowClear optionFilterProp="children"
+          style={{ width: '100%' }} placeholder={inventoryItems.length ? 'Select item' : 'No inventory items'}
+          value={r.productId != null ? Number(r.productId) : undefined}
+          onChange={v => selectLineItem(r.key, v)}
+          dropdownRender={menu => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" size="small" icon={<PlusOutlined />} onClick={() => { setProductLineKey(r.key); setProdModalOpen(true); }} style={{ width: '100%', textAlign: 'left' }}>Add New Inventory Item</Button></>)}>
+          {inventoryItems.map(p => (
+            <Option key={p.id} value={Number(p.id)}>{p.name || p.description}{p.sku ? ` (${p.sku})` : ''}</Option>
+          ))}
+        </Select>
+      ) : (
+        <AccountSelect
+          style={{ width: '100%' }}
+          accounts={allAccounts}
+          value={r.accountId ?? resolveAccountId(r.category)}
+          onChange={(v) => updateLineAccount(r.key, v)}
+          placeholder="Select account"
+          dropdownRender={menu => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" size="small" icon={<PlusOutlined />} onClick={() => { setAccountLineKey(r.key); setAccountModalOpen(true); }} style={{ width: '100%', textAlign: 'left' }}>Add New Account</Button></>)}
+        />
+      )),
+    },
+    {
+      title: 'Description', key: 'desc',
+      render: (_, r) => (
+        <Input size="small" value={r.description} placeholder="Description"
+          onChange={e => updateLine(r.key, 'description', e.target.value)} />
+      ),
+    },
+    {
+      title: 'Qty', key: 'qty', width: 80,
+      render: (_, r) => (r.line_type === LINE_ITEM
+        ? <InputNumber size="small" min={0} step={1} style={{ width: '100%' }} value={r.quantity}
+            onChange={v => updateLine(r.key, 'quantity', v)} />
+        : dash),
+    },
+    {
+      title: `Rate (${cSym})`, key: 'rate', width: 110,
+      render: (_, r) => (r.line_type === LINE_ITEM
+        ? <InputNumber size="small" min={0} step={0.01} style={{ width: '100%' }} value={r.rate}
+            placeholder="0.00" onChange={v => updateLine(r.key, 'rate', v)} />
+        : dash),
+    },
+    {
+      title: `Amount (${cSym})`, key: 'amount', width: 130,
+      render: (_, r) => (r.line_type === LINE_ITEM
+        // Computed — never typed, so it cannot disagree with qty × rate.
+        ? <span style={{ fontWeight: 500 }}>{cSym} {(Number(r.amount) || 0).toFixed(2)}</span>
+        : <InputNumber size="small" min={0} step={0.01} style={{ width: '100%' }} value={r.amount}
+            onChange={v => updateLine(r.key, 'amount', v || 0)}
+            formatter={v => v ? `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+            parser={v => v.replace(/,/g, '')} />),
+    },
+    {
+      title: 'Warehouse', key: 'warehouse', width: 150,
+      render: (_, r) => (r.line_type === LINE_ITEM
+        ? <Select size="small" style={{ width: '100%' }}
+            value={r.warehouseId != null ? Number(r.warehouseId) : (defaultWarehouseId ?? undefined)}
+            placeholder={warehouses.length ? 'Select warehouse' : 'No warehouses'}
+            onChange={v => updateLine(r.key, 'warehouseId', v)}>
+            {warehouses.map(w => <Option key={w.id} value={Number(w.id)}>{w.name}</Option>)}
+          </Select>
+        : dash),
+    },
+    {
+      title: '', key: 'actions', width: 50,
+      render: (_, r) => (
+        <Tooltip title="Remove">
+          <Button size="small" danger icon={<MinusCircleOutlined />}
+            onClick={() => removeLine(r.key)} disabled={lines.length <= 1} />
+        </Tooltip>
+      ),
+    },
+  ];
+
   return (
-    <div style={{ padding: 24 }}>
+    <div style={PAGE_WRAPPER_STYLE}>
       <Card title={<span style={{ fontSize: 18, fontWeight: 600 }}><FileTextOutlined style={{ marginRight: 8 }} />{isEdit ? 'Edit Bill' : 'Enter Bill'}</span>}
         extra={<Space><Button icon={<DownloadOutlined />} onClick={() => {}}>Export</Button><Button icon={<ReloadOutlined />} onClick={loadVendors}>Refresh</Button></Space>}>
         <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -442,66 +866,72 @@ const EnterBill = ({ history, location, match }) => {
         </Row>
 
       <Form form={form} layout="vertical" onFinish={handleSubmit} initialValues={{ billDate: moment(), terms: 30 }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: '1 1 140px', minWidth: 120 }}>
-            <Form.Item name="billDate" label="Bill Date" rules={[{ required: true }]}>
-              <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
-            </Form.Item>
-          </div>
-          <div style={{ flex: '1 1 140px', minWidth: 120 }}>
-            <Form.Item name="dueDate" label="Due Date">
-              <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
-            </Form.Item>
-          </div>
-          <div style={{ flex: '1 1 100px', minWidth: 90 }}>
-            <Form.Item name="billNumber" label="Bill #">
-              <Input placeholder="INV-001" />
-            </Form.Item>
-          </div>
-          <div style={{ flex: '1 1 120px', minWidth: 100 }}>
-            <Form.Item name="terms" label="Terms">
-              <Select onChange={handleTermsChange}>
-                {TERMS_OPTIONS.map(t => <Option key={t.value} value={t.value}>{t.label}</Option>)}
-              </Select>
-            </Form.Item>
-          </div>
-          <div style={{ flex: '2 1 200px', minWidth: 160 }}>
-            <Form.Item name="vendorId" label="Vendor" rules={[{ required: true, message: 'Select a vendor' }]}>
-              <Select showSearch optionFilterProp="children" placeholder="Vendor"
-                dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setSupplierModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>New Vendor</Button></>)}
-                onChange={(v) => {
-                  const selected = vendors.find(x => x.id === v);
-                  const vt = selected?.vendor_type;
-                  if (vt === 'Credit Card' || vt === 'Loan Lender') {
-                    message.info(`Vendor type "${vt}" — if all line accounts use a Credit Card/Loan account, this bill will reclassify the balance to AP instead of recording an expense.`);
-                  }
-                }}>
-                {vendors.map(v => (
-                  <Option key={v.id} value={v.id}>{v.display_name || `${v.first_name} ${v.last_name}`}</Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </div>
-          <div style={{ flex: '2 1 200px', minWidth: 160 }}>
-            <Form.Item name="memo" label="Memo">
-              <Input placeholder="Internal memo..." />
-            </Form.Item>
-          </div>
-        </div>
+        <FormSection title="Bill Details" icon={<FileTextOutlined />}>
+          <FormGrid>
+            <FormCol>
+              <Form.Item name="vendorId" label="Vendor" style={FORM_ITEM_STYLE} rules={[{ required: true, message: 'Select a vendor' }]}>
+                <Select showSearch optionFilterProp="children" placeholder="Vendor"
+                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setSupplierModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>New Vendor</Button></>)}
+                  onChange={(v) => {
+                    const selected = vendors.find(x => x.id === v);
+                    const vt = selected?.vendor_type;
+                    if (vt === 'Credit Card' || vt === 'Loan Lender') {
+                      message.info(`Vendor type "${vt}" — if all line accounts use a Credit Card/Loan account, this bill will reclassify the balance to AP instead of recording an expense.`);
+                    }
+                    // The vendor's default terms (suppliers.supplier_terms) set
+                    // Terms and recompute Due Date.
+                    applyVendorDefaultTerms(selected);
+                  }}>
+                  {vendors.map(v => (
+                    <Option key={v.id} value={v.id}>{v.display_name || `${v.first_name} ${v.last_name}`}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item name="billNumber" label="Bill #" style={FORM_ITEM_STYLE}>
+                <Input placeholder="INV-001" />
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item name="terms" label="Terms" style={FORM_ITEM_STYLE}>
+                <Select onChange={handleTermsChange}>
+                  {TERMS_OPTIONS.map(t => <Option key={t.value} value={t.value}>{t.label}</Option>)}
+                </Select>
+              </Form.Item>
+            </FormCol>
 
-        {/* File Attachment */}
-        <div style={{ marginBottom: 16 }}>
-          <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}><PaperClipOutlined style={{ marginRight: 4 }} />Attachment (Vendor Invoice File)</Text>
+            <FormCol>
+              <Form.Item name="billDate" label="Bill Date" style={FORM_ITEM_STYLE} rules={[{ required: true }]}>
+                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" onChange={handleBillDateChange} />
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              {/* Bill Date + Terms → Due Date, via the one shared calculation. */}
+              <Form.Item name="dueDate" label="Due Date" style={FORM_ITEM_STYLE}>
+                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item name="memo" label="Memo" style={FORM_ITEM_STYLE}>
+                <Input placeholder="Internal memo..." />
+              </Form.Item>
+            </FormCol>
+          </FormGrid>
+        </FormSection>
+
+        <FormSection title="Attachments" icon={<PaperClipOutlined />}>
           <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={(e) => {
             const file = e.target.files && e.target.files[0];
             setSelectedFile(file || null);
           }} />
-          <Space>
+          <Space wrap style={{ marginBottom: 8 }}>
             <Button icon={<UploadOutlined />} onClick={() => fileInputRef.current?.click()}>Select File</Button>
+            <Text type="secondary" style={{ fontSize: 12 }}>Vendor invoice file</Text>
             {selectedFile && <Tag closable onClose={() => setSelectedFile(null)}>{selectedFile.name}</Tag>}
           </Space>
           {billDocuments.length > 0 && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginBottom: 8 }}>
               {billDocuments.map(doc => (
                 <Tag key={doc.id} style={{ cursor: 'pointer' }} onClick={() => handleOpenDocument(doc)}>
                   <EyeOutlined style={{ marginRight: 4 }} />{doc.document_name || doc.file_path || doc.random_number || 'View File'}
@@ -509,104 +939,75 @@ const EnterBill = ({ history, location, match }) => {
               ))}
             </div>
           )}
-        </div>
+        </FormSection>
 
-        <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0 16px' }}>
-          <DollarOutlined style={{ marginRight: 6 }} />Line Items
-        </Divider>
-
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 6, padding: '0 4px' }}>
-            <Text strong style={{ flex: 1, fontSize: 11 }}>Account</Text>
-            <Text strong style={{ flex: 2, fontSize: 11 }}>Description</Text>
-            <Text strong style={{ flex: 1, fontSize: 11 }}>Amount ({cSym})</Text>
-            <div style={{ width: 32 }} />
-          </div>
-          {lines.map((line) => (
-            <div key={line.key} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-              <Select
-                style={{ flex: 1 }}
-                value={line.category || undefined}
-                onChange={(v) => updateLine(line.key, 'category', v)}
-                placeholder="Select account"
-                showSearch optionFilterProp="children" allowClear
-                dropdownRender={menu => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" size="small" icon={<PlusOutlined />} onClick={() => setAccountModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Account</Button></>)}
-              >
-                {allAccounts.map(a => {
-                  const type = a.accountType || a.type;
-                  return (
-                    <Option key={a.id} value={a.accountName || a.name}>
-                      <Space size={4}>
-                        <Tag color={typeColor(type)} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{accountTypeLabel(type)}</Tag>
-                        {a.accountCode ? `${a.accountCode} - ` : ''}{a.accountName || a.name}
-                      </Space>
-                    </Option>
-                  );
-                })}
-              </Select>
-              <Input
-                style={{ flex: 2 }}
-                value={line.description}
-                onChange={(e) => updateLine(line.key, 'description', e.target.value)}
-                placeholder="Description"
-              />
-              <InputNumber
-                style={{ flex: 1 }}
-                min={0} step={0.01}
-                value={line.amount}
-                onChange={(v) => updateLine(line.key, 'amount', v || 0)}
-                formatter={v => v ? `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
-                parser={v => v.replace(/,/g, '')}
-              />
-              <Tooltip title="Remove">
-                <Button size="small" danger icon={<MinusCircleOutlined />} onClick={() => removeLine(line.key)} disabled={lines.length <= 1} />
-              </Tooltip>
-            </div>
-          ))}
-          <Button type="dashed" onClick={addLine} block icon={<PlusOutlined />} style={{ borderRadius: 6 }}>
-            Add Line
-          </Button>
-        </div>
-
-        {/* Total & Payment Status */}
-        <div style={{ textAlign: 'right', marginBottom: 16, padding: '12px 16px', background: '#f6f8fa', borderRadius: 8 }}>
-          {isEdit && paidAmount > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              <Tag color="green" style={{ fontSize: 11 }}><CheckCircleOutlined /> Paid: {cSym} {paidAmount.toFixed(2)}</Tag>
-              {remaining > 0.005 && <Tag color="orange" style={{ fontSize: 11 }}>Remaining: {cSym} {remaining.toFixed(2)}</Tag>}
-            </div>
-          )}
-          {looksLikeReclassification && (
-            <div style={{ marginBottom: 8 }}>
-              <Tag color="purple" style={{ fontSize: 11 }}><SwapOutlined /> Credit Card / Loan Reclassification — DR Credit Card/Loan / CR Accounts Payable</Tag>
-            </div>
-          )}
-          <Text style={{ fontSize: 13, marginRight: 16 }}>Total:</Text>
-          <Text strong style={{ fontSize: 18 }}>{cSym} {totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-          <div style={{ marginTop: 4 }}>
-            {isPaid ? (
-              <Tag color="green">PAID</Tag>
-            ) : (
-              <Tag color="orange">Unpaid — creates Accounts Payable</Tag>
-            )}
-          </div>
-        </div>
-
-        <Form.Item>
-          <Space>
-            <Button type="primary" htmlType="submit" loading={loading} icon={<SaveOutlined />} size="large" disabled={isPaid}>
-              {isEdit ? 'Update Bill' : 'Save Bill'}
+        <FormSection title="Line Items" icon={<DollarOutlined />}>
+          <div style={{ marginBottom: 12 }}>
+            {/* Type | Item/Account | Description | Qty | Rate | Amount | Warehouse | Actions.
+                Driven by React state rather than Form.Item, so it can sit inside
+                the surrounding <Form> without registering fields. */}
+            <Table
+              size="small"
+              rowKey="key"
+              columns={lineColumns}
+              dataSource={lines}
+              pagination={false}
+              scroll={{ x: 1080 }}
+              style={{ marginBottom: 8 }}
+            />
+            <Button type="dashed" onClick={addLine} block icon={<PlusOutlined />} style={{ borderRadius: 6 }}>
+              Add Line
             </Button>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6 }}>
+              An <strong>Inventory Item</strong> line moves stock and debits Inventory Asset; its Amount is
+              quantity × rate. An <strong>Account</strong> line debits the account you pick.
+            </Text>
+          </div>
+
+          {/* Total & Payment Status — values unchanged, laid out for scanning. */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
+            <div>
+              {looksLikeReclassification && (
+                <div style={{ marginBottom: 6 }}>
+                  <Tag color="purple" style={{ fontSize: 11 }}><SwapOutlined /> Credit Card / Loan Reclassification — DR Credit Card/Loan / CR Accounts Payable</Tag>
+                </div>
+              )}
+              {isPaid ? (
+                <Space>
+                  <Tag color="green">PAID</Tag>
+                  <Button type="link" size="small" icon={<BookOutlined />} onClick={openPaidJournal}>View Journal Entry</Button>
+                </Space>
+              ) : (
+                <Tag color="orange">Unpaid — creates Accounts Payable</Tag>
+              )}
+            </div>
+            <TotalsBlock
+              rows={[
+                { label: 'Total', value: `${cSym} ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, strong: true },
+                isEdit && paidAmount > 0 ? { label: 'Paid', value: `${cSym} ${paidAmount.toFixed(2)}`, color: '#52c41a' } : null,
+                isEdit && paidAmount > 0 && remaining > 0.005 ? { label: 'Remaining', value: `${cSym} ${remaining.toFixed(2)}`, color: '#fa8c16' } : null,
+              ]}
+            />
+          </div>
+        </FormSection>
+
+        <FormSection title="Actions" icon={<SaveOutlined />}>
+          <DocumentActionBar
+            left={<>
+              <Button size="large" onClick={handleCancel}>Cancel</Button>
+              <Button onClick={resetForm}>Clear</Button>
+            </>}
+          >
             {isEdit && !isPaid && (
               <Button icon={<DollarOutlined />} size="large" onClick={openPayModal}>
                 Record Payment
               </Button>
             )}
-            <Button onClick={() => { form.resetFields(); setLines([{ key: Date.now(), category: '', description: '', amount: 0 }]); }}>
-              Clear
+            <Button type="primary" htmlType="submit" loading={loading} icon={<SaveOutlined />} size="large">
+              {isEdit ? 'Update Bill' : 'Save Bill'}
             </Button>
-          </Space>
-        </Form.Item>
+          </DocumentActionBar>
+        </FormSection>
       </Form>
 
       {/* Available Credits (when editing) */}
@@ -626,10 +1027,11 @@ const EnterBill = ({ history, location, match }) => {
       <Modal title="Add New Vendor" visible={supplierModalOpen} onOk={handleAddSupplier} onCancel={() => { setSupplierModalOpen(false); supplierForm.resetFields(); }} okText="Add" destroyOnClose width={520}>
         <Form form={supplierForm} layout="vertical" preserve={false}>
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="last_name" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="first_name" label="First Name" rules={identityRule(supplierForm, 'company')}><Input /></Form.Item></Col>
+            <Col span={8}><Form.Item name="last_name" label="Last Name"><Input /></Form.Item></Col>
             <Col span={8}><Form.Item name="company" label="Company"><Input /></Form.Item></Col>
           </Row>
+          <ContactIdentityNote style={{ marginTop: -4 }} />
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={8}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
             <Col span={8}><Form.Item name="phone" label="Phone"><Input onChange={e => supplierForm.setFieldsValue({ phone: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
@@ -647,32 +1049,123 @@ const EnterBill = ({ history, location, match }) => {
         </Form>
       </Modal>
 
-      <Modal title="New Account" visible={accountModalOpen} onOk={handleAddAccount} onCancel={() => setAccountModalOpen(false)} okText="Create" destroyOnClose>
-        <Form form={accountForm} layout="vertical" preserve={false}>
-          <Form.Item name="name" label="Account Name" rules={[{ required: true, message: 'Enter account name' }]}>
-            <Input placeholder="e.g. Office Supplies" />
-          </Form.Item>
-          <Form.Item name="type" label="Type" initialValue="Expense" rules={[{ required: true }]}>
-            <Select>
-              <Option value="Expense">Expense</Option>
-              <Option value="Cost of Goods Sold">Cost of Goods Sold</Option>
-              <Option value="Other Expense">Other Expense</Option>
-              <Option value="Asset">Asset</Option>
-              <Option value="Inventory">Inventory</Option>
-              <Option value="Bank">Bank</Option>
-              <Option value="Cash">Cash</Option>
-              <Option value="Liability">Liability</Option>
-              <Option value="Income">Income</Option>
-              <Option value="Other Income">Other Income</Option>
-              <Option value="Equity">Equity</Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="code" label="Account Code">
-            <Input placeholder="e.g. 6010" />
-          </Form.Item>
+      {/* Add New Inventory Item — the same inline shape CreateInvoice/CreateQuote
+          use, so a bill can create an item without leaving the screen. */}
+      <Modal title="Add New Inventory Item" visible={prodModalOpen} onOk={handleAddProduct}
+        onCancel={() => { setProdModalOpen(false); prodForm.resetFields(); setProductLineKey(null); }}
+        okText="Add" destroyOnClose width={620}>
+        <Form form={prodForm} layout="vertical" preserve={false} initialValues={{ type: 'Product' }}>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={12}>
+              <Form.Item name="type" label="Type" rules={[{ required: true }]}>
+                <Select>
+                  <Option value="Product">Product</Option>
+                  <Option value="Service">Service</Option>
+                  <Option value="Raw Material">Raw Material</Option>
+                  <Option value="Asset">Asset</Option>
+                  <Option value="Bundle">Bundle</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name required' }]}>
+                <Input placeholder="e.g. Large Eggs" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={12}>
+              <Form.Item name="sku" label="SKU">
+                <Input placeholder="e.g. EGG-L" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="category" label="Category">
+                <Input placeholder="e.g. Dairy" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            <Col span={12}>
+              <Form.Item name="price" label={`Selling price (${cSym})`}>
+                <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="0.00" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="stock" label="Opening stock">
+                <InputNumber style={{ width: '100%' }} min={0} step={1} placeholder="0" />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="description" label="Description">
-            <Input.TextArea rows={2} placeholder="Optional description" />
+            <Input.TextArea rows={2} placeholder="Optional" />
           </Form.Item>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            <strong>Service</strong> items never move stock. Product, Raw Material, Asset and Bundle are
+            inventory items and can be billed with a quantity and rate.
+          </Text>
+        </Form>
+      </Modal>
+
+      <Modal title="New Account" visible={accountModalOpen} onOk={handleAddAccount} onCancel={() => { setAccountModalOpen(false); accountForm.resetFields(); setSelectedAccType(null); setAccountLineKey(null); }} okText="Create" width={700} destroyOnClose>
+        <Form form={accountForm} layout="vertical" preserve={false} initialValues={{ status: 'Active', openingBalance: 0, normalBalance: 'Debit', accountType: 'Expense' }}>
+          {/* Row 1: Type / Sub-Type / Account # */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 0 }}>
+            <Form.Item name="accountType" label="Account Type" rules={[{ required: true, message: 'Required' }]} style={{ flex: 1 }}>
+              <Select placeholder="Select type" showSearch onChange={(v) => {
+                setSelectedAccType(v);
+                // Only bill-usable types are offered, so the credit-normal set
+                // is Liability / Equity / Credit Card / Loan.
+                accountForm.setFieldsValue({ normalBalance: (v === 'Liability' || v === 'Equity' || v === 'Credit Card' || v === 'Loan') ? 'Credit' : 'Debit', subType: undefined });
+              }}>
+                {BILL_LINE_ACCOUNT_TYPES.map(t => <Option key={t} value={t}>{t}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item name="subType" label="Sub-Type" style={{ flex: 1 }}>
+              <Select placeholder="Select sub-type" allowClear showSearch>
+                {(accountSubTypes[selectedAccType] || []).map(st => <Option key={st} value={st}>{st}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item name="accountCode" label="Account #" style={{ flex: 0.7 }}>
+              <Input placeholder="e.g., 6010" />
+            </Form.Item>
+          </div>
+          {/* Row 2: Name / Status */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="accountName" label="Account Name" rules={[{ required: true, message: 'Required' }]} style={{ flex: 2 }}>
+              <Input placeholder="e.g., Office Supplies" />
+            </Form.Item>
+            <Form.Item name="status" label="Status" style={{ flex: 1 }}>
+              <Select>
+                <Option value="Active"><Badge status="success" /> Active</Option>
+                <Option value="Inactive"><Badge status="default" /> Inactive</Option>
+              </Select>
+            </Form.Item>
+          </div>
+          {/* Row 3: Opening Bal / Normal Bal / Tax Line */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="openingBalance" label="Opening Balance" style={{ flex: 1 }}>
+              <InputNumber style={{ width: '100%' }} placeholder="0.00" precision={2} />
+            </Form.Item>
+            <Form.Item name="normalBalance" label="Normal Balance" style={{ flex: 1 }}>
+              <Select>
+                <Option value="Debit">Expenses / Assets (Debit)</Option>
+                <Option value="Credit">Income / Liabilities / Equity (Credit)</Option>
+              </Select>
+            </Form.Item>
+            <Form.Item name="taxLine" label="Tax Line" style={{ flex: 1 }}>
+              <Input placeholder="e.g., Schedule C" />
+            </Form.Item>
+          </div>
+          {/* Row 4: Parent Account / Description */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="parentId" label="Parent Account" style={{ flex: 1 }}>
+              <AccountSelect accounts={accounts.filter(a => a.status === 'Active')} placeholder="(none — top level)" allowClear />
+            </Form.Item>
+            <Form.Item name="description" label="Description" style={{ flex: 1 }}>
+              <Input placeholder="Brief description (optional)" />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
 
@@ -715,11 +1208,7 @@ const EnterBill = ({ history, location, match }) => {
           </Form.Item>
 
           <Form.Item name="bankAccount" label="Pay From (Bank Account)" rules={[{ required: true, message: 'Select a bank account' }]}>
-            <Select placeholder="Select bank account" showSearch optionFilterProp="children">
-              {bankAccounts.map(a => (
-                <Option key={a.id} value={a.accountName || a.name}>{a.accountName || a.name}</Option>
-              ))}
-            </Select>
+            <AccountSelect accounts={bankAccounts} placeholder="Select bank account" />
           </Form.Item>
 
           {availableCredits.length > 0 && (
@@ -786,6 +1275,12 @@ const EnterBill = ({ history, location, match }) => {
         )}
       </Modal>
       </Card>
+
+      <JournalEntryDetailModal
+        journalEntryId={journalDetailId}
+        visible={!!journalDetailId}
+        onClose={() => setJournalDetailId(null)}
+      />
     </div>
   );
 };

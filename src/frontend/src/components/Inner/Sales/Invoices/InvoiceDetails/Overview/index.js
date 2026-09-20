@@ -2,6 +2,7 @@ import React, {useContext} from "react";
 import {Col, Row, Select, Alert, Typography, Space, Button} from "antd";
 import { UserOutlined, FileOutlined } from "@ant-design/icons";
 import Widget from "components/Widget";
+import { normalizeStatus } from "components/StatusBadge";
 import {TypeContext} from "appContext/TypeContext.js";
 
 
@@ -10,18 +11,19 @@ const { Text } = Typography;
 
 const Overview = ({detail, handleConvert}) => {
   const type = useContext(TypeContext);
-
+  const status = normalizeStatus(detail?.status);
+  const convertibleQuote = type === 'Quote' && (status === 'Pending' || status === 'Accepted');
 
     return (
-      <Widget 
-      title={
-        
-       <h3 className="gx-ml-3">{type}</h3>
-    } 
-    extra = {
-      <>
+    <Widget 
+    title={
       
-{detail?.status === 'Pending' && type === 'Quote' && 
+     <h3 className="gx-ml-3">{type}</h3>
+  } 
+  extra = {
+    <>
+    
+{convertibleQuote && 
   <Row>
        <Col xs={12} sm={12} md={12}>
        <Button type="danger" onClick={handleConvert} danger>Convert to Invoice</Button>
@@ -31,18 +33,18 @@ const Overview = ({detail, handleConvert}) => {
     }
     
       <Col xs={24} sm={24} md={24}>
-      <Alert  className="gx-mr-3" message={detail?.status} type={
-        detail?.status === 'Paid' || detail?.status === 'Invoiced'
+      <Alert  className="gx-mr-3" message={status} type={
+        status === 'Paid' || status === 'Accepted' || status === 'Converted'
       ? 'success'
-      : detail?.status === 'Rejected'
+      : status === 'Declined'
       ? 'error'
-      : detail?.status === 'Pending'
+      : status === 'Pending' || status === 'Partially Paid'
       ? 'warning'
       : 'info'
       } showIcon banner/>
       </Col>
       </>
-    }
+  }
       styleName="gx-card-tabs gx-card-profile"
       >
         <div className="gx-mb-4"></div>

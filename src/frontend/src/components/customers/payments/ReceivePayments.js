@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Card, Button, message, Modal, Form, InputNumber, Select, Space, Input } from 'antd';
-import { useHistory } from 'react-router-dom';
+import { Table, Card, Button, message, Modal, Form, InputNumber, Select, Space, Input, DatePicker } from 'antd';
 import { useCurrency } from '../../../utils/currency';
 
 const { Option } = Select;
+const { RangePicker } = DatePicker;
 
 const ReceivePayments = () => {
   const { symbol: cSym } = useCurrency();
   const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [invoicesTotal, setInvoicesTotal] = useState(0);
+  const [invoicesPage, setInvoicesPage] = useState(1);
+  const [invoicesPageSize, setInvoicesPageSize] = useState(20);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [customers, setCustomers] = useState([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState();
   const [payments, setPayments] = useState([]);
@@ -19,12 +22,20 @@ const ReceivePayments = () => {
   const [paymentSearch, setPaymentSearch] = useState('');
   const [paymentModal, setPaymentModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [invoicesDateRange, setInvoicesDateRange] = useState(null);
+  const [paymentsDateRange, setPaymentsDateRange] = useState(null);
   const [form] = Form.useForm();
-  const history = useHistory();
+
+  // Display name of the selected customer, for the empty state only.
+  const selectedCustomerName = (() => {
+    const c = customers.find(x => String(x.id) === String(selectedCustomerId));
+    if (!c) return '';
+    return c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company_name || '';
+  })();
 
   useEffect(() => {
     fetchCustomers();
-    fetchInvoices();
+    applyInvoiceFilters(1, 20, null, undefined);
     fetchPaymentsPaginated(1, 20, '');
   }, []);
 
@@ -38,31 +49,52 @@ const ReceivePayments = () => {
     }
   };
 
-  const fetchInvoices = async (customerId) => {
-    setLoading(true);
+  // The customer id is passed IN (not read from state) because a selection
+  // handler runs before React re-renders — reading `selectedCustomerId` here
+  // would query with the PREVIOUS value (undefined on the first pick), which is
+  // exactly why the customer filter appeared to do nothing.
+  const fetchInvoicesPaginated = async (page = 1, pageSize = 20, range = null, customerId = selectedCustomerId) => {
+    setInvoicesLoading(true);
     try {
-      const data = await window.electronAPI.getUnpaidInvoices(customerId);
-      // Normalize invoice fields for the table. Backend returns invoice rows
-      // but may not include a pre-computed total. Ensure numeric fields exist.
-      const normalized = (data || []).map(item => ({
+      const startFrom = range && range[0] ? range[0].format('YYYY-MM-DD') : '';
+      const startTo = range && range[1] ? range[1].format('YYYY-MM-DD') : '';
+      const res = await window.electronAPI.getInvoicesPaginated(page, pageSize, '', '!paid,cancelled,void', '', '', startFrom, startTo, customerId, true);
+      const normalized = (res?.data || []).map(item => ({
         ...item,
         invoiceNumber: item.number || item.invoiceNumber || item.id,
+        customerName: item.customer_name || item.customerName || '',
         date: item.start_date || item.last_date || item.date || null,
-        total: Number(item.total || item.amount || item.amount_due || 0),
-        balance: Number(item.balance || item.remaining || 0),
+        total: Number(item.amount || item.total || 0),
+        balance: Number(item.balance || item.amount || item.total || 0),
       }));
       setInvoices(normalized);
+      setInvoicesTotal(res?.total || 0);
+      setInvoicesPage(page);
+      setInvoicesPageSize(pageSize);
     } catch (error) {
       message.error('Failed to load invoices');
       console.error('Error fetching invoices:', error);
     }
-    setLoading(false);
+    setInvoicesLoading(false);
   };
 
-  const fetchPaymentsPaginated = async (page = 1, pageSize = 20, search = '') => {
+  // Single entry point for the invoice list. Validates the range and forwards
+  // the CURRENT customer id + dates explicitly, so filters always apply
+  // together (AND) and Refresh never silently drops them.
+  const applyInvoiceFilters = (page = 1, pageSize = invoicesPageSize, range = invoicesDateRange, customerId = selectedCustomerId) => {
+    if (range && range[0] && range[1] && range[0].isAfter(range[1], 'day')) {
+      message.error('Invoice From date cannot be after Invoice To date.');
+      return Promise.resolve();
+    }
+    return fetchInvoicesPaginated(page, pageSize, range, customerId);
+  };
+
+  const fetchPaymentsPaginated = async (page = 1, pageSize = 20, search = '', range = null) => {
     setPaymentsLoading(true);
     try {
-      const res = await window.electronAPI.getPaymentsPaginated({ page, pageSize, search });
+      const dateFrom = range && range[0] ? range[0].format('YYYY-MM-DD') : '';
+      const dateTo = range && range[1] ? range[1].format('YYYY-MM-DD') : '';
+      const res = await window.electronAPI.getPaymentsPaginated({ page, pageSize, search, dateFrom, dateTo });
       const data = (res?.data || []).map(p => ({
         key: p.id || `${p.invoiceNumber || 'INV'}-${p.date || p.createdAt || Math.random()}`,
         id: p.id,
@@ -104,8 +136,9 @@ const ReceivePayments = () => {
       });
       message.success('Payment recorded successfully');
       setPaymentModal(false);
-      fetchInvoices(selectedCustomerId);
-      fetchPaymentsPaginated(paymentsPage, paymentsPageSize, paymentSearch);
+      // Refresh the SAME filtered list (customer + dates preserved).
+      applyInvoiceFilters(invoicesPage, invoicesPageSize, invoicesDateRange, selectedCustomerId);
+      fetchPaymentsPaginated(paymentsPage, paymentsPageSize, paymentSearch, paymentsDateRange);
     } catch (error) {
       message.error('Failed to record payment');
       console.error('Error recording payment:', error);
@@ -155,15 +188,17 @@ const ReceivePayments = () => {
   return (
     <>
       <Card title="Receive Payments">
-        <Space style={{ marginBottom: 16 }}>
+        <Space style={{ marginBottom: 16, flexWrap: 'wrap' }}>
           <Select
             allowClear
             placeholder="Filter by customer"
-            style={{ minWidth: 240 }}
+            style={{ minWidth: 200 }}
             value={selectedCustomerId}
             onChange={(val) => {
               setSelectedCustomerId(val);
-              fetchInvoices(val);
+              // Pass the NEW id directly: React state is not updated yet in this
+              // render, so relying on it here would query the previous customer.
+              applyInvoiceFilters(1, invoicesPageSize, invoicesDateRange, val);
             }}
           >
             {customers.map(c => (
@@ -172,23 +207,58 @@ const ReceivePayments = () => {
               </Select.Option>
             ))}
           </Select>
-          <Button onClick={() => fetchInvoices(selectedCustomerId)}>Refresh</Button>
+          <RangePicker
+            placeholder={['Invoice from', 'Invoice to']}
+            value={invoicesDateRange}
+            onChange={(range) => {
+              setInvoicesDateRange(range);
+              applyInvoiceFilters(1, invoicesPageSize, range, selectedCustomerId);
+            }}
+            allowClear
+            style={{ minWidth: 260 }}
+          />
+          <Button onClick={() => applyInvoiceFilters(1, invoicesPageSize)}>Refresh</Button>
         </Space>
         <Table
           columns={columns}
           dataSource={invoices}
-          loading={loading}
+          loading={invoicesLoading}
           rowKey="id"
+          locale={{
+            emptyText: selectedCustomerId
+              ? `No outstanding invoices found${selectedCustomerName ? ` for ${selectedCustomerName}` : ''}.`
+              : 'No outstanding invoices found.',
+          }}
+          pagination={{
+            current: invoicesPage,
+            pageSize: invoicesPageSize,
+            total: invoicesTotal,
+            showSizeChanger: true,
+            showTotal: (total) => `Total ${total} unpaid invoices`,
+            onChange: (p, size) => applyInvoiceFilters(p, size, invoicesDateRange, selectedCustomerId),
+          }}
         />
       </Card>
 
       <Card title="Recent Payments" style={{ marginTop: 16 }}>
-        <Input.Search
-          placeholder="Search payments..."
-          allowClear
-          style={{ width: 300, marginBottom: 12 }}
-          onSearch={(val) => { setPaymentSearch(val); fetchPaymentsPaginated(1, paymentsPageSize, val); }}
-        />
+        <Space style={{ marginBottom: 12, flexWrap: 'wrap' }}>
+          <Input.Search
+            placeholder="Search payments..."
+            allowClear
+            style={{ width: 260 }}
+            onSearch={(val) => { setPaymentSearch(val); fetchPaymentsPaginated(1, paymentsPageSize, val, paymentsDateRange); }}
+          />
+          <RangePicker
+            placeholder={['Paid from', 'Paid to']}
+            value={paymentsDateRange}
+            onChange={(range) => {
+              setPaymentsDateRange(range);
+              fetchPaymentsPaginated(1, paymentsPageSize, paymentSearch, range);
+            }}
+            allowClear
+            style={{ minWidth: 260 }}
+          />
+        </Space>
         <Table
           columns={[
             { title: 'Date', dataIndex: 'date', key: 'date', render: (d) => (d ? new Date(d).toLocaleString() : '-') },
@@ -206,7 +276,7 @@ const ReceivePayments = () => {
             total: paymentsTotal,
             showSizeChanger: true,
             showTotal: (total) => `Total ${total} payments`,
-            onChange: (p, size) => fetchPaymentsPaginated(p, size, paymentSearch),
+            onChange: (p, size) => fetchPaymentsPaginated(p, size, paymentSearch, paymentsDateRange),
           }}
         />
       </Card>
@@ -222,37 +292,39 @@ const ReceivePayments = () => {
           layout="vertical"
           onFinish={onFinishPayment}
         >
-          <Form.Item
-            name="amount"
-            label="Payment Amount"
-            rules={[{ required: true, message: 'Please enter payment amount' }]}
-          >
-            <InputNumber
-              style={{ width: '100%' }}
-              min={0.01}
-              step={0.01}
-              formatter={value => `${cSym} ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-              parser={value => value.replace(new RegExp(`\\${cSym}\\s?|(,*)`, 'g'), '')}
-            />
-          </Form.Item>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', columnGap: 16 }}>
+            <Form.Item
+              name="amount"
+              label="Payment Amount"
+              rules={[{ required: true, message: 'Please enter payment amount' }]}
+            >
+              <InputNumber
+                style={{ width: '100%' }}
+                min={0.01}
+                step={0.01}
+                formatter={value => `${cSym} ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                parser={value => value.replace(new RegExp(`\\${cSym}\\s?|(,*)`, 'g'), '')}
+              />
+            </Form.Item>
 
-          <Form.Item
-            name="paymentMethod"
-            label="Payment Method"
-            rules={[{ required: true, message: 'Please select payment method' }]}
-          >
-            <Select>
-              <Option value="bank">Bank Transfer</Option>
-              <Option value="cash">Cash</Option>
-              <Option value="check">Check</Option>
-              <Option value="card">Credit Card</Option>
-              <Option value="eft">EFT</Option>
-            </Select>
-          </Form.Item>
+            <Form.Item
+              name="paymentMethod"
+              label="Payment Method"
+              rules={[{ required: true, message: 'Please select payment method' }]}
+            >
+              <Select>
+                <Option value="bank">Bank Transfer</Option>
+                <Option value="cash">Cash</Option>
+                <Option value="check">Check</Option>
+                <Option value="card">Credit Card</Option>
+                <Option value="eft">EFT</Option>
+              </Select>
+            </Form.Item>
 
-          <Form.Item name="reference" label="Reference Number">
-            <Input placeholder="Check #, reference #, or transaction ID" />
-          </Form.Item>
+            <Form.Item name="reference" label="Reference Number">
+              <Input placeholder="Check #, reference #, or transaction ID" />
+            </Form.Item>
+          </div>
 
           {selectedInvoice && (
             <div style={{ marginBottom: 16, padding: '8px 12px', background: '#f5f5f5', borderRadius: 4 }}>

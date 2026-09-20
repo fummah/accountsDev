@@ -84,7 +84,7 @@ const Sales = () => {
           rowKey="id"
           loading={loading}
           size="small"
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} sales` }}
+          pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} sales` }}
         />
       </Card>
     </div>

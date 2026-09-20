@@ -74,7 +74,7 @@ const Roles = () => {
           </Space>
         }
       >
-        <Table columns={columns} dataSource={roles} rowKey="id" loading={loading} pagination={{ pageSize: 20 }} size="middle" />
+        <Table columns={columns} dataSource={roles} rowKey="id" loading={loading} pagination={{ defaultPageSize: 20 }} size="middle" />
       </Card>
 
       <Modal

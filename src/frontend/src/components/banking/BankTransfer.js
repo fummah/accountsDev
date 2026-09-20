@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Form, Select, Input, InputNumber, DatePicker, Button, Card, Table, Tabs, message, Statistic, Space, Tag, Typography } from 'antd';
+import { Form, Select, Input, InputNumber, DatePicker, Button, Card, Table, Radio, message, Statistic, Space, Tag, Typography } from 'antd';
 import { SwapOutlined, HistoryOutlined, SearchOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import { dedupeAccounts } from '../../utils/accounts';
+import AccountSelect from '../shared/AccountSelect';
 
 const { Option } = Select;
-const { TabPane } = Tabs;
 const { Text } = Typography;
 const fmt = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -34,7 +35,7 @@ const BankTransfer = () => {
     try {
       const data = await window.electronAPI.getChartOfAccounts();
       const list = Array.isArray(data) ? data : [];
-      setAllAccounts(list);
+      setAllAccounts(dedupeAccounts(list));
       const bankAccounts = list.filter(account => {
         const t = (account.accountType || account.type || '').toLowerCase();
         const n = (account.accountName || account.name || '').toLowerCase();
@@ -170,74 +171,74 @@ const BankTransfer = () => {
       <h2>Bank Transfer</h2>
 
       <Card>
-        <Tabs activeKey={activeTab} onTabClick={(key) => setActiveTab(key)}>
-          <TabPane tab="New Transfer" key="1">
-            <Form form={form} layout="vertical" onFinish={handleTransfer} initialValues={{ date: moment() }}
-              style={{ maxWidth: 600, margin: '0 auto' }}>
-              <Form.Item name="fromAccount" label="From Account" rules={[{ required: true, message: 'Please select source account' }]}>
-                <Select placeholder="Select source account" showSearch optionFilterProp="children" onChange={(val) => refreshBalance(val, setFromBalance)}>
-                  {accounts.map(account => (
-                    <Option key={account.id} value={account.id}>{account.accountName || account.name}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
+        <Radio.Group
+          value={activeTab}
+          onChange={e => setActiveTab(e.target.value)}
+          size="small"
+          style={{ marginBottom: 12 }}
+        >
+          <Radio.Button value="1">New Transfer</Radio.Button>
+          <Radio.Button value="2"><HistoryOutlined /> Transfer History {transferHistory.length > 0 ? `(${transferHistory.length})` : ''}</Radio.Button>
+        </Radio.Group>
 
-              <div style={{ marginBottom: 16 }}>
-                <Statistic title="From Account Balance" prefix={cSym} value={Number(fromBalance).toFixed(2)} />
-              </div>
+        {activeTab === '1' ? (
+          <Form form={form} layout="vertical" onFinish={handleTransfer} initialValues={{ date: moment() }}
+            style={{ maxWidth: 600, margin: '0 auto' }}>
+            <Form.Item name="fromAccount" label="From Account" rules={[{ required: true, message: 'Please select source account' }]}>
+              <AccountSelect accounts={accounts} placeholder="Select source account" onChange={(val) => refreshBalance(val, setFromBalance)} />
+            </Form.Item>
 
-              <div style={{ textAlign: 'center', margin: '16px 0' }}>
-                <SwapOutlined style={{ fontSize: '24px' }} />
-              </div>
+            <div style={{ marginBottom: 16 }}>
+              <Statistic title="From Account Balance" prefix={cSym} value={Number(fromBalance).toFixed(2)} />
+            </div>
 
-              <Form.Item name="toAccount" label="To Account" rules={[
-                { required: true, message: 'Please select destination account' },
-                ({ getFieldValue }) => ({
-                  validator(_, value) {
-                    if (!value || getFieldValue('fromAccount') !== value) return Promise.resolve();
-                    return Promise.reject(new Error('Source and destination accounts must be different'));
-                  },
-                }),
-              ]}>
-                <Select placeholder="Select destination account" showSearch optionFilterProp="children" onChange={(val) => refreshBalance(val, setToBalance)}>
-                  {accounts.map(account => (
-                    <Option key={account.id} value={account.id}>{account.accountName || account.name}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
+            <div style={{ textAlign: 'center', margin: '16px 0' }}>
+              <SwapOutlined style={{ fontSize: '24px' }} />
+            </div>
 
-              <div style={{ marginBottom: 16 }}>
-                <Statistic title="To Account Balance" prefix={cSym} value={Number(toBalance).toFixed(2)} />
-              </div>
+            <Form.Item name="toAccount" label="To Account" rules={[
+              { required: true, message: 'Please select destination account' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('fromAccount') !== value) return Promise.resolve();
+                  return Promise.reject(new Error('Source and destination accounts must be different'));
+                },
+              }),
+            ]}>
+              <AccountSelect accounts={accounts} placeholder="Select destination account" onChange={(val) => refreshBalance(val, setToBalance)} />
+            </Form.Item>
 
-              <Form.Item name="amount" label="Amount" rules={[
-                { required: true, message: 'Please enter transfer amount' },
-                { type: 'number', min: 0.01, message: 'Amount must be greater than 0' },
-              ]}>
-                <InputNumber style={{ width: '100%' }}
-                  formatter={value => value ? `${cSym} ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
-                  parser={value => value.replace(/[^\d.]/g, '')} precision={2} placeholder="Enter amount" />
-              </Form.Item>
+            <div style={{ marginBottom: 16 }}>
+              <Statistic title="To Account Balance" prefix={cSym} value={Number(toBalance).toFixed(2)} />
+            </div>
 
-              <Form.Item name="date" label="Transfer Date" rules={[{ required: true, message: 'Please select transfer date' }]}>
-                <DatePicker style={{ width: '100%' }} />
-              </Form.Item>
+            <Form.Item name="amount" label="Amount" rules={[
+              { required: true, message: 'Please enter transfer amount' },
+              { type: 'number', min: 0.01, message: 'Amount must be greater than 0' },
+            ]}>
+              <InputNumber style={{ width: '100%' }}
+                formatter={value => value ? `${cSym} ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                parser={value => value.replace(/[^\d.]/g, '')} precision={2} placeholder="Enter amount" />
+            </Form.Item>
 
-              <Form.Item name="reference" label="Reference">
-                <Input placeholder="Enter reference number" />
-              </Form.Item>
+            <Form.Item name="date" label="Transfer Date" rules={[{ required: true, message: 'Please select transfer date' }]}>
+              <DatePicker style={{ width: '100%' }} />
+            </Form.Item>
 
-              <Form.Item name="description" label="Description">
-                <Input placeholder="Enter description (optional)" />
-              </Form.Item>
+            <Form.Item name="reference" label="Reference">
+              <Input placeholder="Enter reference number" />
+            </Form.Item>
 
-              <Form.Item>
-                <Button type="primary" htmlType="submit" loading={loading} block>Complete Transfer</Button>
-              </Form.Item>
-            </Form>
-          </TabPane>
+            <Form.Item name="description" label="Description">
+              <Input placeholder="Enter description (optional)" />
+            </Form.Item>
 
-          <TabPane tab={<span><HistoryOutlined /> Transfer History {transferHistory.length > 0 ? `(${transferHistory.length})` : ''}</span>} key="2">
+            <Form.Item>
+              <Button type="primary" htmlType="submit" loading={loading} block>Complete Transfer</Button>
+            </Form.Item>
+          </Form>
+        ) : (
+          <>
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Input placeholder="Search transfers..." prefix={<SearchOutlined />} value={historySearch}
                 onChange={e => setHistorySearch(e.target.value)} allowClear style={{ width: 250 }} />
@@ -249,10 +250,10 @@ const BankTransfer = () => {
               </Space>
             </div>
             <Table columns={historyColumns} dataSource={filteredHistory} rowKey={(r, i) => r.id || i} size="small"
-              loading={historyLoading} pagination={{ pageSize: 10, showSizeChanger: true, showTotal: t => `${t} transfers` }}
+              loading={historyLoading} pagination={{ defaultPageSize: 10, showSizeChanger: true, showTotal: t => `${t} transfers` }}
               locale={{ emptyText: 'No transfers recorded yet' }} />
-          </TabPane>
-        </Tabs>
+          </>
+        )}
       </Card>
     </div>
   );

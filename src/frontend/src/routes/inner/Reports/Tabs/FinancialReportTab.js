@@ -1,9 +1,12 @@
 import React, {useState, useEffect} from "react";
-import {Col, Row, DatePicker, message, Button, Space} from "antd";
+import {Col, Row, DatePicker, message, Button, Space, Divider} from "antd";
 import { SyncOutlined } from '@ant-design/icons';
 import Auxiliary from "util/Auxiliary";
 import Widget from "components/Widget/index";
-import ProfitAndLossSection from "./Sections/ProfitAndLossSection";
+// The FULL Profit & Loss report. This is the SAME component the standalone
+// /main/reports/profit-loss route renders, so the P&L shown inside the
+// Financial Reports tab can never drift from that page.
+import ProfitLoss from "components/reports/ProfitLoss";
 import BalanceSheetSection from "./Sections/BalanceSheetSection";
 import CashFlowSection from "./Sections/CashFlowSection";
 import moment from "moment";
@@ -13,11 +16,11 @@ const { RangePicker } = DatePicker;
 const FinancialReportTab = () => {
   const [dummyData, setDummyData] = useState(null);
   const [syncing, setSyncing] = useState(false);
-  
-const currentMonthStart = moment().startOf("month");
-const currentMonthEnd = moment().endOf("month");
 
-const [dateRange, setDateRange] = useState([currentMonthStart, currentMonthEnd]);
+  const currentMonthStart = moment().startOf("month");
+  const currentMonthEnd = moment().endOf("month");
+
+  const [dateRange, setDateRange] = useState([currentMonthStart, currentMonthEnd]);
 
   const handleSyncJournal = async () => {
     setSyncing(true);
@@ -33,32 +36,32 @@ const [dateRange, setDateRange] = useState([currentMonthStart, currentMonthEnd])
     setSyncing(false);
   };
 
-   const fetchFinancialReports = async (start_date,last_date) => {
-        try {
-            const response = await window.electronAPI.getFinancialReport(start_date,last_date);
-            if (!response) {
-              message.error('No data returned from backend');
-              return;
-            }
-            if (response.error) {
-              message.error(response.error || 'Error fetching financial report');
-              return;
-            }
-            // Response expected to be object with profitLoss, balanceSheet, cashFlow
-            setDummyData(response);
-        } catch (error) {
-          const errorMessage = error.message || "An unknown error occurred.";
-         console.log(errorMessage);
-         message.error(errorMessage);
-        }
-    };
+  const fetchFinancialReports = async (start_date,last_date) => {
+    try {
+      const response = await window.electronAPI.getFinancialReport(start_date,last_date);
+      if (!response) {
+        message.error('No data returned from backend');
+        return;
+      }
+      if (response.error) {
+        message.error(response.error || 'Error fetching financial report');
+        return;
+      }
+      // Response expected to be object with profitLoss, balanceSheet, cashFlow
+      setDummyData(response);
+    } catch (error) {
+      const errorMessage = error.message || "An unknown error occurred.";
+      console.log(errorMessage);
+      message.error(errorMessage);
+    }
+  };
 
-    useEffect(() => {
-      // Auto-sync journal entries from existing invoices/expenses then load reports
-      (async () => {
-        try { await window.electronAPI.journalRepostAll?.(); } catch {}
-        fetchFinancialReports(currentMonthStart.format("YYYY-MM-DD"), currentMonthEnd.format("YYYY-MM-DD"));
-      })();
+  useEffect(() => {
+    // Auto-sync journal entries from existing invoices/expenses then load reports
+    (async () => {
+      try { await window.electronAPI.journalRepostAll?.(); } catch {}
+      fetchFinancialReports(currentMonthStart.format("YYYY-MM-DD"), currentMonthEnd.format("YYYY-MM-DD"));
+    })();
   }, []);
 
   const onDateChange = (dates) => {
@@ -67,44 +70,47 @@ const [dateRange, setDateRange] = useState([currentMonthStart, currentMonthEnd])
       const [startDate, endDate] = dates; // Destructure start and end dates
       const start_date = startDate ? startDate.format("YYYY-MM-DD") : null;
       const last_date = endDate ? endDate.format("YYYY-MM-DD") : null;
-      fetchFinancialReports(start_date, last_date);      
+      fetchFinancialReports(start_date, last_date);
     }
   };
-  return (
-    <Auxiliary> 
-    <Widget
-   title={
-     <h2 className="h4 gx-text-capitalize gx-mb-0">
-       Financial Reports</h2>
-   }
-   extra={
-    <Space>
-      <Button icon={<SyncOutlined spin={syncing} />} onClick={handleSyncJournal} loading={syncing} size="small">Sync Journal</Button>
-      <RangePicker
-        value={dateRange}
-        onChange={onDateChange}
-        format="YYYY-MM-DD"
-        allowClear={true}
-      />
-    </Space>
-   }
-   >  
-   <Row>
-   <Col span={12}>
-<ProfitAndLossSection data={dummyData?.profitLoss}/>
-     </Col>     
 
-   <Col span={12}>
-<BalanceSheetSection data={dummyData?.balanceSheet}/>
-     </Col>  
-     <Col span={12}>
-<CashFlowSection data={dummyData?.cashFlow}/>
-     </Col>     
-           
-   </Row><hr/>
-   
-   </Widget>
- </Auxiliary>
+  return (
+    <Auxiliary>
+      {/* Profit & Loss — rendered by the same component as
+          /main/reports/profit-loss (identical header, controls, KPIs, detail,
+          drill-downs and exports). It owns its own date range. */}
+      <ProfitLoss />
+
+      <Divider style={{ margin: '8px 0 16px' }} />
+
+      {/* Balance Sheet & Cash Flow keep this tab's own period + Sync Journal. */}
+      <Widget
+        title={
+          <h2 className="h4 gx-text-capitalize gx-mb-0">
+            Balance Sheet &amp; Cash Flow</h2>
+        }
+        extra={
+          <Space>
+            <Button icon={<SyncOutlined spin={syncing} />} onClick={handleSyncJournal} loading={syncing} size="small">Sync Journal</Button>
+            <RangePicker
+              value={dateRange}
+              onChange={onDateChange}
+              format="YYYY-MM-DD"
+              allowClear={true}
+            />
+          </Space>
+        }
+      >
+        <Row>
+          <Col span={12}>
+            <BalanceSheetSection data={dummyData?.balanceSheet}/>
+          </Col>
+          <Col span={12}>
+            <CashFlowSection data={dummyData?.cashFlow}/>
+          </Col>
+        </Row>
+      </Widget>
+    </Auxiliary>
   );
 };
 

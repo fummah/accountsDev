@@ -3,6 +3,7 @@ import { Card, Table, Row, Col, Statistic, DatePicker, Space, Tag, Typography, B
 import { DownloadOutlined, DollarOutlined, ShopOutlined, TeamOutlined, FileTextOutlined, CheckCircleOutlined, ClockCircleOutlined, StopOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../../utils/currency';
+import { normalizeStatus } from '../../../../components/StatusBadge';
 
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
@@ -79,14 +80,17 @@ const SalesReportTab = () => {
     return Object.entries(map).map(([account, total]) => ({ account, total }));
   }, [invoices]);
 
-  // Payment status breakdown
+  // Payment status breakdown — automatic invoice states (Open / Partially Paid /
+  // Paid). Void / Cancelled / Draft are document states and never count as owed.
   const statusBreakdown = useMemo(() => {
-    const paid = invoices.filter(i => (i.status || '').toLowerCase() === 'paid');
-    const unpaid = invoices.filter(i => (i.status || '').toLowerCase() === 'pending' || (i.status || '').toLowerCase() === 'draft');
-    const partial = invoices.filter(i => (i.status || '').toLowerCase() === 'partial' || (i.status || '').toLowerCase() === 'partially paid');
+    const st = (i) => normalizeStatus(i.status);
+    const outstanding = (i) => ['Open', 'Partially Paid'].includes(st(i));
+    const paid = invoices.filter(i => st(i) === 'Paid');
+    const unpaid = invoices.filter(i => st(i) === 'Open');
+    const partial = invoices.filter(i => st(i) === 'Partially Paid');
     const overdue = invoices.filter(i => {
       const due = i.due_date ? moment(i.due_date) : null;
-      return due && due.isBefore(moment()) && (i.status || '').toLowerCase() !== 'paid';
+      return due && due.isBefore(moment(), 'day') && outstanding(i);
     });
     return {
       paid: paid.reduce((s, i) => s + Number(i.total || i.amount || 0), 0),
@@ -120,8 +124,13 @@ const SalesReportTab = () => {
     { title: 'Total', dataIndex: 'total', key: 'total', align: 'right', render: v => `${cSym} ${Number(v||0).toFixed(2)}` },
     { title: 'Status', dataIndex: 'status', key: 'status', render: s => {
       const st = (s || '').toLowerCase();
-      const color = st === 'paid' ? 'green' : st === 'partial' ? 'orange' : st === 'overdue' ? 'red' : 'default';
-      return <Tag color={color}>{s || 'Pending'}</Tag>;
+      const color = st === 'paid' ? 'green'
+        : (st === 'partially paid' || st === 'partial') ? 'orange'
+        : (st === 'void' || st === 'voided') ? 'volcano'
+        : (st === 'cancelled' || st === 'canceled' || st === 'draft') ? 'default'
+        : st === 'open' ? 'blue'
+        : 'default';
+      return <Tag color={color}>{s || 'Open'}</Tag>;
     }},
   ];
 
@@ -152,7 +161,7 @@ const SalesReportTab = () => {
           <Card size="small"><Statistic title="Paid" value={statusBreakdown.paid} precision={2} prefix={cSym} valueStyle={{ color: '#52c41a' }} /></Card>
         </Col>
         <Col xs={12} sm={6}>
-          <Card size="small"><Statistic title="Unpaid" value={statusBreakdown.unpaid} precision={2} prefix={cSym} valueStyle={{ color: '#faad14' }} /></Card>
+          <Card size="small"><Statistic title="Open" value={statusBreakdown.unpaid} precision={2} prefix={cSym} valueStyle={{ color: '#faad14' }} /></Card>
         </Col>
         <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="Overdue" value={statusBreakdown.overdue} precision={2} prefix={cSym} valueStyle={{ color: '#f5222d' }} /></Card>
@@ -161,12 +170,12 @@ const SalesReportTab = () => {
 
       {/* Sales by Product */}
       <Card title="Sales by Product/Service" size="small" style={{ marginBottom: 12 }}>
-        <Table columns={prodColumns} dataSource={salesByProduct} rowKey="name" size="small" pagination={{ pageSize: 10 }} />
+        <Table columns={prodColumns} dataSource={salesByProduct} rowKey="name" size="small" pagination={{ defaultPageSize: 10 }} />
       </Card>
 
       {/* Sales by Customer */}
       <Card title="Sales by Customer" size="small" style={{ marginBottom: 12 }}>
-        <Table columns={custColumns} dataSource={salesByCustomer} rowKey="customer" size="small" pagination={{ pageSize: 10 }} />
+        <Table columns={custColumns} dataSource={salesByCustomer} rowKey="customer" size="small" pagination={{ defaultPageSize: 10 }} />
       </Card>
 
       {/* Sales by Income Account */}
@@ -184,7 +193,7 @@ const SalesReportTab = () => {
       {/* Invoice Detail */}
       <Card title="Invoice Detail" size="small" style={{ marginBottom: 12 }}>
         <Table columns={invoiceColumns} dataSource={invoices} rowKey={r => r.invoice_id || r.id || Math.random()}
-          size="small" pagination={{ pageSize: 15 }} loading={loading}
+          size="small" pagination={{ defaultPageSize: 15 }} loading={loading}
           expandable={{
             expandedRowRender: inv => (
               <div style={{ padding: 8 }}>
@@ -205,8 +214,8 @@ const SalesReportTab = () => {
       <Card title="Payment Status Summary" size="small">
         <Row gutter={[12, 12]}>
           <Col xs={12} sm={6}><Tag icon={<CheckCircleOutlined />} color="green">Paid: {cSym}{statusBreakdown.paid.toFixed(2)}</Tag></Col>
-          <Col xs={12} sm={6}><Tag icon={<ClockCircleOutlined />} color="orange">Unpaid: {cSym}{statusBreakdown.unpaid.toFixed(2)}</Tag></Col>
-          <Col xs={12} sm={6}><Tag icon={<ClockCircleOutlined />} color="blue">Partial: {cSym}{statusBreakdown.partial.toFixed(2)}</Tag></Col>
+          <Col xs={12} sm={6}><Tag icon={<ClockCircleOutlined />} color="orange">Open: {cSym}{statusBreakdown.unpaid.toFixed(2)}</Tag></Col>
+          <Col xs={12} sm={6}><Tag icon={<ClockCircleOutlined />} color="blue">Partially Paid: {cSym}{statusBreakdown.partial.toFixed(2)}</Tag></Col>
           <Col xs={12} sm={6}><Tag icon={<StopOutlined />} color="red">Overdue: {cSym}{statusBreakdown.overdue.toFixed(2)}</Tag></Col>
         </Row>
       </Card>

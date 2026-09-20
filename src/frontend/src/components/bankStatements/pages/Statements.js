@@ -70,7 +70,7 @@ const Statements = () => {
         </Row>
 
         <Table columns={columns} dataSource={statements} loading={loading} rowKey="id"
-          pagination={{ pageSize: 15, showSizeChanger: true, showTotal: t => `${t} statements` }} size="middle" />
+          pagination={{ defaultPageSize: 15, showSizeChanger: true, showTotal: t => `${t} statements` }} size="middle" />
       </Card>
 
       <Drawer title={selected ? `Statement #${selected.id} — ${selected.bankName || 'Unknown Bank'}` : 'Statement Details'}
@@ -83,7 +83,7 @@ const Statements = () => {
               <Col span={8}><Statistic title="Currency" value={selected?.currency || 'ZAR'} /></Col>
             </Row>
             <Table columns={txColumns} dataSource={details.transactions || []} rowKey={(_, i) => i}
-              size="small" pagination={{ pageSize: 20, showTotal: t => `${t} rows` }} />
+              size="small" pagination={{ defaultPageSize: 20, showTotal: t => `${t} rows` }} />
           </>
         )}
       </Drawer>

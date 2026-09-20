@@ -125,7 +125,7 @@ const TimeAttendance = () => {
         </Col>
       </Row>
 
-      <Table columns={columns} dataSource={records} rowKey="id" loading={loading} size="small" pagination={{ pageSize: 20 }} />
+      <Table columns={columns} dataSource={records} rowKey="id" loading={loading} size="small" pagination={{ defaultPageSize: 20 }} />
 
       <Modal title="Clock In" visible={clockInVisible} onOk={handleClockIn} onCancel={() => setClockInVisible(false)}>
         <Form form={form} layout="vertical">

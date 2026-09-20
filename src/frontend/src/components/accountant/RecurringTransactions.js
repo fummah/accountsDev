@@ -159,7 +159,7 @@ const RecurringTransactions = () => {
           rowKey="id"
           size="small"
           loading={loading}
-          pagination={{ pageSize: 15 }}
+          pagination={{ defaultPageSize: 15 }}
           rowSelection={rowSelection}
         />
       </Card>

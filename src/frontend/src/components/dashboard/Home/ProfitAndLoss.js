@@ -1,10 +1,11 @@
 import React,{useState} from "react";
 import {Link} from "react-router-dom";
 import Widget from "components/Widget/index";
-import {Button, Col, Row,Select,Typography, Avatar} from "antd";
+import {Button, Col, Row, Select, DatePicker, Space, Typography, Avatar} from "antd";
 import LineIndicator from "./LineIndicator";
-import { FileTextOutlined, WalletOutlined } from '@ant-design/icons';
+import { BarChartOutlined } from '@ant-design/icons';
 import { useCurrency } from '../../../utils/currency';
+import usePeriodData from "./usePeriodData";
 
 const Option = Select.Option;
 const { Text } = Typography;
@@ -15,14 +16,36 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
 }).format(number); 
 };
 
+const PERIODS = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'thisWeek', label: 'This Week' },
+  { value: 'lastWeek', label: 'Last Week' },
+  { value: 'thisMonth', label: 'This Month' },
+  { value: 'lastMonth', label: 'Last Month' },
+  { value: 'custom', label: 'Custom Range' },
+];
 
-const ProfitAndLoss = ({ CurrentBalance, Invoiced, Expensed }) => {
+const ProfitAndLoss = ({ CurrentBalance, Invoiced, Expensed, DailyRevenue, DailyExpenses, DailyCategories, MonthlyRevenue = [], MonthlyExpenses = {}, MonthlyCategories = {} }) => {
   const { symbol: cSym } = useCurrency();
+  const [period, setPeriod] = useState('thisMonth');
+  const [customRange, setCustomRange] = useState([]);
+
+  const data = usePeriodData({
+    period, customRange,
+    DailyRevenue, DailyExpenses, DailyCategories,
+    MonthlyRevenue, MonthlyExpenses, MonthlyCategories,
+    CurrentBalance, Invoiced, Expensed,
+  });
+
+  const displayNet = data.net;
+  const displayInv = data.revenue;
+  const displayExp = data.expenses;
 
   // Safe percentage calculations. If totals are zero, show 0%.
-  const total = (Number(Invoiced) || 0) + (Number(Expensed) || 0);
-  const perc1 = total > 0 ? Math.round((Number(Invoiced) || 0) / total * 100) : 0; // Income %
-  const perc2 = total > 0 ? Math.round((Number(Expensed) || 0) / total * 100) : 0; // Expenses %
+  const total = displayInv + displayExp;
+  const perc1 = total > 0 ? Math.round(displayInv / total * 100) : 0; // Income %
+  const perc2 = total > 0 ? Math.round(displayExp / total * 100) : 0; // Expenses %
 
   const IconButton = ({ icon, text }) => {
     return (
@@ -66,27 +89,33 @@ const ProfitAndLoss = ({ CurrentBalance, Invoiced, Expensed }) => {
         Profit & Loss</h2>
     }
     extra={
-      <Select className="gx-mb-2 gx-select-sm" defaultValue="10">
-      <Option value="10">This Month</Option>
-      <Option value="20">Last Month</Option>
-    </Select>
+      <Space wrap>
+        <Select className="gx-mb-2 gx-select-sm" value={period} onChange={setPeriod} style={{ minWidth: 120 }}>
+          {PERIODS.map(p => <Option key={p.value} value={p.value}>{p.label}</Option>)}
+        </Select>
+        {period === 'custom' && (
+          <DatePicker.RangePicker
+            allowClear={false}
+            size="small"
+            value={customRange.length === 2 ? customRange : null}
+            onChange={(d) => setCustomRange(d || [])}
+          />
+        )}
+      </Space>
     }>
       
       <Row>
         <Col lg={12} md={12} sm={12} xs={24}>
 
           <div className="ant-row-flex">
-            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">{cSym}{formattedNumber(CurrentBalance)}</h2>
+            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">{cSym}{formattedNumber(displayNet)}</h2>
             <h4 className="gx-pt-2 gx-chart-up">0% <i className="icon icon-menu-up gx-fs-sm"/></h4>
           </div>
-          <p className="gx-text-grey">Net profit for December</p>
+          <p className="gx-text-grey">Net profit for {data.label}</p>
           <div className="ant-row-flex gx-mb-3 gx-mb-md-2">
           <Row justify="center" gutter={50}>
       <Col>
-      <Link to={{ pathname: "/inner/sales", state: { tabKey: "2" } }}><IconButton icon={<FileTextOutlined />} text="Create invoice" /></Link>
-      </Col>
-      <Col>
-      <Link to={{ pathname: "/inner/expenses", state: { tabKey: "1" } }}><IconButton icon={<WalletOutlined />} text="Record expense" /></Link>
+      <Link to="/main/reports/profit-loss"><IconButton icon={<BarChartOutlined />} text="View P&L" /></Link>
       </Col>
     </Row>
           </div>
@@ -98,10 +127,10 @@ const ProfitAndLoss = ({ CurrentBalance, Invoiced, Expensed }) => {
             <h5 className="gx-mb-3">Distribution</h5>
             <ul className="gx-line-indicator gx-fs-sm gx-pb-1 gx-pb-sm-0">
               <li>
-                <LineIndicator width={`${perc1}%`} title="Income" title2={`${cSym}${formattedNumber(Invoiced)}`} color="primary" value={`${perc1}%`}/>
+                <LineIndicator width={`${perc1}%`} title="Income" title2={`${cSym}${formattedNumber(displayInv)}`} color="primary" value={`${perc1}%`}/>
               </li>
               <li>
-                <LineIndicator width={`${perc2}%`} title="Expenses" title2={`${cSym}${formattedNumber(Expensed)}`} color="pink" value={`${perc2}%`}/>
+                <LineIndicator width={`${perc2}%`} title="Expenses" title2={`${cSym}${formattedNumber(displayExp)}`} color="pink" value={`${perc2}%`}/>
               </li>
              
             </ul>

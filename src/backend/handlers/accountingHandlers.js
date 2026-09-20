@@ -1,5 +1,7 @@
 const { ipcMain } = require('electron');
 const ChartOfAccounts = require('../models/chartOfAccounts');
+const { getBillLineAccounts } = require('../services/accountEligibility');
+const { getExpectedNormalBalance, normalizeNormalBalance } = require('../services/normalBalance');
 const JournalEntries  = require('../models/journalEntries');
 const FixedAssets = require('../models/fixedAssets');
 const Transactions = require('../models/transactions');
@@ -41,7 +43,7 @@ function registerAccountingHandlers() {
     const repostAll = async () => {
       console.log('[accountingHandlers] Running startup auto-repost check...');
       // Invoices
-      const invoices = db.prepare("SELECT * FROM invoices WHERE status IS NULL OR status NOT IN ('Draft')").all();
+      const invoices = db.prepare("SELECT * FROM invoices WHERE status IS NULL OR LOWER(status) NOT IN ('draft', 'void', 'voided')").all();
       let invCount = 0;
       for (const inv of invoices) {
         try {
@@ -77,15 +79,73 @@ function registerAccountingHandlers() {
   }
 
   // Chart of Accounts handlers
-  safeHandle('get-chart-of-accounts', async () => {
+  // NOTE: `context` is OPT-IN and additive. Omitting it (every existing caller)
+  // returns exactly the same rows as before. `context: 'bill'` narrows the
+  // result to accounts that are valid on a vendor-bill line item — this keeps
+  // the filtering server-side and authoritative without changing the shared
+  // endpoint for Invoices / Deposits / Checks / Journal / Reconciliation /
+  // Products, which all rely on the unfiltered list.
+  safeHandle('get-chart-of-accounts', async (_e, { dateFrom, dateTo, type, context } = {}) => {
     try {
-      return await ChartOfAccounts.getAllAccounts();
+      const accounts = await ChartOfAccounts.getAllAccounts({ dateFrom, dateTo, type });
+      if (context === 'bill' && Array.isArray(accounts)) {
+        return getBillLineAccounts(accounts);
+      }
+      return accounts;
     } catch (error) {
       console.error('Error fetching chart of accounts:', error);
       return { error: error.message };
     }
   });
-  safeHandle('get-budgets', async () => {
+
+  // ── Normal-balance metadata repair (idempotent, ledger-neutral) ───────────
+  // Reads the stored normal side against the account's classification and
+  // corrects any contradiction. Only chart_of_accounts.normalBalance is ever
+  // written — never a journal entry, line, transaction amount or opening
+  // balance. `dryRun: true` returns the proposed changes without writing.
+  safeHandle('repair-normal-balances', async (_e, { dryRun = false } = {}) => {
+    try {
+      const { repairNormalBalances } = require('../services/normalBalance');
+      return { success: true, ...repairNormalBalances(require('../models/dbmgr'), { dryRun }) };
+    } catch (error) {
+      console.error('Error repairing normal balances:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ── Ledger opening / brought-forward row ──────────────────────────────────
+  // The account's opening balance is stored on the account itself
+  // (chart_of_accounts.openingBalance), NOT as a journal entry. The ledger must
+  // therefore derive its first row from that column plus any posted lines dated
+  // before the period — never by inventing a posting.
+  //
+  // Read-only: this handler performs no writes and creates no journal entry, so
+  // it cannot double-count money that is already inside the computed balance.
+  safeHandle('ledger-opening-row', async (_e, { accountId, before } = {}) => {
+    try {
+      const OpeningBalance = require('../services/openingBalance');
+      const st = OpeningBalance.forAccount(db, accountId, { before });
+      if (!st) return { success: false, error: 'account_not_found' };
+      return { success: true, ...st, row: OpeningBalance.openingRow(st) };
+    } catch (error) {
+      console.error('Error reading ledger opening row:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // The authoritative account-type → normal-balance rule (for diagnostics/UI).
+  safeHandle('get-normal-balance-rules', async () => {
+    try {
+      const { NORMAL_BALANCE, LEGACY_TYPE_NORMAL_BALANCE } = require('../services/normalBalance');
+      return { success: true, canonical: NORMAL_BALANCE, legacyTypes: LEGACY_TYPE_NORMAL_BALANCE };
+    } catch (error) {
+      console.error('Error reading normal balance rules:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Dashboard balance cards — pre-aggregated by account category
+  safeHandle('get-dashboard-balances', async () => {
   try {
     console.log('[ipcHandlers] get-budgets invoked');
     return await Budgets.getBudgets();
@@ -94,10 +154,10 @@ function registerAccountingHandlers() {
     return { error: error.message };
   }
 });
-// convert quote
+// convert quote → invoice (lifecycle operation; status is backend controlled)
 safeHandle('convertquote', async (event,quote_id) => {
   try {
-    return await Quotes.convertToInvoice(quote_id);
+    return await Quotes.convertQuoteToInvoice(quote_id);
   } catch (error) {    
     console.error('Error converting quote:', error);
     return { error: error.message };
@@ -241,6 +301,16 @@ safeHandle('budget-periods', async () => {
     catch (e) { return []; }
   });
 
+  safeHandle('journal-get-by-id', async (_e, id) => {
+    try { return JournalEntries.getById(id); }
+    catch (e) { return { error: e.message }; }
+  });
+
+  safeHandle('journal-source-detail', async (_e, sourceType, sourceId) => {
+    try { return JournalEntries.getSourceDetail(sourceType, sourceId); }
+    catch (e) { return { error: e.message }; }
+  });
+
   safeHandle('journal-void', async (event, id) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
@@ -269,6 +339,44 @@ safeHandle('budget-periods', async () => {
     catch (e) { return { error: e.message }; }
   });
 
+  safeHandle('journal-get-by-source', async (_e, sourceType, sourceId) => {
+    try {
+      const entry = db.prepare(
+        `SELECT * FROM journal_entries WHERE source_type = ? AND source_id = ? AND status = 'Posted' ORDER BY id DESC LIMIT 1`
+      ).get(sourceType, sourceId);
+      if (!entry) return null;
+      const lines = db.prepare('SELECT * FROM journal_lines WHERE journal_id = ? ORDER BY id ASC').all(entry.id);
+      return { ...entry, lines };
+    } catch (e) { return { error: e.message }; }
+  });
+
+  // Bulk lookup of the GL debit-line account ids for a list of transactions.
+  // Used by the Credit Card Charges register to render the real Chart of
+  // Accounts expense accounts (with hierarchy) for each charge.
+  safeHandle('journal-transaction-accounts', async (_e, txIds) => {
+    try {
+      const ids = (Array.isArray(txIds) ? txIds : []).map(Number).filter(Boolean);
+      if (!ids.length) return {};
+      const ph = ids.map(() => '?').join(',');
+      const rows = db.prepare(`
+        SELECT je.source_id AS tx_id, jl.account_id AS account_id
+        FROM journal_entries je
+        JOIN journal_lines jl ON jl.journal_id = je.id
+        WHERE je.source_type = 'transaction' AND je.status = 'Posted'
+          AND je.source_id IN (${ph}) AND jl.debit > 0
+        ORDER BY je.id ASC, jl.id ASC
+      `).all(...ids);
+      const out = {};
+      rows.forEach(r => {
+        const id = Number(r.account_id);
+        if (!id) return;
+        if (!out[r.tx_id]) out[r.tx_id] = [];
+        if (!out[r.tx_id].includes(id)) out[r.tx_id].push(id);
+      });
+      return out;
+    } catch (e) { return { error: e.message }; }
+  });
+
   safeHandle('journal-post-expense', async (_e, expense) => {
     try { return JournalEntries.postExpense(expense); }
     catch (e) { return { error: e.message }; }
@@ -291,7 +399,7 @@ safeHandle('budget-periods', async () => {
     try {
       let posted = 0, skipped = 0, errors = 0;
       // Post all non-Draft invoices that don't have journal entries yet
-      const invoices = db.prepare("SELECT * FROM invoices WHERE status IS NULL OR status NOT IN ('Draft')").all();
+      const invoices = db.prepare("SELECT * FROM invoices WHERE status IS NULL OR LOWER(status) NOT IN ('draft', 'void', 'voided')").all();
       for (const inv of invoices) {
         try {
           const res = JournalEntries.postInvoice(inv);
@@ -483,8 +591,7 @@ safeHandle('budget-periods', async () => {
     }
   });
 
-  // Dashboard balance cards — pre-aggregated by account category
-  safeHandle('get-dashboard-balances', async () => {
+  safeHandle('get-budgets', async () => {
     try {
       const db = require('../models/dbmgr');
       const rows = db.prepare(`
@@ -509,7 +616,8 @@ safeHandle('budget-periods', async () => {
       const sum = (filterFn) => rows
         .filter(filterFn)
         .reduce((s, r) => {
-          const nb  = r.normalBalance || 'Debit';
+          // Single source of truth for the normal side (services/normalBalance.js).
+          const nb  = getExpectedNormalBalance(r.type) || normalizeNormalBalance(r.normalBalance) || 'Debit';
           const base = Number(r.openingBalance || 0);
           const bal  = nb === 'Debit'
             ? base + r.totalDebit - r.totalCredit
@@ -574,26 +682,9 @@ safeHandle('budget-periods', async () => {
     }
   });
 
-  // Handle reconciliation
-  safeHandle('reconcile-transactions', async (event, data) => {
-    try {
-      const ctx = authorize(event, { permissions: 'write:reconcile' });
-      const res = await Transactions.reconcileTransactions(data);
-      if (res?.success) {
-        AuditLog.log({
-          userId: ctx.userId,
-          action: 'reconcile',
-          entityType: 'account',
-          entityId: data?.accountId,
-          details: { statementDate: data?.statementDate, transactionIds: data?.transactions }
-        });
-      }
-      return res;
-    } catch (error) {
-      console.error('Error reconciling transactions:', error);
-      return { success: false, error: error.message };
-    }
-  });
+  // Handle reconciliation (single canonical registration lives in
+  // bankingHandlers.js; duplicate registrations were removed to avoid
+  // registration-order-dependent behavior).
 
   // Entities management
   safeHandle('entities-list', async (event) => {
@@ -658,11 +749,12 @@ safeHandle('budget-periods', async () => {
   safeHandle('coa-import', async (_event, { csvText, note }) => {
     try {
       if (!csvText || typeof csvText !== 'string') throw new Error('csvText required');
+      // Strip UTF-8 BOM
+      csvText = csvText.replace(/^\ufeff/, '');
+
       const COAVersions = require('../models/coaVersions');
-      // snapshot before import
       try { COAVersions.createFromCurrent(note || 'Pre-import snapshot'); } catch {}
 
-      // Proper CSV parsing (handles quoted fields with commas)
       const parseLine = (line) => {
         const out = []; let cur = ''; let q = false;
         for (let i = 0; i < line.length; i++) {
@@ -681,14 +773,17 @@ safeHandle('budget-periods', async () => {
       const dataRows = rawLines.slice(1).map(parseLine);
 
       const col = (name) => cols.indexOf(name);
+      // name: QB Desktop uses 'Account', QBO uses 'Name'
       const idxNum     = col('number') >= 0 ? col('number') : col('account number');
-      const idxName    = col('name') >= 0 ? col('name') : col('account name');
+      const idxName    = col('name') >= 0 ? col('name') : col('account name') >= 0 ? col('account name') : col('account');
       const idxType    = col('type') >= 0 ? col('type') : col('account type');
-      const idxSubType = col('subtype') >= 0 ? col('subtype') : col('sub type');
-      const idxStatus  = col('status');
+      // QBO uses 'Detail Type'
+      const idxSubType = col('subtype') >= 0 ? col('subtype') : col('sub type') >= 0 ? col('sub type') : col('detail type');
+      const idxStatus  = col('status') >= 0 ? col('status') : col('active status');
       const idxDesc    = col('description') >= 0 ? col('description') : col('desc');
       const idxNormal  = col('normalbalance') >= 0 ? col('normalbalance') : col('normal balance');
-      const idxBalance = col('openingbalance') >= 0 ? col('openingbalance') : col('opening balance');
+      const idxBalance = col('openingbalance') >= 0 ? col('openingbalance') : col('opening balance') >= 0 ? col('opening balance') : col('balance total');
+      const idxTaxLine = col('taxline') >= 0 ? col('taxline') : col('tax line');
 
       const toInsert = [];
       for (const parts of dataRows) {
@@ -703,24 +798,29 @@ safeHandle('budget-periods', async () => {
         const description   = get(idxDesc) || null;
         const normalBalance = get(idxNormal) || null;
         const openingBalance = parseFloat(get(idxBalance) || '0') || 0;
-        toInsert.push({ name, type, subType, number, status, description, normalBalance, openingBalance });
+        const taxLine        = get(idxTaxLine) || null;
+        toInsert.push({ name, type, subType, number, status, description, normalBalance, openingBalance, taxLine });
       }
       let inserted = 0;
+      const errors = [];
       for (const acc of toInsert) {
         try {
-          ChartOfAccounts.insertAccount({
+          const result = ChartOfAccounts.insertAccount({
             name: acc.name, type: acc.type, subType: acc.subType,
             number: acc.number, status: acc.status,
             description: acc.description, normalBalance: acc.normalBalance,
             openingBalance: acc.openingBalance,
+            taxLine: acc.taxLine,
             entered_by: 'import'
           });
-          inserted++;
-        } catch {}
+          if (result && result.success !== false) inserted++;
+          else errors.push(`${acc.name}: ${result?.error || 'unknown error'}`);
+        } catch (e) {
+          errors.push(`${acc.name}: ${e.message}`);
+        }
       }
-      // snapshot after
       try { COAVersions.createFromCurrent(note || 'Post-import snapshot'); } catch {}
-      return { success: true, inserted };
+      return { success: true, inserted, total: toInsert.length, errors: errors.length ? errors : undefined };
     } catch (error) {
       return { error: error.message };
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import { message } from 'antd';
 import {
   Card,
@@ -11,6 +11,7 @@ import {
   Col,
 } from "antd";
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from "recharts";
+import { useCurrency } from "../../../../utils/currency";
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -27,6 +28,7 @@ const initialData = months.map(month => ({
 }));
 
 export default function CashflowProjector() {
+  const { symbol: cSym } = useCurrency();
   const [cashflowData, setCashflowData] = useState(initialData);
 
   useEffect(() => {
@@ -77,7 +79,7 @@ export default function CashflowProjector() {
         <InputNumber
           value={value}
           min={0}
-          formatter={val => `$ ${val}`}
+          formatter={val => `${cSym} ${val}`}
           parser={val => val.replace(/[^\d]/g, "")}
           onChange={val => updateValue(index, "inflow", val)}
         />
@@ -91,7 +93,7 @@ export default function CashflowProjector() {
         <InputNumber
           value={value}
           min={0}
-          formatter={val => `$ ${val}`}
+          formatter={val => `${cSym} ${val}`}
           parser={val => val.replace(/[^\d]/g, "")}
           onChange={val => updateValue(index, "outflow", val)}
         />
@@ -125,7 +127,7 @@ export default function CashflowProjector() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip formatter={value => `$ ${value}`} />
+                <Tooltip formatter={value => `${cSym} ${value}`} />
                 <Line
                   type="monotone"
                   dataKey="NetCashflow"
@@ -159,3 +161,4 @@ export default function CashflowProjector() {
     </div>
   );
 }
+

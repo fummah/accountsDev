@@ -2,6 +2,7 @@
 const db = require("./dbmgr");
 const Settings = require('./settings');
 const JournalEntries = require('./journalEntries');
+const { getExpectedNormalBalance, normalizeNormalBalance } = require('../services/normalBalance');
 
 const Transactions = {
   createTable() {
@@ -32,13 +33,24 @@ const Transactions = {
       pairId INTEGER
     )`).run();
 
-    // Reconciliations table
+    // Reconciliations table (audit trail)
     db.prepare(`CREATE TABLE IF NOT EXISTS reconciliations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       accountId INTEGER,
+      accountName TEXT,
       statementDate TEXT,
       statementBalance REAL,
       reconciledBalance REAL,
+      reconciledBy TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+
+    // Junction table linking each reconciliation to its transactions
+    db.prepare(`CREATE TABLE IF NOT EXISTS reconciliation_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reconciliationId INTEGER,
+      transactionId INTEGER,
+      amount REAL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`).run();
 
@@ -105,8 +117,11 @@ const Transactions = {
       if (!cols.includes('printed_at')) toAdd.push({ name: 'printed_at', sql: 'TEXT' });
       if (!cols.includes('categories')) toAdd.push({ name: 'categories', sql: 'TEXT' });
       if (!cols.includes('payee_name')) toAdd.push({ name: 'payee_name', sql: 'TEXT' });
+      if (!cols.includes('payee_address')) toAdd.push({ name: 'payee_address', sql: 'TEXT' });
       if (!cols.includes('source_type')) toAdd.push({ name: 'source_type', sql: 'TEXT' });
       if (!cols.includes('source_id')) toAdd.push({ name: 'source_id', sql: 'INTEGER' });
+      if (!cols.includes('reconciliationid')) toAdd.push({ name: 'reconciliationId', sql: 'INTEGER' });
+      if (!cols.includes('reconciliationdate')) toAdd.push({ name: 'reconciliationDate', sql: 'TEXT' });
 
       toAdd.forEach(col => {
         try {
@@ -119,10 +134,72 @@ const Transactions = {
     } catch (err) {
       console.error('Failed to ensure transactions columns', err);
     }
+
+    // Ensure audit columns exist on the reconciliations table (existing DBs)
+    try {
+      const recCols = db.prepare("PRAGMA table_info('reconciliations')").all().map(c => c.name.toLowerCase());
+      const recToAdd = [];
+      if (!recCols.includes('accountname')) recToAdd.push({ name: 'accountName', sql: 'TEXT' });
+      if (!recCols.includes('reconciledby')) recToAdd.push({ name: 'reconciledBy', sql: 'TEXT' });
+      if (!recCols.includes('startingbalance')) recToAdd.push({ name: 'startingBalance', sql: 'REAL DEFAULT 0' });
+      if (!recCols.includes('difference')) recToAdd.push({ name: 'difference', sql: 'REAL DEFAULT 0' });
+      if (!recCols.includes('adjustmentamount')) recToAdd.push({ name: 'adjustmentAmount', sql: 'REAL DEFAULT 0' });
+      if (!recCols.includes('adjustmentjournalid')) recToAdd.push({ name: 'adjustmentJournalId', sql: 'INTEGER' });
+      if (!recCols.includes('adjustmentdescription')) recToAdd.push({ name: 'adjustmentDescription', sql: 'TEXT' });
+      if (!recCols.includes('adjustmentaccountid')) recToAdd.push({ name: 'adjustmentAccountId', sql: 'INTEGER' });
+      // The unresolved difference BEFORE any adjustment, kept for the audit
+      // trail. `difference` itself records the POST-adjustment position, so a
+      // completed reconciliation reads as zero.
+      if (!recCols.includes('originaldifference')) recToAdd.push({ name: 'originalDifference', sql: 'REAL DEFAULT 0' });
+      recToAdd.forEach(col => {
+        try {
+          db.prepare(`ALTER TABLE reconciliations ADD COLUMN ${col.name} ${col.sql}`).run();
+          console.log(`Added missing column reconciliations.${col.name}`);
+        } catch (addErr) {
+          console.error(`Failed to add column ${col.name} to reconciliations:`, addErr);
+        }
+      });
+    } catch (err) {
+      console.error('Failed to ensure reconciliations columns', err);
+    }
   },
  
   getAll() {
-    return db.prepare("SELECT * FROM transactions ORDER BY date DESC").all();
+    return db.prepare("SELECT * FROM transactions ORDER BY created_at DESC").all();
+  },
+
+  getCheckStats() {
+    const total = db.prepare("SELECT COUNT(*) AS c FROM transactions WHERE LOWER(type) = 'check'").get().c;
+    const totalAmount = db.prepare("SELECT COALESCE(SUM(COALESCE(amount, debit, 0)), 0) AS s FROM transactions WHERE LOWER(type) = 'check'").get().s;
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    const ms = monthStart.toISOString().slice(0, 10);
+    const thisMonthCount = db.prepare("SELECT COUNT(*) AS c FROM transactions WHERE LOWER(type) = 'check' AND date >= ?").get(ms).c;
+    const lastRef = db.prepare("SELECT MAX(CAST(reference AS INTEGER)) AS n FROM transactions WHERE LOWER(type) = 'check' AND reference GLOB '[0-9]*'").get().n;
+    return { total, totalAmount, thisMonthCount, nextCheckNumber: String((lastRef || 0) + 1) };
+  },
+
+  getPaginated(page = 1, pageSize = 25, search = '', typeFilter = '') {
+    const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
+    const limit = Math.max(1, Math.min(500, pageSize));
+    const conditions = [];
+    const params = [];
+    if (typeFilter) {
+      conditions.push(`LOWER(type) = LOWER(?)`);
+      params.push(typeFilter);
+    }
+    if (search && search.trim()) {
+      conditions.push('(type LIKE ? OR date LIKE ? OR description LIKE ? OR reference LIKE ? OR payee_name LIKE ? OR CAST(amount AS TEXT) LIKE ?)');
+      const sp = `%${search.trim()}%`;
+      params.push(sp, sp, sp, sp, sp, sp);
+    }
+    const whereClause = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
+    const orderSql = " ORDER BY created_at DESC";
+    const countSql = `SELECT COUNT(*) AS total FROM transactions${whereClause}`;
+    const total = db.prepare(countSql).get(...params).total;
+    const dataSql = `SELECT * FROM transactions${whereClause}${orderSql} LIMIT ? OFFSET ?`;
+    const data = db.prepare(dataSql).all(...params, limit, offset);
+    return { data, total };
   },
 
   getDeposits() {
@@ -133,7 +210,7 @@ const Transactions = {
     return db.prepare("SELECT * FROM transactions WHERE LOWER(type) IN ('transfer_in', 'transfer_out') ORDER BY date DESC").all();
   },
 
-  insert({ date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class: classTag, location, department, categories, payee_name, source_type, source_id }) {
+  insert({ date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class: classTag, location, department, categories, payee_name, payee_address, source_type, source_id }) {
     // Closing date enforcement
     const closingDate = Settings.get('closingDate');
     if (closingDate && date && typeof date === 'string' && date <= closingDate) {
@@ -144,34 +221,74 @@ const Transactions = {
       const cols = new Set(db.prepare("PRAGMA table_info('transactions')").all().map(c => c.name.toLowerCase()));
       if (!cols.has('categories')) db.prepare("ALTER TABLE transactions ADD COLUMN categories TEXT").run();
       if (!cols.has('payee_name')) db.prepare("ALTER TABLE transactions ADD COLUMN payee_name TEXT").run();
+      if (!cols.has('payee_address')) db.prepare("ALTER TABLE transactions ADD COLUMN payee_address TEXT").run();
       if (!cols.has('source_type')) db.prepare("ALTER TABLE transactions ADD COLUMN source_type TEXT").run();
       if (!cols.has('source_id')) db.prepare("ALTER TABLE transactions ADD COLUMN source_id INTEGER").run();
     } catch {}
+    this.assertUniqueCheckNumber({ type, reference });
     return db.prepare(`
       INSERT INTO transactions (
         date, type, amount, description, status, accountId, customerId,
-        reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class, location, department, categories, payee_name, source_type, source_id
-      ) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id || null, isIntercompany ? 1 : 0, eliminateOnConsolidation ? 1 : 0, pairId || null, classTag || null, location || null, department || null, categories || null, payee_name || null, source_type || null, source_id || null);
+        reference, debit, credit, entered_by, entity_id, isIntercompany, eliminateOnConsolidation, pairId, class, location, department, categories, payee_name, payee_address, source_type, source_id
+      ) VALUES (?, ?, ?, ?, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(date, type, amount, description, accountId, customerId, reference, debit, credit, entered_by, entity_id || null, isIntercompany ? 1 : 0, eliminateOnConsolidation ? 1 : 0, pairId || null, classTag || null, location || null, department || null, categories || null, payee_name || null, payee_address || null, source_type || null, source_id || null);
   },
 
   getById(id) {
     return db.prepare("SELECT * FROM transactions WHERE id = ?").get(id);
   },
 
-  update(id, { date, type, amount, description, reference, accountId, categories, payee_name }) {
+  // A transaction cleared as part of a bank statement reconciliation must not be
+  // silently edited/deleted/voided — doing so desyncs the stored reconciliation
+  // balance/difference and the reconciliation_transactions junction.
+  assertNotReconciled(id) {
+    const row = this.getById(id);
+    if (row && Number(row.isReconciled)) {
+      throw new Error(
+        `Transaction #${id} is part of a bank reconciliation and cannot be modified. ` +
+        `Delete the reconciliation first, or void it there.`
+      );
+    }
+  },
+
+  findByReference(type, reference) {
+    return db.prepare("SELECT * FROM transactions WHERE type = ? AND reference = ? AND (status IS NULL OR LOWER(status) != 'void')").get(type, String(reference));
+  },
+
+  // Check numbers must be unique across non-void checks. The frontend gives an
+  // advisory warning, but the DB is the final gate — a duplicate number breaks
+  // check-register integrity, audit trails, and reconciliation of cleared checks.
+  assertUniqueCheckNumber({ id = null, type, reference }) {
+    if (String(type || '').toLowerCase() !== 'check' || reference == null || String(reference).trim() === '') return;
+    const dup = db.prepare(
+      `SELECT id FROM transactions
+       WHERE LOWER(type) = 'check' AND reference = ?
+         AND (status IS NULL OR LOWER(status) != 'void') AND id != ?`
+    ).get(String(reference).trim(), Number(id) || 0);
+    if (dup) {
+      throw new Error(
+        `Check #${reference} already exists (transaction #${dup.id}). ` +
+        `Check numbers must be unique — pick a different number.`
+      );
+    }
+  },
+
+  update(id, { date, type, amount, description, reference, accountId, categories, payee_name, payee_address }) {
+    this.assertNotReconciled(id);
     const closingDate = Settings.get('closingDate');
     const existing = this.getById(id);
     if (!existing) throw new Error(`Transaction ${id} not found`);
     if (closingDate && date && typeof date === 'string' && date <= closingDate) {
       throw new Error(`Posting date ${date} is on or before closing date ${closingDate}`);
     }
+    this.assertUniqueCheckNumber({ id, type: type || existing.type, reference: reference != null ? reference : existing.reference });
     try {
       const cols = new Set(db.prepare("PRAGMA table_info('transactions')").all().map(c => c.name.toLowerCase()));
       if (!cols.has('payee_name')) db.prepare("ALTER TABLE transactions ADD COLUMN payee_name TEXT").run();
+      if (!cols.has('payee_address')) db.prepare("ALTER TABLE transactions ADD COLUMN payee_address TEXT").run();
     } catch {}
     return db.prepare(`
-      UPDATE transactions SET date=?, type=?, amount=?, description=?, reference=?, accountId=?, categories=?, payee_name=?
+      UPDATE transactions SET date=?, type=?, amount=?, description=?, reference=?, accountId=?, categories=?, payee_name=?, payee_address=?
       WHERE id=?
     `).run(
       date || existing.date,
@@ -182,41 +299,334 @@ const Transactions = {
       accountId != null ? accountId : existing.accountId,
       categories != null ? categories : existing.categories,
       payee_name != null ? payee_name : existing.payee_name,
+      payee_address != null ? payee_address : existing.payee_address,
       id
     );
   },
 
   deleteTransaction(id) {
+    this.assertNotReconciled(id);
+    // Remove attached documents + their files (credit-card charges and checks
+    // attach documents keyed by transaction id) so no orphans remain.
+    try {
+      const Documents = require('./documents');
+      Documents.deleteByLinked('creditcard', Number(id));
+      Documents.deleteByLinked('check', Number(id));
+    } catch (docErr) {
+      console.warn('[transactions] Attachment cleanup on delete failed:', docErr.message);
+    }
     return db.prepare("DELETE FROM transactions WHERE id=?").run(id);
   },
 
   voidTransaction(id) {
+    this.assertNotReconciled(id);
     return db.prepare("UPDATE transactions SET status='Voided' WHERE id=?").run(id);
   },
 
-  reconcileTransactions({ accountId, statementDate, statementBalance, transactions }) {
-    const db = require('./dbmgr');
-    
-    db.prepare('BEGIN TRANSACTION').run();
-    
-    try {
-      // Update transaction reconciliation status
-      const updateStmt = db.prepare('UPDATE transactions SET isReconciled = 1 WHERE id = ?');
-      transactions.forEach(txId => updateStmt.run(txId));
+  // Permanently delete a check AND reverse its accounting impact:
+  //   1. Reverse/void the posted journal entry (DR expense / CR bank) so
+  //      account balances are restored.
+  //   2. If the check was a bill payment, un-mark the bill as paid and
+  //      restore the vendor balance.
+  //   3. Delete the check transaction record itself.
+  // Returns { success, message, reversedBill }.
+  deleteCheck(id) {
+    this.assertNotReconciled(id);
+    const check = this.getById(id);
+    if (!check) return { success: false, error: 'Check not found' };
+    if (String(check.type || '').toLowerCase() !== 'check') {
+      return { success: false, error: `Transaction #${id} is not a check` };
+    }
 
-      // Insert reconciliation record
-      db.prepare(`
+    const amount = Number(check.amount || check.debit || check.credit || 0);
+
+    // 1) Reverse the posted journal entry for this check (if any).
+    let reversedJournal = false;
+    try {
+      const je = db.prepare(
+        "SELECT id FROM journal_entries WHERE source_type = 'transaction' AND source_id = ? AND status = 'Posted' LIMIT 1"
+      ).get(String(id));
+      if (je) {
+        JournalEntries.voidEntry(je.id);
+        reversedJournal = true;
+      }
+    } catch (jErr) {
+      console.warn('[transactions.deleteCheck] journal void failed:', jErr.message);
+    }
+
+    // 2) If this check was a bill payment, reverse the bill's paid status and
+    //    restore the vendor balance. Bill-payment checks are created by the
+    //    bill-pay handler with a description like:
+    //      "Bill payment to <vendor> — Bill #<expenseId>"
+    let reversedBill = null;
+    try {
+      const m = String(check.description || '').match(/Bill\s*#(\d+)/i);
+      if (m) {
+        const expenseId = Number(m[1]);
+        const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(expenseId);
+        if (expense) {
+          const paidAmt = Number(expense.paid_amount || 0);
+          const newPaid = Math.max(0, paidAmt - amount);
+          const totalLines = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM expense_lines WHERE expense_id = ?').get(expenseId);
+          const totalAmount = Number(totalLines?.total || 0);
+          const newStatus = newPaid <= 0.005 ? 'Unpaid' : (newPaid >= totalAmount - 0.005 ? 'Paid' : 'Partially Paid');
+          db.prepare('UPDATE expenses SET paid_amount = ?, approval_status = ? WHERE id = ?')
+            .run(newPaid, newStatus, expenseId);
+          // Restore vendor balance (bill-pay reduced it by the payment amount).
+          try {
+            const exp = db.prepare('SELECT payee FROM expenses WHERE id = ?').get(expenseId);
+            if (exp && exp.payee) {
+              db.prepare('UPDATE suppliers SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(amount, Number(exp.payee));
+            }
+          } catch (balErr) { console.warn('[transactions.deleteCheck] vendor balance restore failed:', balErr.message); }
+          reversedBill = { expenseId, newPaid, newStatus };
+        }
+      }
+    } catch (bErr) {
+      console.warn('[transactions.deleteCheck] bill reversal failed:', bErr.message);
+    }
+
+    // 3) Delete the check transaction (also cleans up attached documents).
+    const res = this.deleteTransaction(id);
+
+    return {
+      success: res.changes > 0,
+      message: res.changes > 0 ? `Check #${check.reference || id} deleted and payment reversed` : 'Check not found',
+      reversedJournal,
+      reversedBill,
+    };
+  },
+
+  reconcileTransactions({ accountId, accountName, statementDate, statementBalance, transactions, reconciledBy, createAdjustment = false, adjustmentDescription = null, adjustmentAccountId = null }) {
+    const db = require('./dbmgr');
+
+    if (!accountId || !Array.isArray(transactions) || transactions.length === 0) {
+      throw new Error('Please select at least one transaction to reconcile');
+    }
+    const stmtBal = Number(statementBalance) || 0;
+    const recDate = statementDate || new Date().toISOString().slice(0, 10);
+
+    // Load the selected transactions (debit - credit = bank movement)
+    const placeholders = transactions.map(() => '?').join(',');
+    const selected = db.prepare(
+      `SELECT id, debit, credit, amount, isReconciled FROM transactions WHERE id IN (${placeholders})`
+    ).all(...transactions.map(Number));
+
+    if (selected.length !== transactions.length) {
+      throw new Error('One or more selected transactions no longer exist');
+    }
+    const alreadyReconciled = selected.filter(t => t.isReconciled);
+    if (alreadyReconciled.length > 0) {
+      throw new Error('One or more selected transactions are already reconciled');
+    }
+
+    const movement = selected.reduce((sum, t) => sum + (Number(t.debit) || 0) - (Number(t.credit) || 0), 0);
+
+    // Starting balance for this statement. The rule lives in ONE place —
+    // services/openingBalance.js — so the reconciliation and the General Ledger
+    // cannot drift apart on what the account's opening balance is:
+    //   - First reconciliation  -> the account's opening balance
+    //   - Later reconciliations -> the previous statement ending balance
+    //     (which already contains the opening balance; never re-added)
+    const OpeningBalance = require('../services/openingBalance');
+    const startState = OpeningBalance.reconciliationStartingBalance(db, accountId);
+    const startingBalance = startState.startingBalance;
+
+    const clearedBalance = startingBalance + movement;
+
+    // Difference = statement ending balance - cleared balance (opening balance included)
+    const difference = stmtBal - clearedBalance;
+
+    if (Math.abs(difference) > 0.005 && !createAdjustment) {
+      throw new Error(
+        `Reconciliation cannot be completed because the account is out of balance. Remaining Difference: ${difference.toFixed(2)}`
+      );
+    }
+
+    db.prepare('BEGIN TRANSACTION').run();
+
+    try {
+      // When the user explicitly chooses to adjust, post a real journal entry so
+      // the difference is captured in the GL / journal (never silently zeroed).
+      let adjustmentJournalId = null;
+      let adjustmentAmount = 0;
+      let adjustmentDescriptionText = null;
+      let adjustmentAccountUsed = null;
+      if (Math.abs(difference) > 0.005 && createAdjustment) {
+        adjustmentAmount = Math.abs(difference);
+        const COA = require('./chartOfAccounts');
+        const bank = COA.getAccount(accountId);
+        if (!bank) throw new Error('Bank account not found for the reconciliation adjustment');
+
+        // Which account absorbs the difference is decided by ONE rule
+        // (services/reconciliationAdjustment.js): the account the user chose,
+        // else a configured discrepancy account, else the first eligible one.
+        // The bank account itself is never permitted on both sides.
+        const ReconAdj = require('../services/reconciliationAdjustment');
+        const disc = ReconAdj.resolveAdjustmentAccount(db, { adjustmentAccountId, bankAccountId: accountId });
+        if (!disc) {
+          throw new Error(
+            'No adjustment account available. Create an expense account such as ' +
+            `"${ReconAdj.DEFAULT_DISCREPANCY_NAME}" (or pick one) and try again.`
+          );
+        }
+
+        adjustmentDescriptionText = (adjustmentDescription && adjustmentDescription.trim())
+          || `Bank reconciliation adjustment for ${recDate}`;
+
+        // The adjustment must move the BOOK balance to the statement balance.
+        //   difference > 0 : the statement says there is more money than the
+        //                    books do  -> DEBIT the bank, CREDIT the adjustment
+        //   difference < 0 : the books carry more than the statement does
+        //                    -> CREDIT the bank, DEBIT the adjustment
+        // Either way the bank side is signed like a bank movement and the entry
+        // balances by construction (both lines carry adjustmentAmount).
+        const lines = difference > 0
+          ? [
+              { account_id: bank.id, debit: adjustmentAmount, description: adjustmentDescriptionText },
+              { account_id: disc.id, credit: adjustmentAmount, description: adjustmentDescriptionText },
+            ]
+          : [
+              { account_id: disc.id, debit: adjustmentAmount, description: adjustmentDescriptionText },
+              { account_id: bank.id, credit: adjustmentAmount, description: adjustmentDescriptionText },
+            ];
+
+        const JournalEntries = require('./journalEntries');
+        const je = JournalEntries.post({
+          date: recDate,
+          description: adjustmentDescriptionText,
+          // source_type/source_id make the entry traceable back to the
+          // reconciliation from the General Ledger and Journal Entries screens.
+          source_type: 'reconciliation',
+          source_id: accountId,
+          created_by: reconciledBy || null,
+          lines,
+        });
+        if (!je || je.error || !je.id) {
+          throw new Error((je && je.error) || 'Failed to post the reconciliation adjustment journal entry');
+        }
+        adjustmentJournalId = je.id;
+        adjustmentAccountUsed = { id: disc.id, name: disc.name };
+      }
+
+      // Insert reconciliation record (audit trail)
+      // After a successful adjustment the reconciliation is RESOLVED: the
+      // recorded difference is zero, while `originalDifference` and
+      // `adjustmentAmount` preserve exactly what was posted and why.
+      const unresolvedDifference = Math.abs(difference) < 0.005 ? 0 : difference;
+      const resolvedDifference = adjustmentJournalId ? 0 : unresolvedDifference;
+
+      const recRes = db.prepare(`
         INSERT INTO reconciliations (
-          accountId, statementDate, statementBalance, reconciledBalance
-        ) VALUES (?, ?, ?, ?)
-      `).run(accountId, statementDate, statementBalance, statementBalance);
+          accountId, accountName, statementDate, statementBalance, reconciledBalance,
+          startingBalance, difference, adjustmentAmount, adjustmentJournalId, adjustmentDescription,
+          adjustmentAccountId, originalDifference, reconciledBy
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        accountId,
+        accountName || null,
+        recDate,
+        stmtBal,
+        clearedBalance,
+        startingBalance,
+        resolvedDifference,
+        adjustmentAmount,
+        adjustmentJournalId,
+        adjustmentJournalId ? adjustmentDescriptionText : null,
+        adjustmentAccountUsed ? adjustmentAccountUsed.id : null,
+        unresolvedDifference,
+        reconciledBy || null
+      );
+      const reconciliationId = recRes.lastInsertRowid;
+
+      // Link each transaction to this reconciliation + mark as reconciled
+      const updateStmt = db.prepare(`
+        UPDATE transactions
+        SET isReconciled = 1, reconciliationId = ?, reconciliationDate = ?
+        WHERE id = ?
+      `);
+      const linkStmt = db.prepare(`
+        INSERT INTO reconciliation_transactions (reconciliationId, transactionId, amount)
+        VALUES (?, ?, ?)
+      `);
+
+      selected.forEach(tx => {
+        updateStmt.run(reconciliationId, recDate, tx.id);
+        linkStmt.run(reconciliationId, tx.id, (Number(tx.debit) || 0) - (Number(tx.credit) || 0));
+      });
 
       db.prepare('COMMIT').run();
-      return { success: true };
+      return {
+        success: true,
+        reconciliationId,
+        startingBalance,
+        startingBalanceSource: startState.source,
+        movement,
+        clearedBalance,
+        // Post-adjustment position: zero once the difference has been captured.
+        difference: resolvedDifference,
+        unresolvedDifference,
+        adjustmentJournalId,
+        adjustmentAccount: adjustmentAccountUsed,
+      };
     } catch (error) {
       db.prepare('ROLLBACK').run();
       throw error;
     }
+  },
+
+  // Unreconciled transactions for a bank account (the active work queue)
+  getUnreconciledTransactions({ accountId, statementDate }) {
+    const db = require('./dbmgr');
+    const params = [accountId];
+    let dateClause = '';
+    if (statementDate) {
+      dateClause = ' AND date <= ?';
+      params.push(statementDate);
+    }
+    return db.prepare(`
+      SELECT t.*,
+             (COALESCE(t.debit, 0) - COALESCE(t.credit, 0)) AS amount
+      FROM transactions t
+      WHERE t.accountId = ?
+        AND (t.isReconciled IS NULL OR t.isReconciled = 0)
+        AND (t.status IS NULL OR LOWER(t.status) != 'voided')
+        ${dateClause}
+      ORDER BY t.date ASC, t.id ASC
+    `).all(...params);
+  },
+
+  // Reconciliation history (audit trail) for an account
+  getReconciliations({ accountId }) {
+    const db = require('./dbmgr');
+    const rows = db.prepare(`
+      SELECT r.*,
+             (SELECT COUNT(*) FROM reconciliation_transactions rt WHERE rt.reconciliationId = r.id) AS transactionCount,
+             (SELECT COALESCE(SUM(rt.amount), 0) FROM reconciliation_transactions rt WHERE rt.reconciliationId = r.id) AS totalCleared
+      FROM reconciliations r
+      WHERE r.accountId = ?
+      ORDER BY r.statementDate DESC, r.id DESC
+    `).all(accountId);
+    return rows.map(r => ({
+      ...r,
+      transactionCount: Number(r.transactionCount) || 0,
+      totalCleared: Number(r.totalCleared) || 0,
+    }));
+  },
+
+  // Transactions included in a specific reconciliation
+  getReconciliationDetail({ reconciliationId }) {
+    const db = require('./dbmgr');
+    const rec = db.prepare('SELECT * FROM reconciliations WHERE id = ?').get(reconciliationId);
+    if (!rec) return null;
+    const transactions = db.prepare(`
+      SELECT rt.*, t.date, t.type, t.reference, t.description, t.debit, t.credit, t.status
+      FROM reconciliation_transactions rt
+      LEFT JOIN transactions t ON t.id = rt.transactionId
+      WHERE rt.reconciliationId = ?
+      ORDER BY t.date ASC, t.id ASC
+    `).all(reconciliationId);
+    return { ...rec, transactions };
   },
 
   createBankTransfer({ fromAccount, toAccount, date, amount, reference, description }) {
@@ -226,7 +636,19 @@ const Transactions = {
       throw new Error(`Posting date ${date} is on or before closing date ${closingDate}`);
     }
     const db = require('./dbmgr');
-    
+
+    // A transfer may only move money between real Bank-type accounts.
+    const COA = require('./chartOfAccounts');
+    const srcAcct = COA.getAccount(Number(fromAccount));
+    const dstAcct = COA.getAccount(Number(toAccount));
+    const isBank = (a) => a && String(a.type || a.accountType || '').trim().toLowerCase() === 'bank';
+    if (!isBank(srcAcct)) {
+      throw new Error(`Transfer source account "${srcAcct ? srcAcct.name : fromAccount}" is not a Bank account.`);
+    }
+    if (!isBank(dstAcct)) {
+      throw new Error(`Transfer destination account "${dstAcct ? dstAcct.name : toAccount}" is not a Bank account.`);
+    }
+
     db.prepare('BEGIN TRANSACTION').run();
     
     try {
@@ -254,18 +676,17 @@ const Transactions = {
 
       // Post double-entry to general ledger: DR destination / CR source
       try {
-        const COA = require('./chartOfAccounts');
-        const srcAcct = db.prepare('SELECT id, name FROM chart_of_accounts WHERE id = ?').get(fromAccount);
-        const dstAcct = db.prepare('SELECT id, name FROM chart_of_accounts WHERE id = ?').get(toAccount);
-        if (srcAcct && dstAcct) {
+        const srcRow = db.prepare('SELECT id, name FROM chart_of_accounts WHERE id = ?').get(fromAccount);
+        const dstRow = db.prepare('SELECT id, name FROM chart_of_accounts WHERE id = ?').get(toAccount);
+        if (srcRow && dstRow) {
           JournalEntries.post({
             date: date || new Date().toISOString().slice(0, 10),
             reference: ref,
             description: description || 'Bank Transfer',
             source_type: 'transfer', source_id: ref,
             lines: [
-              { account_id: dstAcct.id, debit: amount, credit: 0, description: dstAcct.name },
-              { account_id: srcAcct.id, debit: 0, credit: amount, description: srcAcct.name },
+              { account_id: dstRow.id, debit: amount, credit: 0, description: dstRow.name },
+              { account_id: srcRow.id, debit: 0, credit: amount, description: srcRow.name },
             ],
           });
         }
@@ -491,7 +912,10 @@ Transactions.getTrialBalance = function(startDate, endDate) {
     `).all(start, end);
 
     return rows.map(r => {
-      const nb = r.normalBalance || 'Debit';
+      // Single source of truth for the normal side (services/normalBalance.js):
+      // the account's type wins; the stored field is honoured only when the
+      // classification is unknown.
+      const nb = getExpectedNormalBalance(r.accountType) || normalizeNormalBalance(r.normalBalance) || 'Debit';
       const d = Number(r.totalDebit)  || 0;
       const c = Number(r.totalCredit) || 0;
       // Balance = normal-side amount (positive = normal, negative = contra)

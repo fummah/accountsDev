@@ -7,6 +7,7 @@ import AddSupplier from 'components/Inner/Customers/AddCustomer';
 import SuppliersList from "components/Inner/Expenses/SuppliersList";
 import SupplierDetails from 'components/Inner/Customers/CustomerDetails';
 import Toast from "components/AppNotification/toast.js";
+import { deriveDisplayName } from "utils/contactIdentity";
 import dayjs from 'dayjs';
 import {CategoryContext} from "appContext/TypeContext.js";
 
@@ -38,7 +39,10 @@ const SuppliersTab = () => {
       const last_name = userData.last_name;
       const suffix = userData.suffix;
       const email = userData.email;
-      const display_name = userData.display_name;
+      // Shared rule: explicit -> personal name -> company. This used to pass
+      // `userData.display_name` straight through, so a company-only vendor was
+      // stored with a blank display name and rendered as an empty row.
+      const display_name = deriveDisplayName(userData);
       const company_name = userData.company_name;
       const phone_number = userData.phone_number;
       const mobile_number = userData.mobile_number;
@@ -64,12 +68,19 @@ const SuppliersTab = () => {
       if (userData.id) {
         const id = userData.id;
         const supplierData = {id,title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-          fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by};
+          fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,
+          taxable: userData.taxable != null ? userData.taxable : true,
+          default_tax_rate: userData.default_tax_rate,
+          default_tax_rate_id: userData.default_tax_rate_id};
         result = await window.electronAPI.updateSupplier(supplierData);   
       }
       else{
         result = await window.electronAPI.insertSupplier(title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-          fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by
+          fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,
+          userData.notes, userData.vendor_type,
+          userData.taxable != null ? userData.taxable : true,
+          userData.default_tax_rate,
+          userData.default_tax_rate_id
         );  
        } 
       setIsSuccess(result.success);    
@@ -81,7 +92,9 @@ const SuppliersTab = () => {
           handleUserClose();
       }
       } else {
-        setMessage('Failed to save supplier. Please try again.');
+        // Prefer the backend's reason (e.g. the identity rule) over a generic
+        // failure — the API and the form share one message.
+        setMessage(result.error || 'Failed to save supplier. Please try again.');
         setShowError(true);
       }
     } catch (error) {

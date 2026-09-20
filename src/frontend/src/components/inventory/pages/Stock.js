@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Row, Col, Select, Table, InputNumber, Button, Space, Form, message } from 'antd';
+import { Card, Row, Col, Select, Table, InputNumber, Button, Space, Form, message, Modal, Tag, Typography } from 'antd';
+
+const { Text } = Typography;
 
 const Stock = () => {
   const [items, setItems] = useState([]);
@@ -12,6 +14,11 @@ const Stock = () => {
   const [transfer, setTransfer] = useState({ fromWarehouseId: undefined, toWarehouseId: undefined, quantity: undefined });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Inventory History (Part 24) — the movements behind one warehouse's balance.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyFor, setHistoryFor] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const loadReferenceData = async () => {
     const [it, prods, whs] = await Promise.all([
@@ -61,6 +68,31 @@ const Stock = () => {
     await window.electronAPI.setReorderPoint(Number(selectedItemId), row.warehouseId, val);
     message.success('Reorder point saved');
     await loadStock(selectedItemId);
+  };
+
+  /**
+   * Inventory History for one warehouse row.
+   *
+   * `item_stock.quantity` is the balance; this is the append-only movement log
+   * that produced it. Showing both is what lets a user answer "why is it 40?"
+   * without trusting either number on its own.
+   */
+  const openHistory = async (row) => {
+    setHistoryFor(row);
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const res = await window.electronAPI.getItemMovements(Number(selectedItemId), 200);
+      const all = Array.isArray(res) ? res : [];
+      // Scope to the row that was clicked — the endpoint is per item, and a
+      // single-warehouse install makes that distinction invisible.
+      setHistoryRows(all.filter(m => Number(m.warehouseId) === Number(row.warehouseId)));
+    } catch (e) {
+      setHistoryRows([]);
+      message.error(`Could not load history: ${e?.message || e}`);
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const doTransfer = async () => {
@@ -144,6 +176,13 @@ const Stock = () => {
                     <Button onClick={() => applyReorder(r)} size="small">Save</Button>
                   </Space>
                 )
+              },
+              {
+                title: 'History',
+                key: 'history',
+                render: (_, r) => (
+                  <Button size="small" onClick={() => openHistory(r)}>History</Button>
+                )
               }
             ]}
             style={{ marginBottom: 16 }}
@@ -184,6 +223,54 @@ const Stock = () => {
           </Card>
         </>
       )}
+
+      <Modal
+        title={historyFor
+          ? `Inventory History — ${historyFor.warehouseName || historyFor.warehouseCode || historyFor.warehouseId}`
+          : 'Inventory History'}
+        open={historyOpen}
+        onCancel={() => setHistoryOpen(false)}
+        footer={<Button onClick={() => setHistoryOpen(false)}>Close</Button>}
+        width={820}
+      >
+        <div style={{ marginBottom: 8 }}>
+          <Text type="secondary">
+            Balance <Text strong>{Number(historyFor?.quantity || 0)}</Text> in this warehouse.
+            Movements are the append-only log behind it; the newest is first.
+          </Text>
+        </div>
+        <Table
+          size="small"
+          rowKey="id"
+          loading={historyLoading}
+          dataSource={historyRows}
+          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          columns={[
+            { title: 'Date', dataIndex: 'movedAt', key: 'movedAt', width: 150 },
+            {
+              title: 'Change',
+              dataIndex: 'quantityChange',
+              key: 'quantityChange',
+              width: 90,
+              render: v => (
+                <Text type={Number(v) < 0 ? 'danger' : 'success'}>
+                  {Number(v) > 0 ? `+${Number(v)}` : Number(v)}
+                </Text>
+              ),
+            },
+            { title: 'Reason', dataIndex: 'reason', key: 'reason', width: 160 },
+            {
+              title: 'Source',
+              dataIndex: 'sourceLabel',
+              key: 'sourceLabel',
+              render: (v, r) => (r.source
+                ? v
+                : <Tag color="default">{v || '—'}</Tag>),
+            },
+          ]}
+          locale={{ emptyText: 'No movements recorded for this item in this warehouse yet.' }}
+        />
+      </Modal>
     </Card>
   );
 };

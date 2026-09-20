@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {Menu,Button,Popover} from "antd";
 import {Link} from "react-router-dom";
 
@@ -7,18 +7,18 @@ import SidebarLogo from "./SidebarLogo";
 import PopOverComponent from "./PopOverComponent";
 import {
   NAV_STYLE_NO_HEADER_EXPANDED_SIDEBAR,
-  NAV_STYLE_NO_HEADER_MINI_SIDEBAR,
-  THEME_TYPE_LITE
+  NAV_STYLE_NO_HEADER_MINI_SIDEBAR
 } from "../../constants/ThemeSetting";
 import IntlMessages from "../../util/IntlMessages";
 import {useSelector} from "react-redux";
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, DatabaseOutlined, HomeOutlined, BarcodeOutlined, SlidersOutlined, CalculatorOutlined } from '@ant-design/icons';
 
 const MenuItemGroup = Menu.ItemGroup;
 const SubMenu = Menu.SubMenu;
 
 const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
-  const {navStyle, themeType} = useSelector(({settings}) => settings);
+  const [popoverVisible, setPopoverVisible] = useState(false);
+  const {navStyle} = useSelector(({settings}) => settings);
   const pathname = useSelector(({common}) => common.pathname);
 
   const getNoHeaderClass = (navStyle) => {
@@ -41,7 +41,7 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
         {!sidebarCollapsed && (
           <div className={`gx-sidebar-notifications ${getNoHeaderClass(navStyle)}`}>
             <div style={{ padding: '1px' }}>
-              <Popover content={PopOverComponent} trigger="click" placement="rightTop" overlayStyle={{ width: 800 }}>
+              <Popover content={<PopOverComponent onClose={() => setPopoverVisible(false)} />} trigger="click" placement="rightTop" overlayStyle={{ width: 800 }} visible={popoverVisible} onVisibleChange={setPopoverVisible}>
                 <Button type="primary" icon={<PlusOutlined />} block style={{ marginBottom: '16px', backgroundColor: '#2ca01c', borderColor: '#2ca01c' }}>
                   New
                 </Button>
@@ -52,7 +52,7 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
         <CustomScrollbars className="gx-layout-sider-scrollbar">
           <Menu
             selectedKeys={[selectedKeys]}
-            theme={themeType === THEME_TYPE_LITE ? 'lite' : 'dark'}
+            theme="dark"
             mode={menuMode}
             inlineCollapsed={sidebarCollapsed}>
 
@@ -85,14 +85,26 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <span><IntlMessages id="accounts.sales"/></span>
                   </Link>
                 </Menu.Item>
-                <Menu.Item key="inner/invoices">
-                  <Link to={{ pathname: "/inner/sales", state: { tabKey: "2" } }}>
+                <Menu.Item key="main/customers/quotes/list">
+                  <Link to="/main/customers/quotes/list">
+                    <i className="icon icon-orders"/>
+                    <span>Quotes</span>
+                  </Link>
+                </Menu.Item>
+                <Menu.Item key="main/customers/invoices/list">
+                  <Link to="/main/customers/invoices/list">
                     <i className="icon icon-orders"/>
                     <span><IntlMessages id="accounts.invoices"/></span>
                   </Link>
                 </Menu.Item>
-                <Menu.Item key="inner/customers">
-                  <Link to={{ pathname: "/inner/sales", state: { tabKey: "9" } }}>
+                <Menu.Item key="main/customers/payments">
+                  <Link to="/main/customers/payments">
+                    <i className="icon icon-check-square-o"/>
+                    <span>Payments</span>
+                  </Link>
+                </Menu.Item>
+                <Menu.Item key="main/customers/center">
+                  <Link to="/main/customers/center">
                     <i className="icon icon-profile2"/>
                     <span><IntlMessages id="accounts.customers"/></span>
                   </Link>
@@ -118,7 +130,7 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                 <Menu.Item key="main/vendors/bills/tracker">
                   <Link to="/main/vendors/bills/tracker">
                     <i className="icon icon-contacts"/>
-                    <span>Bill Tracker</span>
+                    <span>Bill Management</span>
                   </Link>
                 </Menu.Item>
                 <Menu.Item key="main/vendors/bills/enter">
@@ -133,6 +145,18 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <span>Pay Bills</span>
                   </Link>
                 </Menu.Item>
+                <Menu.Item key="main/expenses/credit-cards">
+                  <Link to="/main/expenses/credit-cards">
+                    <i className="icon icon-card"/>
+                    <span>Credit Card Charges</span>
+                  </Link>
+                </Menu.Item>
+                <Menu.Item key="main/accountant/check-printing">
+                  <Link to="/main/accountant/check-printing">
+                    <i className="icon icon-editor"/>
+                    <span>Write Check</span>
+                  </Link>
+                </Menu.Item>
                 <Menu.Item key="main/expenses/suppliers">
                   <Link to="/main/expenses/suppliers">
                     <i className="icon icon-user"/>
@@ -145,12 +169,6 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
               <SubMenu key="sub-banking" popupClassName="gx-menu-horizontal" title={
                 <span><i className="icon icon-card"/><span>Banking</span></span>
               }>
-                <Menu.Item key="inner/transactions">
-                  <Link to="/inner/transactions">
-                    <i className="icon icon-card"/>
-                    <span><IntlMessages id="accounts.transactions"/></span>
-                  </Link>
-                </Menu.Item>
                 <Menu.Item key="main/banking/reconcile">
                   <Link to="/main/banking/reconcile">
                     <i className="icon icon-check-square-o"/>
@@ -205,6 +223,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <span>Trial Balance</span>
                   </Link>
                 </Menu.Item>
+                <Menu.Item key="main/accountant/general-ledger">
+                  <Link to="/main/accountant/general-ledger">
+                    <i className="icon icon-listing-dbrd"/>
+                    <span>General Ledger</span>
+                  </Link>
+                </Menu.Item>
                 <Menu.Item key="main/reports/sales">
                   <Link to="/main/reports/sales">
                     <i className="icon icon-revenue-new"/>
@@ -224,25 +248,25 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <Link to="/main/inventory/items"><i className="icon icon-apps"/><span>Products &amp; Services</span></Link>
                   </Menu.Item>
                   <Menu.Item key="main/inventory/stock">
-                    <Link to="/main/inventory/stock"><i className="icon icon-data"/><span>Stock Levels</span></Link>
+                    <Link to="/main/inventory/stock"><i className="icon icon-shopping-cart"/><span>Stock Levels</span></Link>
                   </Menu.Item>
                   <Menu.Item key="main/inventory/warehouses">
-                    <Link to="/main/inventory/warehouses"><i className="icon icon-building"/><span>Warehouses</span></Link>
+                    <Link to="/main/inventory/warehouses"><i className="icon icon-home"/><span>Warehouses</span></Link>
                   </Menu.Item>
                   <Menu.Item key="main/inventory/bom">
                     <Link to="/main/inventory/bom"><i className="icon icon-widgets"/><span>Bill of Materials</span></Link>
                   </Menu.Item>
                   <Menu.Item key="main/inventory/serials">
-                    <Link to="/main/inventory/serials"><i className="icon icon-barcode"/><span>Serial Numbers</span></Link>
+                    <Link to="/main/inventory/serials"><i className="icon icon-alert"/><span>Serial Numbers</span></Link>
                   </Menu.Item>
                   <Menu.Item key="main/inventory/barcodes">
                     <Link to="/main/inventory/barcodes"><i className="icon icon-tag"/><span>Barcodes</span></Link>
                   </Menu.Item>
                   <Menu.Item key="main/inventory/adjustments">
-                    <Link to="/main/inventory/adjustments"><i className="icon icon-adjust"/><span>Adjustments</span></Link>
+                    <Link to="/main/inventory/adjustments"><i className="icon icon-card"/><span>Adjustments</span></Link>
                   </Menu.Item>
                   <Menu.Item key="main/inventory/pricing-rules">
-                    <Link to="/main/inventory/pricing-rules"><i className="icon icon-calculator"/><span>Pricing Rules</span></Link>
+                    <Link to="/main/inventory/pricing-rules"><i className="icon icon-check-square-o"/><span>Pricing Rules</span></Link>
                   </Menu.Item>
                   <Menu.Item key="main/inventory/pick-pack-ship">
                     <Link to="/main/inventory/pick-pack-ship"><i className="icon icon-orders"/><span>Pick &#38; Pack &#38; Ship</span></Link>

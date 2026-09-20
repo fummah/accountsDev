@@ -270,7 +270,7 @@ const TrialBalanceAdvanced = () => {
           dataSource={filtered}
           loading={loading}
           size="small"
-          pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} accounts` }}
+          pagination={{ defaultPageSize: 50, showSizeChanger: true, showTotal: (t) => `${t} accounts` }}
           scroll={{ x: 800 }}
           locale={{ emptyText: 'Configure filters above and click "Generate Report"' }}
           summary={pageData => {

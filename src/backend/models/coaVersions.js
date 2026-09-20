@@ -34,11 +34,18 @@ const COAVersions = {
     const ver = COAVersions.get(id);
     if (!ver) throw new Error('version not found');
     const snapshot = ver.snapshot || [];
-    const insert = db.prepare(`INSERT INTO chart_of_accounts (name, type, number, balance, status) VALUES (?, ?, ?, ?, ?)`);
+    // Balances are computed live from journal_lines (computedBalance), so a
+    // stored balance is never restored — inserting a stale number here would
+    // conflict with the live ledger. Only account definitions are restored.
+    const insert = db.prepare(`INSERT INTO chart_of_accounts (name, type, number, balance, status) VALUES (?, ?, ?, 0, ?)`);
+    const existsByNum = db.prepare(`SELECT 1 FROM chart_of_accounts WHERE number = ? LIMIT 1`);
+    const existsByName = db.prepare(`SELECT 1 FROM chart_of_accounts WHERE name = ? LIMIT 1`);
     const tx = db.transaction(() => {
-      // naive strategy: do not drop, just append snapshot accounts not existing by number/name combination
+      // Append-only restore: skip accounts already present by number or name.
       for (const acc of snapshot) {
-        insert.run(acc.name, acc.type, acc.number || null, acc.balance || 0, acc.status || 'Active');
+        if (acc.number && existsByNum.get(String(acc.number))) continue;
+        if (acc.name && existsByName.get(String(acc.name))) continue;
+        insert.run(acc.name, acc.type, acc.number || null, acc.status || 'Active');
       }
     });
     tx();

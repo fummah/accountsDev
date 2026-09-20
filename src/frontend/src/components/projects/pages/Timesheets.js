@@ -242,7 +242,7 @@ const Timesheets = () => {
             rowKey="id"
             size="small"
             loading={loading}
-            pagination={{ pageSize: 15, showSizeChanger: true, showTotal: t => `${t} entries` }}
+            pagination={{ defaultPageSize: 15, showSizeChanger: true, showTotal: t => `${t} entries` }}
             locale={{ emptyText: 'No time entries yet. Log your first hours above!' }}
             summary={() => entries.length > 0 ? (
               <Table.Summary.Row style={{ fontWeight: 700, background: '#fafafa' }}>

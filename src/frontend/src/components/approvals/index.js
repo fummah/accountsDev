@@ -117,7 +117,7 @@ const ApprovalsCenter = () => {
           <Title level={4} style={{ margin: 0 }}>Approvals Center</Title>
           <Space>
             <Button onClick={() => { window.location.hash = '#/main/settings/approval-policies'; }}>Manage Policies</Button>
-            <Button type="primary" onClick={() => { window.location.hash = '#/main/expenses/transactions'; }}>Create Expense (with Approval)</Button>
+            <Button type="primary" onClick={() => { window.location.hash = '#/main/vendors/bills/enter'; }}>Create Expense (with Approval)</Button>
           </Space>
         </Space>
         <Space wrap style={{ width: '100%' }}>
@@ -166,7 +166,7 @@ const ApprovalsCenter = () => {
           dataSource={filtered}
           loading={loading}
           rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
-          pagination={{ pageSize: 10 }}
+          pagination={{ defaultPageSize: 10 }}
         />
       </Space>
 

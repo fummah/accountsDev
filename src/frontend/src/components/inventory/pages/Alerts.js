@@ -56,7 +56,7 @@ const Alerts = () => {
           <Table
             rowKey={r => `${r.itemId}-${r.warehouseId}`}
             dataSource={reorder}
-            pagination={{ pageSize: 10 }}
+            pagination={{ defaultPageSize: 10 }}
             columns={[
               { title: 'Item', key: 'item', render: (_, r) => <Text>{nameOfItem(r.itemId)}</Text> },
               { title: 'Warehouse', key: 'wh', render: (_, r) => <Text>{nameOfWh(r.warehouseId)}</Text> },
@@ -90,7 +90,7 @@ const Alerts = () => {
           <Table
             rowKey={r => r.id}
             dataSource={expiring}
-            pagination={{ pageSize: 10 }}
+            pagination={{ defaultPageSize: 10 }}
             columns={[
               { title: 'Item', key: 'item', render: (_, r) => <Text>{nameOfItem(r.itemId)}</Text> },
               { title: 'Lot', dataIndex: 'lot', key: 'lot' },

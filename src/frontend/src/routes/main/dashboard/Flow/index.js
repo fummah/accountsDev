@@ -1,13 +1,11 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useHistory } from "react-router-dom";
 import { Row, Col, Card, Spin, Button, Modal, message, Table, Tag } from "antd";
 import {
   BankOutlined, DollarOutlined, CreditCardOutlined, WalletOutlined,
-  FundOutlined, RiseOutlined, FallOutlined, PieChartOutlined,
-  FileTextOutlined, CheckSquareOutlined, FormOutlined,
-  ReconciliationOutlined, SwapOutlined,
-  BarChartOutlined, AppstoreOutlined, CalendarOutlined,
-  ProfileOutlined
+  FundOutlined, RiseOutlined, FallOutlined,
+  FileTextOutlined, SwapOutlined,
+  BarChartOutlined, ShoppingCartOutlined, TeamOutlined, BookOutlined
 } from "@ant-design/icons";
 import Auxiliary from "util/Auxiliary";
 import { useCurrency } from '../../../../utils/currency';
@@ -73,7 +71,7 @@ const BALANCE_CATEGORIES = [
   {
     key: 'revenue',
     label: 'Revenue',
-    route: '/main/accountant/reports',
+    route: '/main/reports/sales',
     matchFn: a => {
       const t = (a.accountType || '').toLowerCase();
       return t === 'income' || t === 'other income';
@@ -81,19 +79,9 @@ const BALANCE_CATEGORIES = [
     icon: <FundOutlined />, color: '#13c2c2',
   },
   {
-    key: 'expenses',
-    label: 'Enter Bills',
-    route: '/main/accountant/reports',
-    matchFn: a => {
-      const t = (a.accountType || '').toLowerCase();
-      return t === 'expense' || t === 'other expense' || t === 'cost of goods sold';
-    },
-    icon: <PieChartOutlined />, color: '#faad14',
-  },
-  {
     key: 'equity',
     label: 'Equity',
-    route: '/main/accountant/reports',
+    route: '/main/accountant/chart-of-accounts',
     matchFn: a => (a.accountType || '').toLowerCase() === 'equity',
     icon: <DollarOutlined />, color: '#2f54eb',
   },
@@ -104,8 +92,6 @@ const Flow = () => {
   const history = useHistory();
   const { fmt } = useCurrency();
   const [loading, setLoading] = useState(true);
-  const [rowWidth, setRowWidth] = useState(0);
-  const [rowHeight, setRowHeight] = useState(0);
   const rowRef = useRef(null);
   const [balances, setBalances] = useState({});
   const [accountNames, setAccountNames] = useState({});
@@ -117,20 +103,6 @@ const Flow = () => {
   useEffect(() => {
     loadData();
   }, []);
-
-  useLayoutEffect(() => {
-    const measure = () => {
-      if (rowRef.current) {
-        setRowWidth(rowRef.current.offsetWidth);
-        setRowHeight(rowRef.current.offsetHeight);
-      }
-    };
-    measure();
-    // Re-measure after a tick to capture final painted height
-    const t = setTimeout(measure, 100);
-    window.addEventListener('resize', measure);
-    return () => { window.removeEventListener('resize', measure); clearTimeout(t); };
-  }, [loading]);
 
   const loadData = async () => {
     setLoading(true);
@@ -160,135 +132,6 @@ const Flow = () => {
     setLoading(false);
   };
 
-  /* ──── Layout constants ──── */
-  const CELL_W = 175;
-  const CELL_H = 130;
-
-  /* ──── Workflow nodes ──── */
-  const nodes = [
-    // Row 0
-    { id: "n-products",      icon: P("/assets/icons/products.svg"),  label: "Products",         col: 0, row: 0, route: "/inner/sales?tab=10" },
-    { id: "n-expenses",      icon: P("/assets/icons/expenses.svg"),  label: "Enter\nBills",     col: 1, row: 0, route: "/main/vendors/bills/expenses" },
-    { id: "n-paybills",      icon: P("/assets/icons/pay.svg"),       label: "Pay Bills",        col: 2, row: 0, route: "/main/vendors/bills/expenses" },
-    { id: "n-analysis",      icon: P("/assets/icons/analysis.svg"),  label: "Analysis",         col: 3, row: 0, route: "/main/analytics" },
-    // Row 1
-    { id: "n-createsales",   icon: P("/assets/icons/track.svg"),     label: "Create\nSales",    col: 1, row: 1, route: "/inner/sales?tab=1" },
-    { id: "n-cashreceipts",  icon: P("/assets/icons/cash.svg"),      label: "Cash\nReceipts",   col: 2, row: 1, route: "/inner/sales?tab=6" },
-    { id: "n-reports",       icon: P("/assets/icons/statement.svg"), label: "Reports",          col: 3, row: 1, route: "/inner/reports" },
-    // Row 2
-    { id: "n-quotes",        icon: P("/assets/icons/quotes.svg"),    label: "Quotes",           col: 0, row: 2, route: "/inner/sales?tab=3" },
-    { id: "n-createinvoice", icon: P("/assets/icons/invoices.svg"),  label: "Create\nInvoice",  col: 1, row: 2, route: "/inner/sales?tab=2" },
-    { id: "n-payments",      icon: P("/assets/icons/payments.svg"),  label: "Payments",         col: 2, row: 2, route: "/inner/sales?tab=5" },
-    { id: "n-deposits",      icon: P("/assets/icons/deposit.svg"),   label: "Deposits",         col: 3, row: 2, route: "/main/banking/deposits" },
-    // Row 3
-    { id: "n-createemp",     icon: P("/assets/icons/employee.svg"),  label: "Create\nEmployee", col: 1, row: 3, route: "/main/employees/center" },
-    { id: "n-payroll",       icon: P("/assets/icons/payroll.svg"),   label: "Payroll",          col: 2, row: 3, route: "/main/employees/payroll" },
-    { id: "n-reconcile",     icon: P("/assets/icons/refund.svg"),    label: "Reconcile",        col: 3, row: 3, route: "/main/banking/reconcile" },
-  ];
-
-  const arrows = [
-    // Horizontal — row 0
-    ["n-products",      "n-expenses",      "h"],
-    ["n-expenses",      "n-paybills",      "h"],
-    ["n-paybills",      "n-analysis",      "h"],
-    // Horizontal — row 1
-    ["n-createsales",   "n-cashreceipts",  "h"],
-    ["n-cashreceipts",  "n-reports",       "h"],
-    // Horizontal — row 2
-    ["n-quotes",        "n-createinvoice", "h"],
-    ["n-createinvoice", "n-payments",      "h"],
-    ["n-payments",      "n-deposits",      "h"],
-    // Horizontal — row 3
-    ["n-createemp",     "n-payroll",       "h"],
-    ["n-payroll",       "n-reconcile",     "h"],
-    // Vertical
-    ["n-products",      "n-quotes",        "v"],
-    ["n-createsales",   "n-createinvoice", "v"],
-    ["n-cashreceipts",  "n-payments",      "v"],
-    ["n-analysis",      "n-reports",       "v"],
-    ["n-reports",       "n-deposits",      "v"],
-    ["n-deposits",      "n-reconcile",     "v"],
-  ];
-
-  const GridNode = ({ id, icon, label, col, row, route }) => (
-    <div
-      id={id}
-      onClick={() => history.push(route)}
-      style={{
-        position: "absolute",
-        left: col * CELL_W + 30,
-        top:  row * CELL_H + 28,
-        width: 80,
-        display: "flex", flexDirection: "column", alignItems: "center",
-        justifyContent: "center", cursor: "pointer",
-        transition: "transform 0.15s", zIndex: 2,
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.1)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
-    >
-      <div style={{ width: 52, height: 52, borderRadius: 10, background: "transparent",
-        display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 5 }}>
-        <img src={icon} alt={label} style={{ width: 42, height: 42, objectFit: "contain" }} />
-      </div>
-      <span style={{ fontSize: 11, textAlign: "center", color: "#333", lineHeight: "14px",
-        fontWeight: 500, whiteSpace: "pre-line" }}>{label}</span>
-    </div>
-  );
-
-  const totalH = CELL_H * 4 + 20;
-  const totalW = CELL_W * 4 + 60;
-
-  // Node centre positions (matches GridNode: left = col*CELL_W+30+40, top = row*CELL_H+28+26)
-  const NODE_CX = (col) => col * CELL_W + 30 + 40;   // left + half node width (80/2)
-  const NODE_CY = (row) => row * CELL_H + 28 + 26;   // top  + half node height (52/2)
-
-  // Build arrow path data for SVG
-  const ARROW_COLOR = "#4096ff";
-  const ARROW_DASH_COLOR = "#1677ff";
-  const HEAD = 7; // arrowhead size
-
-  // Returns SVG marker id suffix and <marker> element
-  const ArrowMarker = ({ id, color }) => (
-    <marker id={id} markerWidth={HEAD} markerHeight={HEAD} refX={HEAD - 1} refY={HEAD / 2} orient="auto">
-      <path d={`M0,0 L0,${HEAD} L${HEAD},${HEAD / 2} z`} fill={color} />
-    </marker>
-  );
-
-  // Straight workflow arrows from the arrows[] array
-  const svgArrows = arrows.map(([s, e, dir], i) => {
-    const sNode = nodes.find(n => n.id === s);
-    const eNode = nodes.find(n => n.id === e);
-    if (!sNode || !eNode) return null;
-    const x1 = dir === "h" ? NODE_CX(sNode.col) + 40 : NODE_CX(sNode.col);
-    const y1 = dir === "h" ? NODE_CY(sNode.row)       : NODE_CY(sNode.row) + 26;
-    const x2 = dir === "h" ? NODE_CX(eNode.col) - 40  : NODE_CX(eNode.col);
-    const y2 = dir === "h" ? NODE_CY(eNode.row)        : NODE_CY(eNode.row) - 26;
-    return { x1, y1, x2, y2, key: i, dashed: false };
-  }).filter(Boolean);
-
-  // The curved connector is rendered in a full-row overlay SVG below — not as a rightConnectors line
-  const rightConnectors = [];
-  // Reports node start point (right edge of node)
-  const curveStartX = NODE_CX(3) + 40;  // right side of Reports node
-  const curveStartY = NODE_CY(1);        // row 1 vertical centre
-
-  /* ──── Quick action lists (QB right panel) ──── */
-  const quickTop = [
-    { icon: <AppstoreOutlined />,    label: "Chart of\nAccounts",  route: "/main/accountant/chart-of-accounts", color: "#1890ff" },
-    { icon: <ProfileOutlined />,     label: "Items &\nServices",   route: "/inner/sales?tab=10",                color: "#fa8c16" },
-    { icon: <CheckSquareOutlined />, label: "Order\nChecks",       route: "/main/accountant/check-printing",    color: "#2f54eb" },
-    { icon: <CalendarOutlined />,    label: "Calendar",            route: "/main/employees/payroll",            color: "#13c2c2" },
-  ];
-
-  const quickBanking = [
-    { id: "qa-record-deposits", icon: <ReconciliationOutlined />, label: "Record\nDeposits",            route: "/main/banking/deposits",          color: "#1890ff" },
-    { id: "qa-reconcile",       icon: <SwapOutlined />,           label: "Reconcile",                   route: "/main/banking/reconcile",         color: "#13c2c2" },
-    { id: "qa-write-checks",    icon: <FormOutlined />,           label: "Write\nChecks",               route: "/main/accountant/check-printing", color: "#2f54eb" },
-    { id: "qa-check-register",  icon: <FileTextOutlined />,       label: "Check\nRegister",             route: "/main/accountant/general-ledger", color: "#722ed1" },
-    { id: "qa-print-checks",    icon: <BarChartOutlined />,       label: "Print\nChecks",               route: "/main/accountant/check-printing", color: "#fa541c" },
-    { id: "qa-cc-charges",      icon: <CreditCardOutlined />,     label: "Enter Credit\nCard Charges",  route: "/main/expenses/credit-cards",     color: "#eb2f96" },
-  ];
-
   if (loading) {
     return <Auxiliary><div style={{ textAlign: "center", padding: 80 }}><Spin size="large" tip="Loading..." /></div></Auxiliary>;
   }
@@ -296,13 +139,13 @@ const Flow = () => {
   return (
     <Auxiliary>
       {/* ──── Account Balances ──── */}
-      <div style={{ marginBottom: 20 }}>
+      <div style={{ marginBottom: 20, width: '100%' }}>
         <Row gutter={[12, 12]}>
           {BALANCE_CATEGORIES.map(cat => {
             const acctNamesForCat = accountNames[cat.key] || [];
             const count = acctNamesForCat.length;
             return (
-              <Col xl={3} lg={6} md={6} sm={12} xs={12} key={cat.key}>
+              <Col flex="1 1 0" key={cat.key}>
                 <Card
                   size="small"
                   hoverable
@@ -344,157 +187,177 @@ const Flow = () => {
         </Row>
       </div>
 
-      {/* ──── Workflow Diagram + Quick Actions ──── */}
+      {/* ──── Module-based Workflow Diagram + Quick Actions ──── */}
       <Row ref={rowRef} gutter={16} style={{ position: 'relative' }}>
-        {/* Left: QB-style workflow diagram */}
+        {/* Left: Sales column + Purchasing/Payroll column */}
         <Col xl={17} lg={16} md={24} sm={24} xs={24}>
-          <Card bodyStyle={{ padding: 16, overflowX: "auto" }} style={{ borderRadius: 8 }}>
-            <div style={{ position: "relative", width: totalW, height: totalH, minHeight: 560 }}>
+          <Row gutter={[16, 0]}>
+            {/* ── Sales Module (vertical) ── */}
+            <Col xs={24} sm={11}>
+              <Card size="small" bodyStyle={{ padding: 12 }} style={{ borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#52c41a', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, letterSpacing: 1 }}>
+                  <DollarOutlined /> SALES
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  {[
+                    { icon: P('/assets/icons/customers.svg'), label: 'Customers', route: '/main/customers/center' },
+                    { icon: P('/assets/icons/products.svg'), label: 'Products', route: '/main/inventory/items' },
+                    { icon: P('/assets/icons/quotes.svg'), label: 'Quotes', route: '/main/customers/quotes/list' },
+                    { icon: P('/assets/icons/invoices.svg'), label: 'Create Invoice', route: '/main/customers/invoices/new' },
+                    { icon: P('/assets/icons/payments.svg'), label: 'Payments', route: '/main/customers/payments' },
+                  ].map((n, i) => (
+                    <React.Fragment key={n.label}>
+                      <div onClick={() => history.push(n.route)}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', padding: '6px 0', transition: 'transform 0.15s', zIndex: 2 }}
+                        onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.1)'}
+                        onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                      >
+                        <img src={n.icon} alt={n.label} style={{ width: 34, height: 34, objectFit: 'contain' }} />
+                        <span style={{ fontSize: 10, textAlign: 'center', color: '#333', fontWeight: 500, marginTop: 2, lineHeight: '13px' }}>{n.label}</span>
+                      </div>
+                      {i < 4 && (
+                        <svg width={20} height={24} style={{ display: 'block' }}>
+                          <line x1={10} y1={0} x2={10} y2={24} stroke="#52c41a" strokeWidth={2} strokeDasharray="6 4" className="flow-arrow" markerEnd="url(#ah-green)" />
+                        </svg>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </Card>
+            </Col>
 
-              {/* ── Workflow nodes ── */}
-              {nodes.map(n => <GridNode key={n.id} {...n} />)}
+            {/* ── Right column: Purchasing + Payroll stacked ── */}
+            <Col xs={24} sm={13} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Purchasing */}
+              <Card size="small" bodyStyle={{ padding: 12 }} style={{ borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#fa541c', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, letterSpacing: 1 }}>
+                  <ShoppingCartOutlined /> PURCHASING
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                  {[
+                    { icon: P('/assets/icons/vendors.svg'), label: 'Vendors / Suppliers', route: '/main/expenses/suppliers' },
+                    { icon: P('/assets/icons/expenses.svg'), label: 'Enter Bills', route: '/main/vendors/bills/enter' },
+                    { icon: P('/assets/icons/pay.svg'), label: 'Pay Bills', route: '/main/vendors/bills/pay' },
+                    { icon: P('/assets/icons/card.svg'), label: 'Credit Card Charges', route: '/main/expenses/credit-cards' },
+                  ].map((n, i) => (
+                    <React.Fragment key={n.label}>
+                      <div onClick={() => history.push(n.route)}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', padding: '8px 10px', transition: 'transform 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.1)'}
+                        onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                      >
+                        <img src={n.icon} alt={n.label} style={{ width: 36, height: 36, objectFit: 'contain' }} />
+                        <span style={{ fontSize: 10, textAlign: 'center', color: '#333', fontWeight: 500, marginTop: 2 }}>{n.label}</span>
+                      </div>
+                      {i < 3 && (
+                        <svg width={40} height={20} style={{ flexShrink: 0 }}>
+                          <line x1={0} y1={10} x2={40} y2={10} stroke="#fa541c" strokeWidth={2} strokeDasharray="6 4" className="flow-arrow" markerEnd="url(#ah-orange)" />
+                        </svg>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </Card>
 
-              {/* ── Workflow arrows (pure SVG — always perfectly straight) ── */}
-              <svg
-                style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-                  pointerEvents: "none", overflow: "visible", zIndex: 1 }}
-              >
-                <defs>
-                  <ArrowMarker id="ah-solid" color={ARROW_COLOR} />
-                  <ArrowMarker id="ah-dashed" color={ARROW_DASH_COLOR} />
-                </defs>
-                {/* Workflow arrows */}
-                {svgArrows.map(a => (
-                  <line key={a.key}
-                    x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2}
-                    stroke={ARROW_COLOR} strokeWidth={1.8}
-                    markerEnd="url(#ah-solid)"
-                  />
-                ))}
-                {/* Right-edge connectors — now replaced by full-row overlay SVG below */}
-              </svg>
-            </div>
-          </Card>
+              {/* Payroll */}
+              <Card size="small" bodyStyle={{ padding: 12 }} style={{ borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#722ed1', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, letterSpacing: 1 }}>
+                  <TeamOutlined /> PAYROLL
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                  {[
+                    { icon: P('/assets/icons/employee.svg'), label: 'Create Employee', route: '/main/employees/center' },
+                    { icon: P('/assets/icons/payroll.svg'), label: 'Payroll', route: '/main/employees/payroll' },
+                  ].map((n, i) => (
+                    <React.Fragment key={n.label}>
+                      <div onClick={() => history.push(n.route)}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', padding: '8px 10px', transition: 'transform 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.1)'}
+                        onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                      >
+                        <img src={n.icon} alt={n.label} style={{ width: 36, height: 36, objectFit: 'contain' }} />
+                        <span style={{ fontSize: 10, textAlign: 'center', color: '#333', fontWeight: 500, marginTop: 2 }}>{n.label}</span>
+                      </div>
+                      {i < 1 && (
+                        <svg width={40} height={20} style={{ flexShrink: 0 }}>
+                          <line x1={0} y1={10} x2={40} y2={10} stroke="#722ed1" strokeWidth={2} strokeDasharray="6 4" className="flow-arrow" markerEnd="url(#ah-purple)" />
+                        </svg>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </Card>
+            {/* Banking */}
+              <Card size="small" bodyStyle={{ padding: 12 }} style={{ borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#1890ff', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, letterSpacing: 1 }}>
+                  <BankOutlined /> BANKING
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                  {[
+                    { icon: P('/assets/icons/cash.svg'), label: 'Bank Accounts', route: '/main/banking/accounts' },
+                    { icon: P('/assets/icons/pay.svg'), label: 'Write Checks', route: '/main/accountant/check-printing' },
+                    { icon: P('/assets/icons/deposit.svg'), label: 'Deposits', route: '/main/banking/deposits' },
+                    { icon: P('/assets/icons/transfer.svg'), label: 'Transfer Funds', route: '/main/banking/transfers' },
+                    { icon: P('/assets/icons/statement.svg'), label: 'Reconcile', route: '/main/banking/reconcile' },
+                  ].map((n, i) => (
+                    <React.Fragment key={n.label}>
+                      <div onClick={() => history.push(n.route)}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', padding: '8px 6px', transition: 'transform 0.15s', zIndex: 2 }}
+                        onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.1)'}
+                        onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                      >
+                        <img src={n.icon} alt={n.label} style={{ width: 34, height: 34, objectFit: 'contain' }} />
+                        <span style={{ fontSize: 10, textAlign: 'center', color: '#333', fontWeight: 500, marginTop: 2, lineHeight: '12px' }}>{n.label}</span>
+                      </div>
+                      {i < 4 && (
+                        <svg width={32} height={20} style={{ flexShrink: 0 }}>
+                          <line x1={0} y1={10} x2={32} y2={10} stroke="#1890ff" strokeWidth={2} strokeDasharray="6 4" className="flow-arrow" markerEnd="url(#ah-blue)" />
+                        </svg>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </Card>
+            </Col>
+          </Row>
         </Col>
 
-
-        {/* ── Overlay SVG: long animated curved connector from Reports → Quick Panel ── */}
+        {/* Animated arrow styles + SVG markers */}
         <style>{`
           @keyframes marchDash {
-            from { stroke-dashoffset: 80; }
+            from { stroke-dashoffset: 40; }
             to   { stroke-dashoffset: 0; }
           }
-          @keyframes glowPulse {
-            0%, 100% { opacity: 1; }
-            50%      { opacity: 0.5; }
-          }
-          .flow-curve-line {
-            animation: marchDash 2s linear infinite, glowPulse 3s ease-in-out infinite;
+          .flow-arrow {
+            animation: marchDash 1.2s linear infinite;
           }
         `}</style>
-        <svg
-          style={{
-            position: 'absolute',
-            top: 0, left: 0,
-            width: '100%', height: '100%',
-            pointerEvents: 'none',
-            overflow: 'visible',
-            zIndex: 10,
-          }}
-          preserveAspectRatio="none"
-        >
+        <svg style={{ position: 'absolute', width: 0, height: 0 }}>
           <defs>
-            <marker id="ah-curve" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-              <path d="M0,0 L0,7 L7,3.5 z" fill={ARROW_DASH_COLOR} />
+            <marker id="ah-green" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#52c41a" />
+            </marker>
+            <marker id="ah-orange" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#fa541c" />
+            </marker>
+            <marker id="ah-purple" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#722ed1" />
+            </marker>
+            <marker id="ah-blue" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#1890ff" />
             </marker>
           </defs>
-          {/*
-            Cubic bezier: starts at Reports node right edge (inside left col, ~74% width),
-            sweeps down-right in a long S-curve, ends at the left edge of the quick panel
-            (~76% x, mid-panel y). Control points create the swooping curve.
-          */}
-          {rowWidth > 0 && (() => {
-            // Gutter half = 8px (antd gutter={16} → 8px per side)
-            const GUTTER_HALF = 8;
-            const CARD_PAD = 16; // card bodyStyle padding
-
-            // sx: gutter half + card body pad + Reports node right edge inside card div
-            const sx = GUTTER_HALF + CARD_PAD + curveStartX;
-            // sy: card top padding offset + node vertical centre
-            const sy = CARD_PAD + curveStartY;
-
-            // ex: where right col starts (left edge of quick panel)
-            // Right col left edge = left col pixel width + gutter between cols
-            const leftColPx = rowWidth * (17 / 24);
-            const ex = leftColPx + GUTTER_HALF + 4;
-            // ey: aim at ~45% down the right panel (middle of the Banking card)
-            // fallback to 260px if rowHeight not yet measured
-            const ey = (rowHeight > 0 ? rowHeight : 580) * 0.45;
-
-            // Long sweeping S-curve with dramatic arc
-            // CP1: extend far right horizontally from start
-            // CP2: swing down in a wide arc, arriving from above
-            const midX = (sx + ex) / 2;
-            const cp1x = sx + (ex - sx) * 0.7;
-            const cp1y = sy + (ey - sy) * 0.1;
-            const cp2x = sx + (ex - sx) * 0.3;
-            const cp2y = ey - (ey - sy) * 0.3;
-
-            return (
-              <g>
-                {/* Glow / shadow behind the dashed line */}
-                <path
-                  d={`M ${sx} ${sy} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${ex} ${ey}`}
-                  stroke={ARROW_DASH_COLOR}
-                  strokeWidth={5}
-                  strokeDasharray="10 6"
-                  fill="none"
-                  opacity={0.25}
-                />
-                {/* Main animated dashed curve — longer, slower, dramatic sweep */}
-                <path
-                  className="flow-curve-line"
-                  d={`M ${sx} ${sy} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${ex} ${ey}`}
-                  stroke={ARROW_DASH_COLOR}
-                  strokeWidth={2.5}
-                  strokeDasharray="16 10"
-                  fill="none"
-                  markerEnd="url(#ah-curve)"
-                />
-              </g>
-            );
-          })()}
         </svg>
 
         {/* Right: QB-style quick access panel */}
         <Col xl={7} lg={8} md={24} sm={24} xs={24}>
-          {/* Top section — no title (matches QB) */}
-          <Card size="small" bodyStyle={{ padding: 8 }}
-            style={{ borderRadius: 8, marginBottom: 12, border: "1px solid #e8e8e8" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 2 }}>
-              {quickTop.map((qa, i) => (
-                <div key={i} onClick={() => history.push(qa.route)}
-                  style={{ display: "flex", flexDirection: "column", alignItems: "center",
-                    justifyContent: "center", padding: "16px 4px", cursor: "pointer",
-                    borderRadius: 6, transition: "background 0.15s" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f7ff"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                >
-                  <span style={{ fontSize: 26, color: qa.color, marginBottom: 5 }}>{qa.icon}</span>
-                  <span style={{ fontSize: 11, textAlign: "center", whiteSpace: "pre-line",
-                    color: "#333", lineHeight: "14px", fontWeight: 500 }}>{qa.label}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* BANKING section */}
+          {/* ACCOUNTING & REPORTING section */}
           <Card size="small"
             title={
               <div style={{ textAlign: "center" }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: "#1890ff",
                   letterSpacing: 1.5, borderBottom: "2px solid #1890ff", paddingBottom: 2 }}>
-                  BANKING
+                  ACCOUNTING & REPORTING
                 </span>
               </div>
             }
@@ -502,13 +365,19 @@ const Flow = () => {
             style={{ borderRadius: 8, border: "1px solid #bae0ff" }}
           >
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 2 }}>
-              {quickBanking.map((qa, i) => (
-                <div key={i} id={qa.id} onClick={() => history.push(qa.route)}
+              {[
+                { icon: <BankOutlined />, label: 'Chart of\nAccounts', route: '/main/accountant/chart-of-accounts', color: '#1890ff' },
+                { icon: <BookOutlined />, label: 'Journal\nEntries', route: '/main/accountant/journal-entries', color: '#2f54eb' },
+                { icon: <BarChartOutlined />, label: 'Analysis', route: '/main/analytics', color: '#13c2c2' },
+                { icon: <FileTextOutlined />, label: 'Reports', route: '/main/reports/sales', color: '#722ed1' },
+                { icon: <SwapOutlined />, label: 'Reconcile', route: '/main/banking/reconcile', color: '#eb2f96' },
+              ].map((qa, i) => (
+                <div key={i} onClick={() => history.push(qa.route)}
                   style={{ display: "flex", flexDirection: "column", alignItems: "center",
                     justifyContent: "center", padding: "12px 4px", cursor: "pointer",
-                    borderRadius: 6, transition: "background 0.15s" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "#e6f7ff"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    borderRadius: 6, transition: "all 0.15s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#e6f7ff"; e.currentTarget.style.transform = "scale(1.05)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "scale(1)"; }}
                 >
                   <span style={{ fontSize: 24, color: qa.color, marginBottom: 4 }}>{qa.icon}</span>
                   <span style={{ fontSize: 11, textAlign: "center", whiteSpace: "pre-line",
@@ -532,7 +401,12 @@ const Flow = () => {
             key: 'accountName',
             render: (v, r) => (
               <div>
-                <div style={{ fontWeight: 500 }}>{v}</div>
+                <a
+                  style={{ fontWeight: 500, color: '#1890ff', cursor: 'pointer' }}
+                  onClick={() => { setDrillDown(null); history.push(`/main/accountant/general-ledger?account=${r.id}`); }}
+                >
+                  {v}
+                </a>
                 {r.accountNumber && <div style={{ fontSize: 11, color: '#aaa' }}>#{r.accountNumber}</div>}
               </div>
             ),
@@ -597,7 +471,8 @@ const Flow = () => {
                 dataSource={accts.map((a, i) => ({ ...a, key: a.id || i }))}
                 columns={drillColumns}
                 size="small"
-                pagination={accts.length > 10 ? { pageSize: 10, size: 'small' } : false}
+                onRow={(r) => ({ onClick: () => { setDrillDown(null); history.push(`/main/accountant/general-ledger?account=${r.id}`); }, style: { cursor: 'pointer' } })}
+                pagination={accts.length > 10 ? { defaultPageSize: 10, size: 'small' } : false}
                 summary={() => (
                   <Table.Summary.Row>
                     <Table.Summary.Cell colSpan={2}>

@@ -250,7 +250,7 @@ const FixedAssets = () => {
           loading={loading}
           size="small"
           scroll={{ x: 1200 }}
-          pagination={{ pageSize: 25, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
+          pagination={{ defaultPageSize: 25, showSizeChanger: true, showTotal: (t) => `${t} assets` }}
           summary={pageData => {
             if (!pageData.length) return null;
             let pgCost = 0, pgAccum = 0, pgNbv = 0;

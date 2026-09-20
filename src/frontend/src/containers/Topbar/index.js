@@ -1,5 +1,5 @@
 import React, {useState} from "react";
-import {Layout, Popover, Tooltip} from "antd";
+import {Layout, Popover, Tooltip, AutoComplete} from "antd";
 import {Link, useHistory} from "react-router-dom";
 import {LeftOutlined, RightOutlined} from "@ant-design/icons";
 
@@ -22,6 +22,7 @@ const Topbar = () => {
   const navCollapsed = useSelector(({common}) => common.navCollapsed);
   const width = useSelector(({common}) => common.width);
   const [searchText, setSearchText] = useState('');
+  const [searchOptions, setSearchOptions] = useState([]);
   const dispatch = useDispatch();
   const history = useHistory();
 
@@ -39,9 +40,55 @@ const Topbar = () => {
       </ul>
     </CustomScrollbars>);
 
-  const updateSearchChatUser = (evt) => {
-    setSearchText(evt.target.value);
+  const runSearch = async (value) => {
+    const q = String(value || '').trim();
+    if (!q) { setSearchOptions([]); return; }
+    try {
+      const res = await window.electronAPI.globalSearch?.(q);
+      const results = (res && res.success && Array.isArray(res.results)) ? res.results : [];
+      setSearchOptions(results.slice(0, 8).map(r => ({
+        value: `${r.title}${r.subtitle ? ` — ${r.subtitle}` : ''} (${String(r.kind).replace(/-/g, ' ')})`,
+        route: r.route,
+      })));
+    } catch (e) {
+      setSearchOptions([]);
+    }
   };
+
+  const updateSearchChatUser = (evt) => {
+    const v = evt.target.value;
+    setSearchText(v);
+    runSearch(v);
+  };
+
+  const goSearch = (value) => {
+    const opt = searchOptions.find(o => o.value === value);
+    if (opt && opt.route) {
+      history.push(opt.route);
+      setSearchText('');
+      setSearchOptions([]);
+    }
+  };
+
+  const searchBar = (
+    <AutoComplete
+      value={searchText}
+      options={searchOptions}
+      onSearch={setSearchText}
+      onSelect={goSearch}
+      onInputKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          if (searchOptions.length > 0) goSearch(searchOptions[0].value);
+          else if (searchText.trim()) runSearch(searchText);
+        }
+      }}
+    >
+      <SearchBox styleName="gx-d-none gx-d-lg-block gx-lt-icon-search-bar-lg"
+                 placeholder="Search in System..."
+                 onChange={updateSearchChatUser}
+                 value={searchText}/>
+    </AutoComplete>
+  );
   return (
     <Header>
       {(navStyle === NAV_STYLE_DRAWER || navStyle === NAV_STYLE_FIXED || navStyle === NAV_STYLE_MINI_SIDEBAR || width < TAB_SIZE) ?
@@ -68,10 +115,7 @@ const Topbar = () => {
         </Tooltip>
       </div>
 
-      <SearchBox styleName="gx-d-none gx-d-lg-block gx-lt-icon-search-bar-lg"
-                 placeholder="Search in System..."
-                 onChange={updateSearchChatUser}
-                 value={searchText}/>
+      {searchBar}
       <ul className="gx-header-notifications gx-ml-auto">
         <li className="gx-notify gx-notify-search gx-d-inline-block gx-d-lg-none">
           <Popover overlayClassName="gx-popover-horizantal" placement="bottomRight" content={

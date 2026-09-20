@@ -3,10 +3,10 @@ const { Settings } = require('../models');
 const Email = require('../models/email');
 const Invoices = require('../models/invoices');
 const Quotes = require('../models/quotes');
+const MailClient = require('../services/mailClient');
+const EmailErrors = require('../services/emailErrors');
+const Secure = require('../services/secureSettings');
 const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
 
 const PROVIDERS = {
   google: {
@@ -93,11 +93,24 @@ function registerEmailHandlers() {
         port: parseInt(Settings.get('smtp_port') || '587', 10),
         secure: Settings.get('smtp_secure') === 'true',
         user: Settings.get('smtp_user') || '',
-        pass: Settings.get('smtp_pass') || '',
+        // NEVER return the stored password to the renderer. The UI only needs to
+        // know whether one exists; it sends a new value only when the user types
+        // one, and never receives the current one back.
+        pass: '',
+        pass_set: Secure.hasSecret('smtp_pass'),
+        pass_encrypted: Secure.encryptionAvailable(),
         from_name: Settings.get('smtp_from_name') || '',
         from_email: Settings.get('smtp_from_email') || '',
         default_subject: Settings.get('email_default_subject') || 'Invoice from {company}',
         default_body: Settings.get('email_default_body') || 'Please find attached invoice #{number} for {amount}.\n\nThank you for your business.',
+        // Document-type / payment-status aware templates. Empty means "use the
+        // built-in approved default" (resolved in the shared email service).
+        quote_subject: Settings.get('email_quote_subject') || '',
+        quote_body: Settings.get('email_quote_body') || '',
+        invoice_paid_subject: Settings.get('email_invoice_paid_subject') || '',
+        invoice_paid_body: Settings.get('email_invoice_paid_body') || '',
+        invoice_outstanding_subject: Settings.get('email_invoice_outstanding_subject') || '',
+        invoice_outstanding_body: Settings.get('email_invoice_outstanding_body') || '',
         oauth_provider: Settings.get('oauth_provider') || '',
         oauth_client_id: Settings.get('oauth_client_id') || '',
         oauth_client_secret: Settings.get('oauth_client_secret') || '',
@@ -117,11 +130,21 @@ function registerEmailHandlers() {
       if (cfg.port !== undefined) Settings.set('smtp_port', String(cfg.port));
       if (cfg.secure !== undefined) Settings.set('smtp_secure', String(cfg.secure));
       if (cfg.user !== undefined) Settings.set('smtp_user', cfg.user);
-      if (cfg.pass !== undefined) Settings.set('smtp_pass', cfg.pass);
+      // The password is a SECRET: encrypt it at rest. An empty/omitted value
+      // means "keep what is already saved" so re-saving the form (or running a
+      // Test) never wipes the stored password. `clear_pass` removes it.
+      if (cfg.clear_pass === true) Secure.clearSecret('smtp_pass');
+      else if (typeof cfg.pass === 'string' && cfg.pass.length > 0) Secure.setSecret('smtp_pass', cfg.pass);
       if (cfg.from_name !== undefined) Settings.set('smtp_from_name', cfg.from_name);
       if (cfg.from_email !== undefined) Settings.set('smtp_from_email', cfg.from_email);
       if (cfg.default_subject !== undefined) Settings.set('email_default_subject', cfg.default_subject);
       if (cfg.default_body !== undefined) Settings.set('email_default_body', cfg.default_body);
+      if (cfg.quote_subject !== undefined) Settings.set('email_quote_subject', cfg.quote_subject);
+      if (cfg.quote_body !== undefined) Settings.set('email_quote_body', cfg.quote_body);
+      if (cfg.invoice_paid_subject !== undefined) Settings.set('email_invoice_paid_subject', cfg.invoice_paid_subject);
+      if (cfg.invoice_paid_body !== undefined) Settings.set('email_invoice_paid_body', cfg.invoice_paid_body);
+      if (cfg.invoice_outstanding_subject !== undefined) Settings.set('email_invoice_outstanding_subject', cfg.invoice_outstanding_subject);
+      if (cfg.invoice_outstanding_body !== undefined) Settings.set('email_invoice_outstanding_body', cfg.invoice_outstanding_body);
       if (cfg.oauth_provider !== undefined) Settings.set('oauth_provider', cfg.oauth_provider);
       if (cfg.oauth_client_id !== undefined) Settings.set('oauth_client_id', cfg.oauth_client_id);
       if (cfg.oauth_client_secret !== undefined) Settings.set('oauth_client_secret', cfg.oauth_client_secret);
@@ -134,20 +157,30 @@ function registerEmailHandlers() {
   });
 
   // ── Test SMTP connection ────────────────────────────────────────────
-  ipcMain.handle('email-test-connection', async (_e) => {
+  // Validates authentication BEFORE the user relies on Save & Email, and
+  // returns a friendly message instead of a raw provider trace. The full error
+  // is logged server-side only.
+  ipcMain.handle('email-test-connection', async () => {
     try {
       const nodemailer = require('nodemailer');
       const host = Settings.get('smtp_host');
       const port = parseInt(Settings.get('smtp_port') || '587', 10);
       const secure = Settings.get('smtp_secure') === 'true';
       const user = Settings.get('smtp_user');
-      const pass = Settings.get('smtp_pass');
-      if (!host || !user) return { success: false, error: 'SMTP not configured' };
+      const pass = Secure.getSecret('smtp_pass');
+
+      const check = EmailErrors.validateSmtpConfig({ host, port, user, passSet: !!pass });
+      if (!check.ok) {
+        return { success: false, error: `Email settings are incomplete — missing ${check.missing.join(', ')}.`, needsSettings: true };
+      }
+
       const transporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
       await transporter.verify();
-      return { success: true, message: 'Connection successful' };
+      return { success: true, message: 'SMTP connection successful.' };
     } catch (e) {
-      return { success: false, error: e.message };
+      const t = EmailErrors.translate(e, { host: Settings.get('smtp_host') });
+      console.error('[email] SMTP test failed:', t.technical);
+      return { success: false, error: t.error, technical: t.technical, code: t.code, needsSettings: t.needsSettings };
     }
   });
 
@@ -162,7 +195,7 @@ function registerEmailHandlers() {
 
       const fromName = Settings.get('smtp_from_name') || 'Accounts';
       const user = Settings.get('smtp_user');
-      const pass = Settings.get('smtp_pass');
+      const pass = Secure.getSecret('smtp_pass');
       const fromEmail = Settings.get('smtp_from_email') || user;
       const oauthProvider = Settings.get('oauth_provider');
       let transporter;
@@ -200,7 +233,17 @@ function registerEmailHandlers() {
         const host = Settings.get('smtp_host');
         const port = parseInt(Settings.get('smtp_port') || '587', 10);
         const secure = Settings.get('smtp_secure') === 'true';
-        if (!host || !user) return { success: false, error: 'SMTP not configured' };
+        // Validate BEFORE attempting: a missing field must open Settings, not
+        // produce a confusing transport error.
+        const check = EmailErrors.validateSmtpConfig({ host, port, user, passSet: !!pass });
+        if (!check.ok) {
+          return {
+            success: false,
+            error: `Email settings are incomplete — missing ${check.missing.join(', ')}. Open Settings → Email to finish the setup.`,
+            needsSettings: true,
+            code: 'config',
+          };
+        }
         transporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
       }
 
@@ -213,7 +256,10 @@ function registerEmailHandlers() {
       if (bcc) mailOptions.bcc = bcc;
       if (attachments && Array.isArray(attachments)) {
         mailOptions.attachments = attachments.map(a => ({
-          filename: a.filename || 'document.pdf', content: a.content, encoding: a.encoding || 'base64',
+          filename: a.filename || 'document.pdf',
+          content: a.content,
+          encoding: a.encoding || 'base64',
+          contentType: a.contentType || undefined,
         }));
       }
 
@@ -221,8 +267,11 @@ function registerEmailHandlers() {
       return { success: true, messageId: info.messageId };
     } catch (e) {
       status = 'failed';
-      errorMsg = e.message;
-      return { success: false, error: e.message };
+      // Friendly message to the user, full trace to the log (never the password).
+      const t = EmailErrors.translate(e, { host: Settings.get('smtp_host') });
+      errorMsg = t.technical;
+      console.error('[email] send failed:', t.technical);
+      return { success: false, error: t.error, technical: t.technical, code: t.code, needsSettings: t.needsSettings };
     } finally {
       try {
         Email.logSend({ recipient: to, subject, status, error_message: errorMsg, document_type, document_id });
@@ -301,54 +350,140 @@ function registerEmailHandlers() {
     }
   });
 
-  // ── Send via default email program (.eml file) ────────────────────
+  // ── Send via default email program (opens a compose/write window) ──
+  //
+  // All client-specific knowledge lives in services/mailClient.js. This handler
+  // only adapts the IPC payload and records the outcome. It reports `success`
+  // strictly from what the OS told us — a client that fails to start is a
+  // failure, not a success with a warning.
   ipcMain.handle('email-send-external', async (_e, payload) => {
-    const { to, subject, body, pdfFilename, pdfBase64, document_type, document_id } = payload || {};
+    const { to, subject, body, pdfFilename, pdfBase64, document_type, document_id, requireAttachment } = payload || {};
     try {
       if (!to) return { success: false, error: 'Recipient email required' };
-      const boundary = `boundary_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      const encodedPdf = pdfBase64 || '';
-      const emlContent = [
-        `From: "${Settings.get('smtp_from_name') || 'Accounts'}" <${Settings.get('smtp_from_email') || Settings.get('smtp_user') || ''}>`,
-        `To: ${to}`,
-        `Subject: ${subject || 'Document'}`,
-        'MIME-Version: 1.0',
-        `Content-Type: multipart/mixed; boundary="${boundary}"`,
-        '',
-        `--${boundary}`,
-        'Content-Type: text/plain; charset="UTF-8"',
-        'Content-Transfer-Encoding: 7bit',
-        '',
-        body || '',
-        '',
-        `--${boundary}`,
-        `Content-Type: application/pdf; name="${pdfFilename || 'document.pdf'}"`,
-        'Content-Transfer-Encoding: base64',
-        `Content-Disposition: attachment; filename="${pdfFilename || 'document.pdf'}"`,
-        '',
-        encodedPdf,
-        '',
-        `--${boundary}--`,
-      ].join('\r\n');
+      if (!pdfBase64) return { success: false, error: 'Missing PDF data — save the document first' };
 
-      const tmpDir = os.tmpdir();
-      const emlPath = path.join(tmpDir, `${pdfFilename || 'document'}.eml`);
-      fs.writeFileSync(emlPath, emlContent, 'utf-8');
-      shell.openPath(emlPath);
+      const attachments = pdfBase64
+        ? [{ filename: pdfFilename || 'document.pdf', content: pdfBase64 }]
+        : [];
 
-      // Log as sent (external)
-      Email.logSend({ recipient: to, subject, status: 'success', error_message: null, document_type, document_id });
+      const result = await MailClient.sendViaDefaultMailClient({
+        to, subject: subject || 'Document', body: body || '', attachments,
+        // Save/Update & Email requires the document attachment: never open an
+        // attachment-less draft, fall back to the built-in sender instead.
+        requireAttachment: requireAttachment === true,
+      });
 
-      // Mark invoice/quote as Sent (External Email)
+      if (!result.ok) {
+        try {
+          Email.logSend({ recipient: to, subject, status: 'failed', error_message: result.error, document_type, document_id });
+        } catch {}
+        return {
+          success: false,
+          error: result.error,
+          method: result.method,
+          client: result.client,
+          launched: !!result.launched,
+          clientReady: !!result.clientReady,
+          attached: false,
+          canAttach: result.canAttach,
+          fallback: result.fallback || null,
+          guarantee: 'none',
+          attachmentPath: result.attachmentPath,
+          // Present when we deliberately did not launch (known-unusable client),
+          // so the UI can show the fuller explanation rather than just the error.
+          warning: result.warning || null,
+        };
+      }
+
+      // The draft opened in the user's own mail client — AccuLedger did NOT send
+      // it, so the document is recorded as an externally-opened DRAFT, never as
+      // Sent. Marking it Sent here would falsify the communication history.
+      Email.logSend({ recipient: to, subject, status: 'opened', error_message: null, document_type, document_id });
+
       try {
-        if (document_type === 'Invoice' && document_id) Invoices.markInvoiceSent(document_id, 'External Email', 'Sent');
-        else if (document_type === 'Quote' && document_id) Quotes.markQuoteSent(document_id, 'External Email', 'Sent');
+        if (document_type === 'Invoice' && document_id) Invoices.markInvoiceSent(document_id, 'External Email', 'Draft opened externally');
+        else if (document_type === 'Quote' && document_id) Quotes.markQuoteSent(document_id, 'External Email', 'Draft opened externally');
       } catch {}
 
-      return { success: true, method: 'external', emlPath };
+      return {
+        success: true,
+        method: result.method,
+        client: result.client,
+        exe: result.exe || null,
+        launched: !!result.launched,
+        clientReady: !!result.clientReady,
+        attached: !!result.attached,
+        guarantee: result.guarantee || 'none',
+        attachmentPath: result.attachmentPath || null,
+        warning: result.warning || null,
+      };
     } catch (e) {
       try { Email.logSend({ recipient: to, subject, status: 'failed', error_message: e.message, document_type, document_id }); } catch {}
       return { success: false, error: e.message };
+    }
+  });
+
+  // ── What will actually happen if the user picks "Default Email Program" ──
+  // Lets the UI warn BEFORE the user sends, instead of reporting a false
+  // success afterwards. Never throws.
+  ipcMain.handle('email-mail-client-info', async () => {
+    try {
+      const clients = MailClient.detectMailClients();
+      const adapter = MailClient.chooseAdapter(clients);
+      // Attachment capability is a property of the client integration: Outlook
+      // and Thunderbird compose with an attachment; a generic mailto handler
+      // cannot. It is NOT gated on the (unreliable) mail-profile probe — that is
+      // what wrongly classified Outlook as unable to attach.
+      const canAttach = adapter.kind === 'outlook' || adapter.kind === 'thunderbird'
+        || !!(clients.outlook && clients.outlook.installed)
+        || !!(clients.thunderbird && clients.thunderbird.installed);
+      const clientReady = adapter.clientReady === true;
+      // False only when the client IS installed but its mail account could not
+      // be determined — we must not then assert "no account".
+      const profileKnown = adapter.profileKnown !== false;
+
+      // One sentence the UI can show verbatim, so the user is never promised
+      // something the chosen client cannot do.
+      const clientName = adapter.kind === 'outlook' ? 'Microsoft Outlook'
+        : adapter.kind === 'thunderbird' ? 'Mozilla Thunderbird' : null;
+      // Label the handler the OS will ACTUALLY open — never the registered
+      // default mail client, which is a different registry key and may name a
+      // program that is never launched (they disagree on this very machine).
+      const handlerLabel = MailClient.mailHandlerLabel(clients);
+      let note;
+      if (adapter.kind === 'unusable-client') {
+        // The handler IS a desktop client, but one we positively know has no
+        // mail account. Saying "cannot attach files" would be the wrong reason.
+        const dead = adapter.clientKind === 'outlook' ? 'Microsoft Outlook' : 'Mozilla Thunderbird';
+        note = `${dead} is the mail handler but has no email account set up, so it cannot open a message window. Set up an account in ${dead}, or use built-in email.`;
+      } else if (!canAttach) {
+        note = `Your email will open in ${handlerLabel}, which cannot attach files, so the PDF would have to be attached by hand. Built-in email is recommended.`;
+      } else if (!clientReady && !profileKnown) {
+        note = `Could not check whether ${clientName} has an email account set up, so the attachment cannot be guaranteed. Built-in email sends it as a real attachment.`;
+      } else if (!clientReady) {
+        note = `${clientName} is installed but has no email account set up, so it cannot open a message window. Set up an account in ${clientName}, or use built-in email.`;
+      } else {
+        note = `${clientName} is ready — the PDF will be attached automatically.`;
+      }
+
+      return {
+        success: true,
+        platform: clients.platform,
+        progId: clients.progId,
+        progIdKind: clients.progIdKind,
+        defaultClientName: clients.defaultClientName,
+        registeredClients: clients.registeredClients,
+        registryReadable: clients.registryReadable !== false,
+        outlook: clients.outlook,
+        thunderbird: clients.thunderbird,
+        adapter: { kind: adapter.kind, exe: adapter.exe || null, substituted: !!adapter.substituted, reason: adapter.reason || null },
+        canAttach,
+        clientReady,
+        profileKnown,
+        note,
+      };
+    } catch (e) {
+      return { success: false, error: e.message, canAttach: false, adapter: { kind: 'unknown' } };
     }
   });
 

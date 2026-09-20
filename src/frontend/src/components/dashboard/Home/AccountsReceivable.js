@@ -2,6 +2,7 @@ import React from "react";
 import Widget from "components/Widget/index";
 import {Table,Select,Row,Col,Button} from "antd";
 import {PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer} from "recharts";
+import { useCurrency } from '../../../utils/currency';
 
 // Colors for each section of the pie chart
 const COLORS = ['#0088FE', '#00C49F','yellow','purple','red','green','grey'];
@@ -15,6 +16,7 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
 
 
 const AccountsReceivable = ({ Invoiced, ExpenseList }) => {
+  const { symbol: cSym } = useCurrency();
 
   return (
       <Widget
@@ -28,7 +30,7 @@ const AccountsReceivable = ({ Invoiced, ExpenseList }) => {
         <Col lg={12} md={12} sm={12} xs={24}>
 
           <div className="ant-row-flex">
-            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">${formattedNumber(Invoiced)}</h2>
+            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">{cSym}{formattedNumber(Invoiced)}</h2>
           </div>
           <p className="gx-text-grey">Total A/R Amount</p>
          

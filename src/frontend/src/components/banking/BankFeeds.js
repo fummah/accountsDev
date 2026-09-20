@@ -216,11 +216,11 @@ const BankFeeds = () => {
             )}
 
             <Table rowKey={(r, i) => `${r.date}-${i}`} columns={txCols} dataSource={txs} size="small"
-              pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }} />
+              pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }} />
           </TabPane>
 
           <TabPane tab="Rules" key="3">
-            <Table rowKey="id" columns={ruleCols} dataSource={rules} size="small" pagination={{ pageSize: 10 }} style={{ marginBottom: 16 }} />
+            <Table rowKey="id" columns={ruleCols} dataSource={rules} size="small" pagination={{ defaultPageSize: 10 }} style={{ marginBottom: 16 }} />
             <Card size="small" title="Add Auto-Match Rule">
               <Form form={form} layout="vertical">
                 <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>

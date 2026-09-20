@@ -33,72 +33,191 @@ function headerIndex(headers, candidates) {
 	return -1;
 }
 
-function findUnmappedHeaders(headers, usedIdxs) {
-	const used = new Set(Object.values(usedIdxs).filter(i => i >= 0));
-	return headers.filter((_, i) => !used.has(i));
+// The flat QB Desktop export puts the whole mailing address on a single
+// "Bill to 1" / "Bill from 1" column: "Name", "Street", "City, State Zip".
+// When no separate address columns exist, split that combined line.
+function parseCombined(raw) {
+	const lines = String(raw || '').replace(/\\n/g, '\n').split('\n').map(l => l.trim()).filter(Boolean);
+	const out = { address1: '', address2: '', city: '', state: '', postal: '' };
+	const streetLines = [];
+	let postal = '', state = '', city = '';
+	for (const line of lines) {
+		// look for the "City, ST ZIP" (or "City ST ZIP") tail
+		const m = line.match(/^(.*?)[,\s]+([A-Za-z]{2})\s+(\d{3,10}(?:-\d{4})?)$/i) ||
+		          line.match(/^(.*)\s+(\d{3,5}(?:-\d{4})?)$/);
+		if (m) {
+			city = (m[1] || '').trim();
+			state = m[2] || '';
+			postal = m[3] || m[2] || '';
+		} else {
+			streetLines.push(line);
+		}
+	}
+	out.city = city; out.state = state.replace(/,/g, ''); out.postal = postal;
+	out.address1 = streetLines[0] || '';
+	out.address2 = streetLines.slice(1).join('\n') || '';
+	return out;
 }
 
-async function register() {
+function register() {
 	// Import Customers from QuickBooks CSV export
 	ipcMain.handle('import-customers-csv', async (_e, csvText, options = {}) => {
 		try {
 			const { headers, rows } = simpleCsvParse(csvText || '');
 			if (!headers.length) return { success: false, error: 'empty_csv' };
 
-			// Common QB headers (varies by locale/export)
+			// Common QB headers (varies by locale/export). Also handles the
+			// QuickBooks Desktop flat export format: "Customer", "Company",
+			// "Main Phone", "Alt. Phone", "Main Email", "Bill to 1..5", "Ship to 1..5",
+			// "Active Status", "Balance / Balance Total", "Sales Tax Code"/"Tax item"/"Resale Num",
+			// "Account No.", "Credit Limit", "Customer Type", "Rep", job columns, etc.
 			const idx = {
-				displayName: headerIndex(headers, ['display name', 'customer', 'customer name', 'company']),
+				status: headerIndex(headers, ['active status']),
+				displayName: headerIndex(headers, ['customer', 'customer name', 'display name']),
+				company: headerIndex(headers, ['company']),
+				title: headerIndex(headers, ['mr./ms./...', 'title', 'salutation']),
 				firstName: headerIndex(headers, ['first name', 'firstname']),
+				middleName: headerIndex(headers, ['m.i.', 'mi.', 'middle name', 'middle initial', 'middle']),
 				lastName: headerIndex(headers, ['last name', 'lastname']),
-				email: headerIndex(headers, ['email', 'email address']),
-				phone: headerIndex(headers, ['phone', 'phone number']),
-				mobile: headerIndex(headers, ['mobile', 'mobile phone']),
+				primaryContact: headerIndex(headers, ['primary contact']),
+				secondaryContact: headerIndex(headers, ['secondary contact']),
+				jobTitle: headerIndex(headers, ['job title']),
+				email: headerIndex(headers, ['main email', 'email address', 'email']),
+				phone: headerIndex(headers, ['main phone', 'phone', 'phone number']),
+				mobile: headerIndex(headers, ['alt. phone', 'alt phone', 'mobile', 'mobile phone']),
 				fax: headerIndex(headers, ['fax']),
-				address1: headerIndex(headers, ['billing address line 1', 'bill addr1', 'address1', 'address line 1', 'address', 'street address', 'street']),
-				address2: headerIndex(headers, ['billing address line 2', 'bill addr2', 'address2', 'address line 2', 'address 2', 'unit']),
-				city: headerIndex(headers, ['billing city', 'bill city', 'city']),
-				state: headerIndex(headers, ['billing state', 'bill state', 'state']),
-				postal: headerIndex(headers, ['billing postal code', 'bill postal code', 'zip', 'postal code']),
+				address1: headerIndex(headers, ['bill to 2', 'billing address line 1', 'bill addr1', 'address1', 'address', 'street address', 'street']),
+				address2: headerIndex(headers, ['billing address line 2', 'bill addr2', 'address2', 'unit', 'address1']),
+				cityStateZip: headerIndex(headers, ['bill to 3']),
+				city: headerIndex(headers, ['bill to 3', 'billing city', 'bill city', 'city', 'bill to 4']),
+				state: headerIndex(headers, ['billing state', 'bill state', 'state', 'bill to 5']),
+				postal: headerIndex(headers, ['postal code', 'zip', 'zip code']),
+				combined1: headerIndex(headers, ['bill to 1']),
+				shipTo: headerIndex(headers, ['ship to 1', 'ship to 2', 'ship to 3', 'ship to 4', 'ship to 5']),
 				country: headerIndex(headers, ['billing country', 'country']),
 				terms: headerIndex(headers, ['terms']),
-				openingBalance: headerIndex(headers, ['open balance', 'opening balance', 'balance']),
+				openingBalance: headerIndex(headers, ['balance total', 'open balance', 'opening balance', 'balance']),
 				asOf: headerIndex(headers, ['open balance date', 'as of', 'as of date']),
-				taxNumber: headerIndex(headers, ['tax number', 'vat number', 'tax id']),
+				taxNumber: headerIndex(headers, ['resale num', 'tax item', 'tax number', 'vat number', 'tax id', 'sales tax code']),
+				accountNumber: headerIndex(headers, ['account no.', 'acct. no.', 'account number']),
+				creditLimit: headerIndex(headers, ['credit limit']),
+				customerType: headerIndex(headers, ['customer type']),
+				rep: headerIndex(headers, ['rep', 'sales rep']),
+				jobStatus: headerIndex(headers, ['job status']),
+				jobType: headerIndex(headers, ['job type']),
+				jobDescription: headerIndex(headers, ['job description']),
+				startDate: headerIndex(headers, ['start date']),
+				projectedEnd: headerIndex(headers, ['projected end', 'projected end date']),
+				endDate: headerIndex(headers, ['end date']),
 			};
-
-			const unmapped = findUnmappedHeaders(headers, idx);
 
 			let inserted = 0;
 			for (const r of rows) {
 				const val = (i) => (i >= 0 ? (r[i] || '').toString().trim() : '');
-				const displayName = val(idx.displayName);
-				const firstName = val(idx.firstName) || displayName.split(' ')[0] || '';
-				const lastName = val(idx.lastName) || displayName.split(' ').slice(1).join(' ') || '';
+				// Prefer the "Customer" column for the display name; fall back to Company.
+				const explicitCompany = val(idx.company);
+				const displayName = val(idx.displayName) || explicitCompany;
+				if (!displayName) continue;
+				const companyName = explicitCompany || displayName || '';
+				// A row that names a Company but no First/Last is a BUSINESS. Splitting
+				// the company name into a person ("Amazon Web Services" -> first
+				// "Amazon", last "Web Services") is how a company-only import turned
+				// into a fake individual. The legacy split is kept for the single-name
+				// "Customer" export, where the value genuinely might be a person.
+				const nameIsJustTheCompany = !!explicitCompany && displayName === explicitCompany;
+				const firstName = val(idx.firstName) || (nameIsJustTheCompany ? '' : displayName.split(' ')[0]) || '';
+				const middleName = val(idx.middleName);
+				const lastName = val(idx.lastName) || (nameIsJustTheCompany ? '' : displayName.split(' ').slice(1).join(' ')) || '';
 				const email = val(idx.email);
-				const phone = val(idx.phone);
+				const phone = val(idx.phone) || val(idx.mobile);
 				const mobile = val(idx.mobile) || phone;
 				const fax = val(idx.fax);
-				const address1 = val(idx.address1);
-				const address2 = val(idx.address2);
-				const city = val(idx.city);
-				const state = val(idx.state);
-				const postal = val(idx.postal);
 				const country = val(idx.country) || '';
+				const primaryContact = val(idx.primaryContact);
+				const secondaryContact = val(idx.secondaryContact);
+				const jobTitle = val(idx.jobTitle);
+
+				// Resolve address. The flat export commonly stores the full mailing address
+// across "Bill to 1..5" (e.g. street in "Bill to 1", "City, ST ZIP" in
+// "Bill to 2"). Parse those combined lines first; if that yields a usable
+// city/state/zip, use it. Otherwise fall back to dedicated address columns.
+				let address1 = '', address2 = '', city = '', state = '', postal = '';
+
+				// Collect every "Bill to N" column value in order.
+				const billLines = [];
+				for (const c of ['bill to 1', 'bill to 2', 'bill to 3', 'bill to 4', 'bill to 5']) {
+					const i = headerIndex(headers, [c]);
+					if (i >= 0) {
+						const v = (r[i] || '').toString().trim();
+						if (v) billLines.push(v);
+					}
+				}
+				const parsed = billLines.length ? parseCombined(billLines.join('\n')) : null;
+				if (parsed && parsed.state && parsed.postal) {
+					// Combined parse found a "City, ST ZIP" tail.
+					address1 = parsed.address1;
+					address2 = parsed.address2;
+					city = parsed.city;
+					state = parsed.state;
+					postal = parsed.postal;
+					if (address1 && (address1 === displayName || address1 === companyName)) {
+						address1 = address2;
+						address2 = '';
+					}
+				} else {
+					address1 = val(idx.address1);
+					address2 = val(idx.address2);
+					city = val(idx.city);
+					state = val(idx.state);
+					postal = val(idx.postal);
+					// Some exports put the whole "City, ST ZIP" in a single column.
+					const csz = [idx.cityStateZip].filter(i => i >= 0).map(i => (r[i] || '').toString()).join('\n');
+					if (csz && !state && !postal) {
+						const p = parseCombined(csz);
+						city = city || p.city;
+						state = state || p.state;
+						postal = postal || p.postal;
+						if (!address1 && p.address1) address1 = p.address1;
+						if (!address2 && p.address2) address2 = p.address2;
+					}
+				}
+
 				const terms = val(idx.terms);
 				const openingBalance = parseFloat(val(idx.openingBalance) || '0') || 0;
 				const asOf = val(idx.asOf) || null;
 				const taxNumber = val(idx.taxNumber);
+				const accountNumber = val(idx.accountNumber);
+				const customerType = val(idx.customerType);
+				const rep = val(idx.rep);
+				const title = val(idx.title);
 
-				// insertCustomer expects many fields; use safe defaults
+				// Compact extra contact/meta data (this schema has no dedicated
+				// columns for these), so fold them into notes for safe keeping.
+				const extras = [
+					primaryContact && ('Primary contact: ' + primaryContact),
+					secondaryContact && ('Secondary contact: ' + secondaryContact),
+					jobTitle && ('Job title: ' + jobTitle),
+					customerType && ('Customer type: ' + customerType),
+					val(idx.creditLimit) && ('Credit limit: ' + val(idx.creditLimit)),
+					rep && ('Rep: ' + rep),
+					accountNumber && ('Account no.: ' + accountNumber),
+				].filter(Boolean).join(' | ');
+
+				// insertCustomer expects many fields; use safe defaults.
+				// first_name is NOT backfilled from the display name: for a
+				// company-only row that produced a customer whose first name was
+				// the company ("Amazon"). companyName below is always non-empty
+				// (displayName is, and it is the fallback), so the record is still
+				// identifiable and the model derives the display name.
 				const res = await Customers.insertCustomer(
-					'', // title
-					firstName || displayName || '',
-					'', // middle_name
+					title, // title
+					firstName || '',
+					middleName || '',
 					lastName || '',
 					'', // suffix
 					email || '',
 					displayName || (firstName + ' ' + lastName).trim(),
-					displayName || '', // company_name
+					companyName, // company_name
 					phone || '',
 					mobile || '',
 					fax || '',
@@ -118,12 +237,12 @@ async function register() {
 					asOf,
 					'Email', // delivery_option
 					'en', // language
-					'' // notes
+					extras // notes
 				);
 				if (res && res.success) inserted++;
 			}
 
-			return { success: true, inserted, unmappedColumns: unmapped };
+			return { success: true, inserted };
 		} catch (e) {
 			return { success: false, error: e.message };
 		}
@@ -217,7 +336,7 @@ async function register() {
 				// find or create customer
 				let cust = db.prepare(`SELECT id FROM customers WHERE display_name=? OR email=?`).get(customerName, email);
 				if (!cust) {
-					const res = await Customers.insertCustomer('', customerName || 'Unknown', '', '', '', email || '', customerName || '', customerName || '', '', '', '', '', '', billing_address || '', '', '', '', '', '', '', terms || '', '', options.enteredBy || 'import', 0, date || null, 'Email', 'en', '');
+					const res = await Customers.insertCustomer('', customerName || 'Unknown', '', '', '', email || '', customerName || '', customerName || '', '', '', '', '', '', billing_address || '', '', '', '', '', '', '', terms || '', '', options.enteredBy || 'import', 0, date || null, 'Email', 'en', '', 1, null, null);
 					if (res && res.success) {
 						cust = db.prepare(`SELECT id FROM customers WHERE display_name=? ORDER BY id DESC LIMIT 1`).get(customerName);
 					}
@@ -466,64 +585,129 @@ async function register() {
 			const { headers, rows } = simpleCsvParse(csvText || '');
 			if (!headers.length) return { success: false, error: 'empty_csv' };
 			const idx = {
-				displayName: headerIndex(headers, ['display name','vendor','vendor name','company']),
+				status: headerIndex(headers, ['active status']),
+				displayName: headerIndex(headers, ['vendor', 'vendor name', 'display name']),
+				company: headerIndex(headers, ['company']),
+				title: headerIndex(headers, ['mr./ms./...', 'title', 'salutation']),
 				firstName: headerIndex(headers, ['first name','firstname']),
+				middleName: headerIndex(headers, ['m.i.', 'mi.', 'middle name', 'middle initial', 'middle']),
 				lastName: headerIndex(headers, ['last name','lastname']),
-				email: headerIndex(headers, ['email','email address']),
-				phone: headerIndex(headers, ['phone','phone number']),
-				mobile: headerIndex(headers, ['mobile','mobile phone']),
+				primaryContact: headerIndex(headers, ['primary contact']),
+				secondaryContact: headerIndex(headers, ['secondary contact']),
+				jobTitle: headerIndex(headers, ['job title']),
+				email: headerIndex(headers, ['email','email address','main email']),
+				phone: headerIndex(headers, ['main phone','phone','phone number']),
+				mobile: headerIndex(headers, ['alt. phone','alt phone','mobile','mobile phone']),
 				fax: headerIndex(headers, ['fax']),
-				address1: headerIndex(headers, ['billing address line 1','address1','address line 1','address','street address','street']),
-				address2: headerIndex(headers, ['billing address line 2','address2','address line 2','address 2','unit']),
-				city: headerIndex(headers, ['billing city','city']),
-				state: headerIndex(headers, ['billing state','state']),
+				address1: headerIndex(headers, ['bill from 2','billing address line 1','address1','street address','street']),
+				address2: headerIndex(headers, ['billing address line 2','address2','unit','address1']),
+				cityStateZip: headerIndex(headers, ['bill from 3']),
+				city: headerIndex(headers, ['bill from 3','billing city','city','bill from 4']),
+				state: headerIndex(headers, ['billing state','state','bill from 5']),
 				postal: headerIndex(headers, ['billing postal code','postal code','zip']),
+				shipFrom: headerIndex(headers, ['ship from 1', 'ship from 2', 'ship from 3', 'ship from 4', 'ship from 5']),
 				country: headerIndex(headers, ['billing country','country']),
-				accountNumber: headerIndex(headers, ['account number','acct #']),
+				accountNumber: headerIndex(headers, ['account number','account no.','acct #']),
 				terms: headerIndex(headers, ['terms','vendor terms']),
-				openingBalance: headerIndex(headers, ['open balance','opening balance']),
+				openingBalance: headerIndex(headers, ['balance total','open balance','opening balance','balance']),
 				asOf: headerIndex(headers, ['open balance date','as of','as of date']),
 				notes: headerIndex(headers, ['notes','memo']),
 			};
+
+			// Same combined "Bill from 1" parser as customers: name, street,
+			// "City, ST ZIP". Use the shared parseCombined helper above.
 			let inserted = 0, updated = 0;
 			for (const r of rows) {
 				const val = (i) => (i >= 0 ? (r[i] || '').toString().trim() : '');
-				const display = val(idx.displayName);
+				const explicitCompany = val(idx.company);
+				const display = val(idx.displayName) || explicitCompany;
 				if (!display) continue;
-				const first = val(idx.firstName) || display.split(' ')[0] || '';
-				const last = val(idx.lastName) || display.split(' ').slice(1).join(' ') || '';
+				// Same rule as the customer import: a Company with no First/Last is a
+				// BUSINESS, so do not split its name into a fake person.
+				const nameIsJustTheCompany = !!explicitCompany && display === explicitCompany;
+				const first = val(idx.firstName) || (nameIsJustTheCompany ? '' : display.split(' ')[0]) || '';
+				const middle = val(idx.middleName);
+				const last = val(idx.lastName) || (nameIsJustTheCompany ? '' : display.split(' ').slice(1).join(' ')) || '';
 				const email = val(idx.email);
-				const phone = val(idx.phone);
+				const phone = val(idx.phone) || val(idx.mobile);
 				const mobile = val(idx.mobile) || phone;
 				const fax = val(idx.fax);
-				const address1 = val(idx.address1);
-				const address2 = val(idx.address2);
-				const city = val(idx.city);
-				const state = val(idx.state);
-				const postal = val(idx.postal);
 				const country = val(idx.country);
+				const primaryContact = val(idx.primaryContact);
+				const secondaryContact = val(idx.secondaryContact);
+				const jobTitle = val(idx.jobTitle);
+
+				// Resolve address from combined "Bill from 1..5" lines if possible,
+				// otherwise fall back to dedicated address columns.
+				let address1 = '', address2 = '', city = '', state = '', postal = '';
+				const billLines = [];
+				for (const c of ['bill from 1', 'bill from 2', 'bill from 3', 'bill from 4', 'bill from 5']) {
+					const i = headerIndex(headers, [c]);
+					if (i >= 0) {
+						const v = (r[i] || '').toString().trim();
+						if (v) billLines.push(v);
+					}
+				}
+				const parsed = billLines.length ? parseCombined(billLines.join('\n')) : null;
+				if (parsed && parsed.state && parsed.postal) {
+					address1 = parsed.address1;
+					address2 = parsed.address2;
+					city = parsed.city;
+					state = parsed.state;
+					postal = parsed.postal;
+					if (address1 && (address1 === display || address1 === val(idx.company))) {
+						address1 = address2;
+						address2 = '';
+					}
+				} else {
+					address1 = val(idx.address1);
+					address2 = val(idx.address2);
+					city = val(idx.city);
+					state = val(idx.state);
+					postal = val(idx.postal);
+					const csz = [idx.cityStateZip].filter(i => i >= 0).map(i => (r[i] || '').toString()).join('\n');
+					if (csz && !state && !postal) {
+						const p = parseCombined(csz);
+						city = city || p.city;
+						state = state || p.state;
+						postal = postal || p.postal;
+						if (!address1 && p.address1) address1 = p.address1;
+						if (!address2 && p.address2) address2 = p.address2;
+					}
+				}
+				const companyName = val(idx.company) || display;
+
 				const terms = val(idx.terms);
 				const account_number = val(idx.accountNumber);
 				const opening_balance = parseFloat(val(idx.openingBalance) || '0') || 0;
 				const as_of = val(idx.asOf) || null;
-				const notes = val(idx.notes) || '';
 
-				// Upsert by display_name or email (only match on email if non-empty to avoid false matches)
+				// Fold extra contact/meta data into notes for safe keeping.
+				const extras = [
+					primaryContact && ('Primary contact: ' + primaryContact),
+					secondaryContact && ('Secondary contact: ' + secondaryContact),
+					jobTitle && ('Job title: ' + jobTitle),
+				].filter(Boolean).join(' | ');
+				const compiledNotes = [val(idx.notes), extras].filter(Boolean).join(' | ');
+				const notes = compiledNotes;
+				const title = val(idx.title);
+
+				// Upsert by display_name/company_name (only match on email if non-empty to avoid false matches)
 				const existing = email
-					? db.prepare(`SELECT id FROM suppliers WHERE display_name=? OR email=?`).get(display, email)
-					: db.prepare(`SELECT id FROM suppliers WHERE display_name=?`).get(display);
+					? db.prepare(`SELECT id FROM suppliers WHERE display_name=? OR company_name=? OR email=?`).get(display, companyName, email)
+					: db.prepare(`SELECT id FROM suppliers WHERE display_name=? OR company_name=?`).get(display, companyName);
 				if (existing && existing.id) {
 					try {
 						await Suppliers.updateSupplier({
 							id: existing.id,
-							title: '',
+							title,
 							first_name: first,
-							middle_name: '',
+							middle_name: middle,
 							last_name: last,
 							suffix: '',
 							email,
 							display_name: display,
-							company_name: display,
+							company_name: companyName,
 							phone_number: phone,
 							mobile_number: mobile,
 							fax,
@@ -547,7 +731,7 @@ async function register() {
 					} catch {}
 				} else {
 					const res = await Suppliers.insertSupplier(
-						'', first, '', last, '', email, display, display, phone, mobile, fax, '', '', address1, address2, city, state, postal, country,
+						title, first, middle, last, '', email, display, companyName || display, phone, mobile, fax, '', '', address1, address2, city, state, postal, country,
 						terms, '', account_number, '', opening_balance, as_of, options.enteredBy || 'import', notes
 					);
 					if (res && res.success) inserted++;

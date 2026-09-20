@@ -4,8 +4,25 @@ const AuditLog = require('../models/auditLog');
 const { authorize } = require('../security/authz');
 const { validateInvoice } = require('../validation/validators');
 const JournalEntries = require('../models/journalEntries');
+const SalesRegister = require('../models/salesRegister');
+const { isInvoiceDocumentState, isFinanciallyEffective } = require('../services/documentStatus');
+
+// Invoice status is system controlled. The only value a normal create/update
+// payload may carry is an explicit document lifecycle state (Draft / Void /
+// Cancelled); any financial status is discarded here before it reaches the model.
+const sanitizeInvoiceStatus = (status) => (isInvoiceDocumentState(status) ? String(status).trim() : undefined);
 
 const registerInvoiceHandlers = () => {
+  // Sales Register — read-only chronological audit trail of sales activity
+  ipcMain.handle('sales-register', async (_event, params) => {
+    try {
+      return SalesRegister.getRegister(params || {});
+    } catch (error) {
+      console.error('Error fetching sales register:', error);
+      return { data: [], total: 0, error: error.message };
+    }
+  });
+
   // Get all Invoices
   ipcMain.handle('get-invoices', async () => {
     try {
@@ -17,9 +34,9 @@ const registerInvoiceHandlers = () => {
   });
 
   // Get Invoices (server-side pagination)
-  ipcMain.handle('get-invoices-paginated', async (event, page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId) => {
+  ipcMain.handle('get-invoices-paginated', async (event, page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId, onlyOutstanding) => {
     try {
-      return await Invoices.getPaginated(page, pageSize, search || '', status || '', dueFrom || '', dueTo || '', startFrom || '', startTo || '', customerId || '');
+      return await Invoices.getPaginated(page, pageSize, search || '', status || '', dueFrom || '', dueTo || '', startFrom || '', startTo || '', customerId || '', !!onlyOutstanding);
     } catch (error) {
       console.error('Error fetching invoices (paginated):', error);
       return { error: error.message };
@@ -76,6 +93,16 @@ const registerInvoiceHandlers = () => {
     }
   });
 
+  // Sales by Income Account drill-down
+  ipcMain.handle('sales-by-account-detail', async (_event, params) => {
+    try {
+      return Invoices.getSalesByAccountDetail(params || {});
+    } catch (error) {
+      console.error('Error fetching sales by account detail:', error);
+      return [];
+    }
+  });
+
   // Sales Report summary (KPI, byCustomer, byIncomeAccount)
   ipcMain.handle('sales-summary', async (_event, filters) => {
     try {
@@ -101,22 +128,33 @@ const registerInvoiceHandlers = () => {
     try {
       const ctx = authorize(event, { permissions: 'write:invoices' });
       validateInvoice({ customer, start_date, last_date, invoiceLines });
+      const safeStatus = sanitizeInvoiceStatus(status);
       const res = await Invoices.insertInvoice(
         customer, customer_email, islater, billing_address, terms, start_date, 
-        last_date, message, statement_message, number, entered_by, vat, status, invoiceLines
+        last_date, message, statement_message, number, entered_by, vat, safeStatus, invoiceLines
       );
       if (res?.success) {
         try {
           AuditLog.log({
             userId: ctx.userId, action: 'create', entityType: 'invoice',
-            entityId: res?.invoice_id || res?.id, details: { customer, number, status }
+            entityId: res?.invoice_id || res?.id, details: { customer, number, status: res?.financials?.status || safeStatus || 'Open' }
           });
         } catch (auditErr) { console.warn('Audit log failed (non-fatal):', auditErr.message); }
 
         // ── Auto-post to COA: DR Accounts Receivable / CR Income per line ──
-        if (status && status !== 'Draft') {
+        // (skip void/voided/draft — those contribute $0, matching the register)
+        //
+        // ONE predicate decides whether this document is financially effective.
+        // It gates the journal post here, and the SAME predicate gates the stock
+        // issue — which now happens inside Invoices.insertInvoice, in the
+        // invoice's own transaction, because five different callers create
+        // invoices and only this one runs through a handler. See the comment
+        // there. Preview / PDF / print / email / payment / refresh never reach
+        // this code at all, so they cannot move stock by construction.
+        const nextStatus = String(res?.financials?.status || safeStatus || '');
+        if (isFinanciallyEffective(nextStatus)) {
+          const invoiceId = res.invoiceId || res.invoice_id || res.id;
           try {
-            const invoiceId = res.invoiceId || res.invoice_id || res.id;
             if (invoiceId) {
               const inv = await Invoices.getSingleInvoice(invoiceId);
               if (inv) {
@@ -146,6 +184,13 @@ const registerInvoiceHandlers = () => {
             console.warn('Journal auto-post (invoice) failed:', jErr.message);
             res.glWarning = jErr.message;
           }
+
+          // Stock is issued inside Invoices.insertInvoice, not here — see the
+          // comment on that function. It is deliberately fatal there (an invoice
+          // that ships goods but moves no stock is the inconsistency this
+          // integration exists to prevent), whereas the GL post above stays
+          // non-fatal and recoverable via res.glWarning, because hasPosting()
+          // makes a re-post safe and the invoice is already committed.
         }
       }
       return res;
@@ -160,21 +205,37 @@ const registerInvoiceHandlers = () => {
     try {
       const ctx = authorize(event, { permissions: 'write:invoices' });
       validateInvoice(invoiceData);
-      const res = await Invoices.updateInvoice(invoiceData);
+      // Strip any client-supplied financial status; only an explicit document
+      // lifecycle state survives. The model then recomputes from real money.
+      const payload = { ...(invoiceData || {}), status: sanitizeInvoiceStatus(invoiceData?.status) };
+      const res = await Invoices.updateInvoice(payload);
       if (res?.success) {
         try {
+          const prev = res.previous || {};
+          const fin = res.financials || {};
           AuditLog.log({
             userId: ctx.userId,
             action: 'update',
             entityType: 'invoice',
             entityId: invoiceData?.id,
-            details: { status: invoiceData?.status, total: invoiceData?.total }
+            details: {
+              status: fin.status,
+              previousTotal: prev.invoiceTotal,
+              newTotal: fin.invoiceTotal,
+              paidToDate: fin.paidToDate,
+              newBalance: fin.balance,
+              previousStatus: prev.status,
+            }
           });
         } catch (auditErr) {
           console.warn('Audit log failed (non-fatal):', auditErr.message);
         }
-        // ── Post-on-save: post/repost journal entry for non-Draft invoices ──
-        if (invoiceData?.status && invoiceData.status !== 'Draft') {
+        // ── Post-on-save: post/repost journal entry for non-Draft, non-void invoices ──
+        // The same single predicate as the insert path, gating the GL re-post.
+        // The stock reconciliation uses the same predicate but lives in
+        // Invoices.updateInvoice, in the transaction that rewrites the lines.
+        const nextStatus = String(res?.financials?.status || '');
+        if (isFinanciallyEffective(nextStatus)) {
           try {
             const inv = await Invoices.getSingleInvoice(invoiceData.id);
             if (inv) {
@@ -196,6 +257,15 @@ const registerInvoiceHandlers = () => {
             console.warn('Journal re-post (invoice update) failed:', jErr.message);
           }
         }
+
+        // ── Stock is reconciled inside Invoices.updateInvoice ───────────────
+        // It moved into the model for the same reason the insert path did: the
+        // model is the only place that knows every caller, and the reconcile
+        // has to sit in the same transaction as the line rewrite it follows.
+        // It also runs OUTSIDE the guard above, on purpose — a Draft/Void
+        // invoice reconciles to nothing (an empty set), which reverses whatever
+        // it had issued. Guarding it like the GL post would leave a voided
+        // invoice's stock issued forever.
       }
       return res;
     } catch (error) {    
@@ -205,10 +275,10 @@ const registerInvoiceHandlers = () => {
   });
 
   // Get Financial Report
-  ipcMain.handle('get-financial', async (event, start_date, last_date) => {
+  ipcMain.handle('get-financial', async (event, start_date, last_date, options) => {
     try {
-      console.log('[invoiceHandlers] get-financial invoked with', start_date, last_date);
-      const result = await Invoices.getFinancialReport(start_date, last_date);
+      console.log('[invoiceHandlers] get-financial invoked with', start_date, last_date, options);
+      const result = await Invoices.getFinancialReport(start_date, last_date, options || {});
       // Ensure we always return an object with the expected keys
       return result || { profitLoss: {}, balanceSheet: {}, cashFlow: {} };
     } catch (error) {

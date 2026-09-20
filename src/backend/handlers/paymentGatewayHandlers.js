@@ -73,9 +73,13 @@ async function register() {
 		// record payment and update invoice balance/status
 		try {
 			db.prepare('BEGIN').run();
-			Payments.create({ invoiceId: row.invoiceId, amount: row.amount, paymentMethod, date: new Date().toISOString().slice(0,10) });
-			db.prepare(`UPDATE invoices SET balance = MAX(0, COALESCE(balance,0) - ?), status = CASE WHEN MAX(0, COALESCE(balance,0) - ?) <= 0 THEN 'Paid' ELSE status END WHERE id = ?`)
-				.run(row.amount, row.amount, row.invoiceId);
+			const inv = db.prepare(`SELECT customer FROM invoices WHERE id=?`).get(row.invoiceId);
+			Payments.createWithAllocations({
+				customerId: inv?.customer || null,
+				amount: row.amount,
+				paymentMethod,
+				date: new Date().toISOString().slice(0, 10),
+			}, [{ invoiceId: row.invoiceId, amount: row.amount }]);
 			db.prepare('COMMIT').run();
 		} catch (e) {
 			db.prepare('ROLLBACK').run();

@@ -20,17 +20,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteEmployee: (id) => ipcRenderer.invoke('delete-employee', id),
   //Customers
   getAllCustomers: () => ipcRenderer.invoke('get-customers'),
-  getCustomersPaginated: (page, pageSize, search) => ipcRenderer.invoke('get-customers-paginated', page, pageSize, search),
+  getCustomersPaginated: (page, pageSize, search, status) => ipcRenderer.invoke('get-customers-paginated', page, pageSize, search, status),
   getCustomerReport: () => ipcRenderer.invoke('get-customer-report'),
   getSingleCustomer: (customer_id) => ipcRenderer.invoke('get-singleCustomer',customer_id),
   updateCustomer: (customerData) => ipcRenderer.invoke('updatecustomer',customerData),
-  insertCustomer: (title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language, notes) => ipcRenderer.invoke('insert-customer', title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language, notes),
+  customerToggleStatus: (id, status) => ipcRenderer.invoke('customer-toggle-status', id, status),
+  insertCustomer: (title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes,taxable,default_tax_rate,default_tax_rate_id) => ipcRenderer.invoke('insert-customer', title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes,taxable,default_tax_rate,default_tax_rate_id),
   //Suppliers
   getAllSuppliers: () => ipcRenderer.invoke('get-suppliers'),
   getSuppliersPaginated: (page, pageSize, search) => ipcRenderer.invoke('get-suppliers-paginated', page, pageSize, search),
   getSingleSupplier: (supplier_id) => ipcRenderer.invoke('get-singleSupplier',supplier_id),
   updateSupplier: (supplierData) => ipcRenderer.invoke('updatesupplier',supplierData),
-  insertSupplier: (title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes, vendor_type) => ipcRenderer.invoke('insert-supplier', title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes, vendor_type),
+  insertSupplier: (title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes, vendor_type,taxable,default_tax_rate,default_tax_rate_id) => ipcRenderer.invoke('insert-supplier', title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by, notes, vendor_type,taxable,default_tax_rate,default_tax_rate_id),
   supplierToggleStatus: (id, status) => ipcRenderer.invoke('supplier-toggle-status', id, status),
   deleteSupplier: (id) => ipcRenderer.invoke('delete-supplier', id),
 
@@ -45,6 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAllExpenses: () => ipcRenderer.invoke('get-expenses'),
   getExpensesPaginated: (page, pageSize, search) => ipcRenderer.invoke('get-expenses-paginated', page, pageSize, search),
   getSingleExpense: (id) => ipcRenderer.invoke('get-single-expense', id),
+  getOpenBills: (payeeId) => ipcRenderer.invoke('get-open-bills', payeeId),
   updateExpense: (expenseData) => ipcRenderer.invoke('updateexpense',expenseData),
   insertExpense: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines,due_date,memo,terms) => ipcRenderer.invoke('insert-expense', payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines,due_date,memo,terms),
   createExpenseWithApproval: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => 
@@ -52,20 +54,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   markExpensePaid: (id) => ipcRenderer.invoke('mark-expense-paid', id),
 //Quotes
 getAllQuotes: () => ipcRenderer.invoke('get-quotes'),
-getQuotesPaginated: (page, pageSize, search, status) => ipcRenderer.invoke('get-quotes-paginated', page, pageSize, search, status),
+getQuotesPaginated: (page, pageSize, search, status, dateFrom, dateTo, expFrom, expTo) => ipcRenderer.invoke('get-quotes-paginated', page, pageSize, search, status, dateFrom, dateTo, expFrom, expTo),
 getSingleQuote: (quote_id) => ipcRenderer.invoke('get-singleQuote',quote_id),
 updateQuote: (quoteData) => ipcRenderer.invoke('updatequote',quoteData),
 insertQuote: (status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines) => ipcRenderer.invoke('insert-quote', status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines),
 convertToInvoice: (quote_id) => ipcRenderer.invoke('convertquote', quote_id),
+// Explicit quote workflow actions — the only way a quote status can change.
+acceptQuote: (quote_id) => ipcRenderer.invoke('accept-quote', quote_id),
+declineQuote: (quote_id) => ipcRenderer.invoke('decline-quote', quote_id),
+convertQuoteToInvoice: (quote_id) => ipcRenderer.invoke('convert-quote-to-invoice', quote_id),
 //Invoices 
 getAllInvoices: () => ipcRenderer.invoke('get-invoices'),
-  getInvoicesPaginated: (page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId) => ipcRenderer.invoke('get-invoices-paginated', page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId),
+  getInvoicesPaginated: (page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId, onlyOutstanding) => ipcRenderer.invoke('get-invoices-paginated', page, pageSize, search, status, dueFrom, dueTo, startFrom, startTo, customerId, onlyOutstanding),
   getSalesSummary: (filters) => ipcRenderer.invoke('sales-summary', filters),
+  getSalesRegister: (params) => ipcRenderer.invoke('sales-register', params),
 getInvoiceReport: () => ipcRenderer.invoke('get-invoice-report'),
-getFinancialReport: (start_date, last_date) => ipcRenderer.invoke('get-financial', start_date, last_date),
+getFinancialReport: (start_date, last_date, options) => ipcRenderer.invoke('get-financial', start_date, last_date, options),
 getManagementReport: (start_date, last_date) => ipcRenderer.invoke('get-management', start_date, last_date),
 getInvoiceSummary: () => ipcRenderer.invoke('invoicesummary'),
 getSalesByProduct: (filters) => ipcRenderer.invoke('sales-by-product', filters),
+  getSalesByAccountDetail: (params) => ipcRenderer.invoke('sales-by-account-detail', params),
 getDashboardSummary: () => ipcRenderer.invoke('dashboard'),
 getSingleInvoice: (invoice_id) => ipcRenderer.invoke('get-singleInvoice',invoice_id),
 getInitialInvoice: (invoice_id,type) => ipcRenderer.invoke('get-initinvoice',invoice_id, type),
@@ -73,9 +81,9 @@ updateInvoice: (invoiceData) => ipcRenderer.invoke('updateinvoice',invoiceData),
 insertInvoice: (customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines) => ipcRenderer.invoke('insert-invoice', customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines),
 //Products
 getAllProducts: () => ipcRenderer.invoke('get-products'),
-getProductsPaginated: (page, pageSize, search, typeFilter) => ipcRenderer.invoke('get-products-paginated', page, pageSize, search, typeFilter),
+getProductsPaginated: (page, pageSize, search, typeFilter, categoryFilter) => ipcRenderer.invoke('get-products-paginated', page, pageSize, search, typeFilter, categoryFilter),
 updateProduct: (productData) => ipcRenderer.invoke('updateproduct',productData),
-insertProduct: (type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock) => ipcRenderer.invoke('insert-product', type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock),
+  insertProduct: (type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock, income_account_id) => ipcRenderer.invoke('insert-product', type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock, income_account_id),
 //Product Categories
 getProductCategories: () => ipcRenderer.invoke('get-product-categories'),
 insertProductCategory: (name) => ipcRenderer.invoke('insert-product-category', name),
@@ -91,8 +99,12 @@ getVatReport: (start_date, last_date) => ipcRenderer.invoke('get-vatreport',star
 insertVat: (vat_name,vat_percentage,entered_by) => ipcRenderer.invoke('insert-vat', vat_name,vat_percentage,entered_by),
 deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   // Chart of accounts and fixed assets
-  getChartOfAccounts: () => ipcRenderer.invoke('get-chart-of-accounts'),
+  getChartOfAccounts: (params) => ipcRenderer.invoke('get-chart-of-accounts', params),
   getDashboardBalances: () => ipcRenderer.invoke('get-dashboard-balances'),
+  // Normal-balance metadata repair — corrects wrong normalBalance values on
+  // existing company files. Idempotent and ledger-neutral (metadata only).
+  repairNormalBalances: (opts) => ipcRenderer.invoke('repair-normal-balances', opts),
+  getNormalBalanceRules: () => ipcRenderer.invoke('get-normal-balance-rules'),
   deleteProduct: (id) => ipcRenderer.invoke('delete-product', id),
   insertChartAccount: (payload, type, number, entered_by, openingBalance, status, parentId, description) =>
     ipcRenderer.invoke('insert-chart-account', payload, type, number, entered_by, openingBalance, status, parentId, description),
@@ -108,12 +120,19 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   // Journal entries
   journalPost:        (entry)              => ipcRenderer.invoke('journal-post', entry),
   journalList:        (filters)            => ipcRenderer.invoke('journal-list', filters),
+  journalSourceDetail:(sourceType, sourceId) => ipcRenderer.invoke('journal-source-detail', sourceType, sourceId),
   journalByAccount:   (accountId, opts)    => ipcRenderer.invoke('journal-by-account', accountId, opts),
+  journalGetById:     (id)                 => ipcRenderer.invoke('journal-get-by-id', id),
   journalVoid:        (id)                 => ipcRenderer.invoke('journal-void', id),
   journalReverse:     (journalId, date)    => ipcRenderer.invoke('journal-reverse', journalId, date),
   journalPostInvoice: (invoice)            => ipcRenderer.invoke('journal-post-invoice', invoice),
   journalPostPayment: (payment)            => ipcRenderer.invoke('journal-post-payment', payment),
+  journalGetBySource: (sourceType, sourceId) => ipcRenderer.invoke('journal-get-by-source', sourceType, sourceId),
+  journalTransactionAccounts: (txIds) => ipcRenderer.invoke('journal-transaction-accounts', txIds),
   journalPostExpense: (expense)            => ipcRenderer.invoke('journal-post-expense', expense),
+  // Opening balance / balance brought forward for the General Ledger's first
+  // row. Read-only — derives from chart_of_accounts.openingBalance, never posts.
+  ledgerOpeningRow:   (params)             => ipcRenderer.invoke('ledger-opening-row', params),
   getFixedAssets: () => ipcRenderer.invoke('get-fixed-assets'),
   insertFixedAsset: (asset) => ipcRenderer.invoke('insert-fixed-asset', asset),
   updateFixedAsset: (asset) => ipcRenderer.invoke('update-fixed-asset', asset),
@@ -134,11 +153,15 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
 
   // Transactions
   getTransactions: () => ipcRenderer.invoke('get-transactions'),
+  getTransactionsPaginated: (params) => ipcRenderer.invoke('get-transactions-paginated', params),
+  getCheckStats: () => ipcRenderer.invoke('get-check-stats'),
+  findTransactionByReference: (params) => ipcRenderer.invoke('find-transaction-by-reference', params),
   getTransaction: (id) => ipcRenderer.invoke('get-transaction', id),
   insertTransaction: (tx) => ipcRenderer.invoke('insert-transaction', tx),
   updateTransaction: (id, data) => ipcRenderer.invoke('update-transaction', id, data),
   deleteTransaction: (id) => ipcRenderer.invoke('delete-transaction', id),
   voidTransaction: (id) => ipcRenderer.invoke('void-transaction', id),
+  deleteCheck: (id) => ipcRenderer.invoke('delete-check', id),
   markCheckPrinted: (id, printed) => ipcRenderer.invoke('mark-check-printed', id, printed),
   getTrialBalance: (startDate, endDate) => ipcRenderer.invoke('get-trial-balance', startDate, endDate),
   getTrialBalanceConsolidated: (payload) => ipcRenderer.invoke('get-trial-balance-consolidated', payload),
@@ -149,9 +172,18 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   createDeposit: (data) => ipcRenderer.invoke('create-deposit', data),
   updateDeposit: (id, data) => ipcRenderer.invoke('update-deposit', id, data),
   voidDeposit: (id) => ipcRenderer.invoke('void-deposit', id),
+  deleteDeposit: (id) => ipcRenderer.invoke('delete-deposit', id),
   getPendingPayments: () => ipcRenderer.invoke('get-pending-payments'),
   createBankTransfer: (data) => ipcRenderer.invoke('create-bank-transfer', data),
   reconcileTransactions: (data) => ipcRenderer.invoke('reconcile-transactions', data),
+  getUnreconciledTransactions: (params) => ipcRenderer.invoke('get-unreconciled-transactions', params),
+  getReconciliationHistory: (accountId) => ipcRenderer.invoke('get-reconciliation-history', { accountId }),
+  getReconciliationDetail: (reconciliationId) => ipcRenderer.invoke('get-reconciliation-detail', { reconciliationId }),
+  // Starting (book) balance for a reconciliation — same opening-balance rule as
+  // the General Ledger. Read-only.
+  getReconciliationStartingBalance: (params) => ipcRenderer.invoke('reconciliation-starting-balance', params),
+  // Accounts eligible to absorb a "Reconcile Anyway" difference.
+  getReconciliationAdjustmentAccounts: (params) => ipcRenderer.invoke('reconciliation-adjustment-accounts', params),
   createIntercompanyTransfer: (data) => ipcRenderer.invoke('create-intercompany-transfer', data),
   // Payroll
   getPayrollRecords: () => ipcRenderer.invoke('get-payroll-records'),
@@ -234,6 +266,9 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   customerPaymentsAll:     (filters)    => ipcRenderer.invoke('customer-payments-all', filters),
   customerPaymentUpdate:   (id, data)   => ipcRenderer.invoke('customer-payment-update', id, data),
   customerPaymentDelete:   (id)         => ipcRenderer.invoke('customer-payment-delete', id),
+  customerPaymentCreate:   (data)       => ipcRenderer.invoke('customer-payment-create', data),
+  customerPaymentApply:    (paymentId, invoiceId, amount) => ipcRenderer.invoke('customer-payment-apply', paymentId, invoiceId, amount),
+  customerPaymentAllocations: (paymentId) => ipcRenderer.invoke('customer-payment-allocations', paymentId),
   invoicePaymentsList:     (invoiceId)  => ipcRenderer.invoke('invoice-payments-list', invoiceId),
 
   // Income Tracking
@@ -269,6 +304,7 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   updateWarehouse: (warehouse) => ipcRenderer.invoke('update-warehouse', warehouse),
   deleteWarehouse: (id) => ipcRenderer.invoke('delete-warehouse', id),
   getItemStock: (itemId) => ipcRenderer.invoke('get-item-stock', itemId),
+  getItemMovements: (itemId, limit) => ipcRenderer.invoke('get-item-movements', itemId, limit),
   setReorderPoint: (itemId, warehouseId, reorderPoint) => ipcRenderer.invoke('set-reorder-point', itemId, warehouseId, reorderPoint),
   getReorderList: () => ipcRenderer.invoke('get-reorder-list'),
   listExpiringLots: (days) => ipcRenderer.invoke('list-expiring-lots', days),
@@ -407,11 +443,16 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   emailOAuthStatus: (provider) => ipcRenderer.invoke('email-oauth-status', provider),
   emailOAuthRevoke: (provider) => ipcRenderer.invoke('email-oauth-revoke', provider),
   emailSendExternal: (payload) => ipcRenderer.invoke('email-send-external', payload),
+  emailMailClientInfo: () => ipcRenderer.invoke('email-mail-client-info'),
   emailMarkSent: (payload) => ipcRenderer.invoke('email-mark-sent', payload),
 
   // Invoice Template Customization
   getInvoiceTemplate: () => ipcRenderer.invoke('get-invoice-template'),
   saveInvoiceTemplate: (templateSettings) => ipcRenderer.invoke('save-invoice-template', templateSettings),
+
+  // Quote Template Customization
+  getQuoteTemplate: () => ipcRenderer.invoke('get-quote-template'),
+  saveQuoteTemplate: (templateSettings) => ipcRenderer.invoke('save-quote-template', templateSettings),
 
   // Imports (QuickBooks CSV)
   importCustomersCsv: (csvText, options) => ipcRenderer.invoke('import-customers-csv', csvText, options || {}),
@@ -511,6 +552,7 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
 
   // CRM
   crmListLeads: (filters) => ipcRenderer.invoke('crm-list-leads', filters),
+  crmListLeadsByCustomer: (customerId) => ipcRenderer.invoke('crm-list-leads-by-customer', customerId),
   crmGetLead: (id) => ipcRenderer.invoke('crm-get-lead', id),
   crmCreateLead: (lead) => ipcRenderer.invoke('crm-create-lead', lead),
   crmUpdateLead: (lead) => ipcRenderer.invoke('crm-update-lead', lead),
@@ -636,6 +678,7 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
 
   // #18 Help System
   helpSearch: (query) => ipcRenderer.invoke('help-search', query),
+  globalSearch: (query) => ipcRenderer.invoke('global-search', query),
   helpArticle: (id) => ipcRenderer.invoke('help-article', id),
   helpContext: (contextKey) => ipcRenderer.invoke('help-context', contextKey),
   helpArticleSave: (article) => ipcRenderer.invoke('help-article-save', article),

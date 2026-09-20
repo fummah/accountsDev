@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, Button, message, Table, Input, Space } from 'antd';
-import { DownloadOutlined, CloudUploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, CloudUploadOutlined, FileAddOutlined } from '@ant-design/icons';
 
 const { TextArea } = Input;
 
@@ -9,6 +9,8 @@ const COAImportExport = () => {
   const [versions, setVersions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeKey, setActiveKey] = useState('export');
+  const fileRef = useRef(null);
+  const [fileName, setFileName] = useState('');
 
   const loadVersions = async () => {
     try {
@@ -44,7 +46,14 @@ const COAImportExport = () => {
       setLoading(true);
       const res = await window.electronAPI.coaImport(csv, 'COA import');
       if (res?.success) {
-        message.success(`Imported ${res.inserted} rows`);
+        const total = res.total ?? res.inserted;
+        const msg = `Imported ${res.inserted} of ${total} rows`;
+        if (res.errors?.length) {
+          message.warning(`${msg} — ${res.errors.length} errors`);
+          console.warn('COA import errors:', res.errors);
+        } else {
+          message.success(msg);
+        }
         await loadVersions();
       } else message.error(res?.error || 'Import failed');
     } catch (e) {
@@ -52,6 +61,20 @@ const COAImportExport = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCsv(String(reader.result || ''));
+      setFileName(file.name);
+      message.success(`Loaded ${file.name}`);
+    };
+    reader.onerror = () => message.error('Failed to read file');
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const createSnapshot = async () => {
@@ -110,8 +133,15 @@ const COAImportExport = () => {
 
       {activeKey === 'import' && (
         <div>
-          <p>Paste CSV (columns: number,name,type,status) then click Import.</p>
-          <TextArea rows={12} value={csv} onChange={e => setCsv(e.target.value)} />
+          <p>Paste CSV or select a file, then click Import.</p>
+          <Space style={{ marginBottom: 12 }}>
+            <Button icon={<FileAddOutlined />} onClick={() => fileRef.current?.click()}>
+              {fileName || 'Browse CSV File'}
+            </Button>
+            {fileName && <span style={{ color: '#888' }}>{fileName}</span>}
+          </Space>
+          <input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={handleFile} />
+          <TextArea rows={12} value={csv} onChange={e => setCsv(e.target.value)} placeholder="Or paste CSV content here..." />
           <div style={{ marginTop: 12 }}>
             <Button type="primary" icon={<CloudUploadOutlined />} loading={loading} onClick={importCsv}>Import</Button>
           </div>

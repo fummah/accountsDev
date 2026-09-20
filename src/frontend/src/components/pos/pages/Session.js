@@ -158,7 +158,7 @@ const Session = () => {
               <>
                 <Divider><HistoryOutlined /> Previous Sessions</Divider>
                 <Table dataSource={pastSessions} columns={historyColumns} rowKey="id"
-                  size="small" pagination={{ pageSize: 10 }} />
+                  size="small" pagination={{ defaultPageSize: 10 }} />
               </>
             )}
           </>

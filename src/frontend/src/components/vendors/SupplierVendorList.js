@@ -1,15 +1,29 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useHistory } from 'react-router-dom';
-import { Card, Table, Button, Modal, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Tabs, Statistic, Popconfirm, Badge } from 'antd';
-import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, DollarOutlined, ClockCircleOutlined, FileTextOutlined, FileAddOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Tabs, Statistic, Popconfirm, Badge, Avatar, Typography, Descriptions, Empty, Divider } from 'antd';
+import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, DollarOutlined, ClockCircleOutlined, FileTextOutlined, FileAddOutlined, ShopOutlined, TeamOutlined, UsergroupAddOutlined, MailOutlined, PhoneOutlined, GlobalOutlined, EnvironmentOutlined, IdcardOutlined, BankOutlined, AccountBookOutlined, ProfileOutlined, TagsOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { formatPhone, phoneInputHandler } from '../../utils/phone';
 import COUNTRIES from '../../utils/countries';
+import FormSection, { FORM_ITEM_STYLE } from '../shared/FormSection';
+import ContactIdentityNote from '../shared/ContactIdentityNote';
+import TaxSettingsSection from '../shared/TaxSettingsSection';
+import { deriveDisplayName, identityRule } from '../../utils/contactIdentity';
+import { resolveTaxRateFields, taxRateFormValue, describeTaxRate } from '../../utils/taxRate';
 
 const { Option } = Select;
 const { TabPane } = Tabs;
 const { TextArea } = Input;
+const { Title, Text } = Typography;
+
+// Modern stat "tile" card style used across the screen
+const statStyle = { borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', border: '1px solid #f0f0f0' };
+const iconTile = (bg) => ({
+  width: 44, height: 44, borderRadius: 10,
+  background: bg, color: '#fff', fontSize: 20, flexShrink: 0,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+});
 
 const SupplierVendorList = () => {
   const history = useHistory();
@@ -24,6 +38,8 @@ const SupplierVendorList = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [form] = Form.useForm();
   const [billStats, setBillStats] = useState({ totalPayables: 0, overdueAmount: 0, unpaidBills: 0 });
+  const [detailTab, setDetailTab] = useState('1');
+  const [vatRates, setVatRates] = useState([]);
 
   const loadBillStats = useCallback(async () => {
     try {
@@ -60,6 +76,10 @@ const SupplierVendorList = () => {
 
   useEffect(() => { loadSuppliers(); loadBillStats(); }, [loadSuppliers, loadBillStats]);
 
+  useEffect(() => {
+    window.electronAPI.getAllVat?.().then(v => setVatRates(Array.isArray(v) ? v : [])).catch(() => {});
+  }, []);
+
   const filtered = useMemo(() => {
     let list = suppliers;
     if (statusFilter !== 'all') {
@@ -90,29 +110,63 @@ const SupplierVendorList = () => {
     form.setFieldsValue({
       ...record,
       display_name: record.display_name || `${record.first_name || ''} ${record.last_name || ''}`.trim(),
+      // taxable is stored as INTEGER (0/1); the Select expects a boolean
+      taxable: record.taxable != null ? !!Number(record.taxable) : true,
+      // Prefer the stored ID. If null, the legacy percentage is matched only
+      // when it resolves to exactly one saved rate — never guessed between
+      // candidates (see utils/taxRate.js).
+      default_tax_rate_id: taxRateFormValue(record, vatRates),
     });
     setDrawerOpen(true);
   };
 
   const openDetail = async (record) => {
+    let detail = null;
     try {
-      const detail = await window.electronAPI.getSingleSupplier(record.id);
+      detail = await window.electronAPI.getSingleSupplier(record.id);
       setViewingSupplier(detail || record);
     } catch (_) {
       setViewingSupplier(record);
     }
+    const base = detail && !detail.error ? detail : record;
+    try {
+      const allExp = await window.electronAPI.getAllExpenses();
+      const list = Array.isArray(allExp) ? allExp : (allExp?.data || allExp?.all || []);
+      const mine = list.filter(e => Number(e.payee) === Number(record.id)
+        && ['supplier', 'bill'].includes((e.category || '').toLowerCase()));
+      const bills = (Array.isArray(mine) && mine.length) ? mine
+        : (Array.isArray(base.expenses) && base.expenses.length ? base.expenses : []);
+      setViewingSupplier(prev => {
+        const b = prev || base;
+        return { ...b, bills };
+      });
+    } catch (_) { /* keep whatever getSingleSupplier returned */ }
+    try {
+      const openBills = await window.electronAPI.getOpenBills(record.id);
+      setViewingSupplier(prev => {
+        const b = prev || base;
+        return { ...b, openBills: Array.isArray(openBills) ? openBills : [] };
+      });
+    } catch (_) { /* keep whatever we have */ }
     setDetailDrawerOpen(true);
+    setDetailTab('1');
   };
 
   const handleSave = async () => {
     try {
       const vals = await form.validateFields();
-      const display = vals.display_name || `${vals.first_name || ''} ${vals.last_name || ''}`.trim() || vals.company_name || 'Unnamed';
+      // Shared rule: explicit -> personal name -> company. The `'Unnamed'`
+      // fallback is gone — it fabricated a name for a record that the rule
+      // above has already refused, so it could only ever mask a bug.
+      const display = deriveDisplayName(vals);
+      // The id is the relationship; the percentage is a denormalized snapshot.
+      // One rule for both — see utils/taxRate.js.
+      const tax = resolveTaxRateFields(vals, vatRates);
 
       if (editingSupplier) {
         // Preserve existing values for fields not in the edit form
         const existing = editingSupplier.raw ? editingSupplier.raw : editingSupplier;
-        await window.electronAPI.updateSupplier({
+        const res = await window.electronAPI.updateSupplier({
           id: editingSupplier.id,
           title: vals.title || existing.title || '',
           first_name: vals.first_name || existing.first_name || '',
@@ -141,17 +195,28 @@ const SupplierVendorList = () => {
           as_of: vals.as_of || existing.as_of || null,
           notes: vals.notes || existing.notes || '',
           vendor_type: vals.vendor_type || existing.vendor_type || 'Regular',
+          taxable: vals.taxable != null ? vals.taxable : true,
+          default_tax_rate: tax.default_tax_rate,
+          default_tax_rate_id: tax.default_tax_rate_id,
         });
+        // The API returns `{ error }` rather than throwing; without this the
+        // screen reported success for a write that was refused.
+        if (res && res.error) { message.error(res.error); return; }
         message.success('Supplier/Vendor updated');
       } else {
-        await window.electronAPI.insertSupplier(
+        const res = await window.electronAPI.insertSupplier(
           vals.title || '', vals.first_name || '', vals.middle_name || '', vals.last_name || '', '',
           vals.email || '', display, vals.company_name || '', vals.phone_number || '', vals.mobile_number || '',
           '', '', vals.website || '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '',
           vals.postal_code || '', vals.country || '', vals.supplier_terms || '', vals.business_number || '',
           vals.account_number || '', vals.expense_category || '', Number(vals.opening_balance) || 0,
-          vals.as_of || null, 'system', vals.notes || '', vals.vendor_type || 'Regular'
+          vals.as_of || null, 'system', vals.notes || '', vals.vendor_type || 'Regular',
+          vals.taxable != null ? vals.taxable : true,
+          tax.default_tax_rate,
+          tax.default_tax_rate_id
         );
+        if (res && res.error) { message.error(res.error); return; }
+        if (res && res.success === false) { message.error('Failed to add supplier/vendor'); return; }
         message.success('Supplier/Vendor added');
       }
       setDrawerOpen(false);
@@ -200,30 +265,58 @@ const SupplierVendorList = () => {
 
   const columns = [
     {
-      title: 'Name', dataIndex: 'display_name', key: 'display_name', sorter: (a, b) => (a.display_name || '').localeCompare(b.display_name || ''),
-      render: (v, r) => <Button type="link" style={{ padding: 0 }} onClick={() => openDetail(r)}>{v || `${r.first_name || ''} ${r.last_name || ''}`.trim() || '-'}</Button>
+      title: 'Name', dataIndex: 'display_name', key: 'display_name', width: 220, ellipsis: true,
+      sorter: (a, b) => (a.display_name || '').localeCompare(b.display_name || ''),
+      render: (v, r) => {
+        const nm = v || `${r.first_name || ''} ${r.last_name || ''}`.trim() || '-';
+        const initials = nm.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+        return (
+          <Space size={10}>
+            <Avatar size={34} style={{ background: 'linear-gradient(135deg,#722ed1,#b37feb)', fontSize: 14, fontWeight: 600, flexShrink: 0 }}>
+              {initials || 'S'}
+            </Avatar>
+            <div>
+              <Button type="link" style={{ padding: 0, fontWeight: 600, lineHeight: '20px' }} onClick={() => openDetail(r)}>{nm}</Button>
+              {r.company_name && <div><Text type="secondary" style={{ fontSize: 12 }}>{r.company_name}</Text></div>}
+            </div>
+          </Space>
+        );
+      }
     },
-    { title: 'Company', dataIndex: 'company_name', key: 'company_name', sorter: (a, b) => (a.company_name || '').localeCompare(b.company_name || '') },
-    { title: 'Email', dataIndex: 'email', key: 'email' },
-    { title: 'Phone', dataIndex: 'phone_number', key: 'phone_number', render: v => formatPhone(v) || '' },
-    { title: 'City', dataIndex: 'city', key: 'city' },
+    { title: 'Email', dataIndex: 'email', key: 'email', width: 160, ellipsis: true, render: v => v ? <a href={`mailto:${v}`}>{v}</a> : '-' },
+    { title: 'Phone', dataIndex: 'phone_number', key: 'phone_number', width: 110, render: v => formatPhone(v) || '-' },
+    { title: 'City', dataIndex: 'city', key: 'city', width: 100, ellipsis: true, render: v => v || '-' },
+    {
+      title: 'Type', dataIndex: 'vendor_type', key: 'vendor_type', width: 105,
+      render: (v) => <Tag color={v === '1099' ? 'red' : v === 'Contractor' ? 'blue' : v === 'Credit Card' ? 'purple' : 'default'}>{v || 'Regular'}</Tag>
+    },
     {
       title: 'Status', dataIndex: 'status', key: 'status', width: 100,
-      render: (v) => <Tag color={(v || 'Active') === 'Active' ? 'green' : 'red'}>{v || 'Active'}</Tag>
+      render: (v) => <Tag color={(v || 'Active') === 'Active' ? 'green' : 'red'} style={{ borderRadius: 20, paddingInline: 10 }}>{v || 'Active'}</Tag>
     },
     {
-      title: 'Actions', key: 'actions', width: 260,
+      title: 'Pending', key: 'due_amount', width: 105, align: 'right',
+      sorter: (a, b) => (Number(a.due_amount) || 0) - (Number(b.due_amount) || 0),
+      render: (_, r) => {
+        const due = Number(r.due_amount) || 0;
+        return due > 0
+          ? <span style={{ color: '#fa541c', fontWeight: 500 }}>{cSym} {due.toFixed(2)}</span>
+          : <span style={{ color: '#52c41a' }}>{cSym} 0.00</span>;
+      }
+    },
+    {
+      title: 'Actions', key: 'actions', width: 200,
       render: (_, r) => (
-        <Space size="small">
-          <Tooltip title="View"><Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(r)} /></Tooltip>
-          <Tooltip title="Edit"><Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} /></Tooltip>
+        <Space size={4}>
+          <Tooltip title="View"><Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openDetail(r)} /></Tooltip>
+          <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} /></Tooltip>
           <Tooltip title={(r.status || 'Active') === 'Active' ? 'Deactivate' : 'Activate'}>
-            <Button size="small" icon={(r.status || 'Active') === 'Active' ? <StopOutlined /> : <CheckCircleOutlined />} onClick={() => toggleStatus(r)} />
+            <Button type="text" size="small" icon={(r.status || 'Active') === 'Active' ? <StopOutlined /> : <CheckCircleOutlined />} onClick={() => toggleStatus(r)} />
           </Tooltip>
           <Popconfirm title="Delete this supplier?" onConfirm={() => handleDelete(r.id)} okText="Yes" cancelText="No">
-            <Button size="small" danger icon={<DeleteOutlined />} />
+            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
-          <Tooltip title="Enter Bill"><Button size="small" icon={<FileAddOutlined />} onClick={() => history.push(`/main/vendors/bills/new?vendor=${r.id}`)}>Bill</Button></Tooltip>
+          <Tooltip title="Enter Bill"><Button type="text" size="small" icon={<FileAddOutlined />} onClick={() => history.push(`/main/vendors/bills/new?vendor=${r.id}`)} /></Tooltip>
         </Space>
       )
     },
@@ -231,73 +324,87 @@ const SupplierVendorList = () => {
 
   return (
     <div style={{ padding: 24 }}>
-      <Card
-        title={<span style={{ fontSize: 18, fontWeight: 600 }}>Suppliers / Vendors</span>}
-        extra={
-          <Space>
-            <Button icon={<DownloadOutlined />} onClick={exportCSV}>Export CSV</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Add Supplier / Vendor</Button>
-          </Space>
-        }
-      >
-        <Row gutter={16} style={{ marginBottom: 16, flexDirection: 'row', flexWrap: 'wrap' }}>
-          <Col span={6}>
-            <Card size="small" style={{ textAlign: 'center' }}>
-              <Statistic title="Total" value={suppliers.length} />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small" style={{ textAlign: 'center' }}>
-              <Statistic title="Active" value={activeCount} valueStyle={{ color: '#3f8600' }} />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small" style={{ textAlign: 'center' }}>
-              <Statistic title="Inactive" value={inactiveCount} valueStyle={{ color: '#cf1322' }} />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small" style={{ textAlign: 'center' }}>
-              <Statistic title="Filtered" value={filtered.length} />
-            </Card>
-          </Col>
-        </Row>
-        <Row gutter={16} style={{ marginBottom: 16, flexDirection: 'row', flexWrap: 'wrap' }}>
-          <Col span={8}>
-            <Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #722ed1' }}>
-              <Statistic title="Total Payables" value={billStats.totalPayables} precision={2} prefix={cSym} valueStyle={{ color: '#722ed1' }} />
-            </Card>
-          </Col>
-          <Col span={8}>
-            <Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #cf1322' }}>
-              <Statistic title="Overdue Amount" value={billStats.overdueAmount} precision={2} prefix={cSym} valueStyle={{ color: '#cf1322' }} />
-            </Card>
-          </Col>
-          <Col span={8}>
-            <Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #fa8c16' }}>
-              <Statistic title="Unpaid Bills" value={billStats.unpaidBills} prefix={<FileTextOutlined />} valueStyle={{ color: '#fa8c16' }} />
-            </Card>
-          </Col>
-        </Row>
+      {/* Page header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <Title level={3} style={{ margin: 0 }}><ShopOutlined style={{ marginRight: 8 }} />Suppliers / Vendors</Title>
+          <Text type="secondary">Manage your suppliers, vendors, payables and terms</Text>
+        </div>
+        <Button type="primary" size="large" icon={<PlusOutlined />} onClick={openAdd}
+          style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(114,46,209,0.35)', fontWeight: 600 }}>Add Supplier / Vendor</Button>
+      </div>
 
-        <Space style={{ marginBottom: 16 }} wrap>
+      {/* Stat tiles */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={statStyle}><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={iconTile('linear-gradient(135deg,#722ed1,#b37feb)')}><TeamOutlined /></div>
+            <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Total Vendors</Text><Text strong style={{ fontSize: 18 }}>{suppliers.length}</Text></div>
+          </div></Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={statStyle}><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={iconTile('linear-gradient(135deg,#52c41a,#95de64)')}><CheckCircleOutlined /></div>
+            <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Active</Text><Text strong style={{ fontSize: 18, color: '#3f8600' }}>{activeCount}</Text></div>
+          </div></Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={statStyle}><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={iconTile('linear-gradient(135deg,#cf1322,#ff7875)')}><StopOutlined /></div>
+            <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Inactive</Text><Text strong style={{ fontSize: 18, color: '#cf1322' }}>{inactiveCount}</Text></div>
+          </div></Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={statStyle}><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={iconTile('linear-gradient(135deg,#1890ff,#69c0ff)')}><UsergroupAddOutlined /></div>
+            <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Filtered</Text><Text strong style={{ fontSize: 18 }}>{filtered.length}</Text></div>
+          </div></Card>
+        </Col>
+      </Row>
+
+      {/* Payables tiles */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={8}>
+          <Card size="small" style={statStyle}><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={iconTile('linear-gradient(135deg,#722ed1,#b37feb)')}><DollarOutlined /></div>
+            <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Total Payables</Text><Text strong style={{ fontSize: 18, color: '#722ed1' }}>{cSym}{billStats.totalPayables.toFixed(2)}</Text></div>
+          </div></Card>
+        </Col>
+        <Col xs={8}>
+          <Card size="small" style={statStyle}><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={iconTile('linear-gradient(135deg,#cf1322,#ff7875)')}><ClockCircleOutlined /></div>
+            <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Overdue Amount</Text><Text strong style={{ fontSize: 18, color: '#cf1322' }}>{cSym}{billStats.overdueAmount.toFixed(2)}</Text></div>
+          </div></Card>
+        </Col>
+        <Col xs={8}>
+          <Card size="small" style={statStyle}><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={iconTile('linear-gradient(135deg,#fa8c16,#ffc53d)')}><FileTextOutlined /></div>
+            <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Unpaid Bills</Text><Text strong style={{ fontSize: 18, color: '#fa8c16' }}>{billStats.unpaidBills}</Text></div>
+          </div></Card>
+        </Col>
+      </Row>
+
+      {/* Table card */}
+      <Card size="small" style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0' }} bodyStyle={{ padding: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap' }}>
           <Input.Search allowClear placeholder="Search by name, company, email, phone..." prefix={<SearchOutlined />}
-            onSearch={v => setSearch(v)} onChange={e => { if (!e.target.value) setSearch(''); }} style={{ width: 320 }} />
+            onChange={e => setSearch(e.target.value)} onSearch={v => setSearch(v)} style={{ width: 320, marginRight: 'auto' }} />
           <Select value={statusFilter} onChange={v => setStatusFilter(v)} style={{ width: 150 }}>
             <Option value="all">All Statuses</Option>
             <Option value="Active">Active</Option>
             <Option value="Inactive">Inactive</Option>
           </Select>
+          <Button icon={<DownloadOutlined />} onClick={exportCSV}>Export</Button>
           <Button icon={<ReloadOutlined />} onClick={loadSuppliers}>Refresh</Button>
-        </Space>
-
-        <Table columns={columns} dataSource={filtered} loading={loading} rowKey={r => r.id}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} suppliers/vendors` }}
+        </div>
+        <Table columns={columns} dataSource={filtered} loading={loading} rowKey={r => r.id} scroll={{ x: 1000 }}
+          pagination={{ defaultPageSize: 20, defaultCurrent: 1, showSizeChanger: true, showTotal: t => `${t} suppliers/vendors` }}
           size="middle" />
       </Card>
 
       {/* Add/Edit Drawer */}
-      {drawerOpen && <Drawer title={editingSupplier ? 'Edit Supplier / Vendor' : 'Add Supplier / Vendor'} width={640}
+      {drawerOpen && <Drawer title={editingSupplier ? 'Edit Supplier / Vendor' : 'Add Supplier / Vendor'} width={600}
+        className="app-form-drawer"
         visible onClose={() => setDrawerOpen(false)}
         footer={
           <div style={{ textAlign: 'right' }}>
@@ -306,98 +413,240 @@ const SupplierVendorList = () => {
           </div>
         }>
         <Form form={form} layout="vertical">
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}><Form.Item name="title" label="Title"><Select allowClear placeholder="Title"><Option value="Mr">Mr</Option><Option value="Mrs">Mrs</Option><Option value="Ms">Ms</Option><Option value="Dr">Dr</Option></Select></Form.Item></Col>
-            <Col span={8}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="last_name" label="Last Name"><Input /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="display_name" label="Display Name"><Input placeholder="Auto-generated if blank" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="company_name" label="Company"><Input /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="phone_number" label="Phone"><Input onChange={e => form.setFieldsValue({ phone_number: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="mobile_number" label="Mobile"><Input onChange={e => form.setFieldsValue({ mobile_number: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="website" label="Website"><Input /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="address1" label="Address Line 1"><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="address2" label="Address Line 2"><Input /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}><Form.Item name="city" label="City"><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="state" label="State/Province"><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="postal_code" label="Postal Code"><Input /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="country" label="Country"><Select showSearch placeholder="Select country" allowClear optionFilterProp="children">{COUNTRIES.map(c => <Option key={c} value={c}>{c}</Option>)}</Select></Form.Item></Col>
-            <Col span={12}><Form.Item name="supplier_terms" label="Payment Terms"><Select allowClear><Option value="Net 15">Net 15</Option><Option value="Net 30">Net 30</Option><Option value="Net 60">Net 60</Option><Option value="Due on receipt">Due on receipt</Option></Select></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="business_number" label="Business/Tax Number"><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="account_number" label="Account Number"><Input /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="opening_balance" label="Opening Balance"><Input type="number" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="expense_category" label="Default Expense Category"><Input /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}>
-              <Form.Item name="vendor_type" label="Vendor Type" initialValue="Regular">
-                <Select>
-                  <Option value="Regular">Regular</Option>
-                  <Option value="1099">1099 Vendor</Option>
-                  <Option value="Contractor">Contractor</Option>
-                  <Option value="Government">Government</Option>
-                  <Option value="Credit Card">Credit Card</Option>
-                  <Option value="Loan Lender">Loan Lender</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="notes" label="Notes"><TextArea rows={3} /></Form.Item>
+          <FormSection title="Vendor Information" icon={<ShopOutlined />}>
+            <Row gutter={12}>
+              <Col xs={24} md={12} lg={8}>
+                <Form.Item name="title" label="Title" style={FORM_ITEM_STYLE}>
+                  <Select allowClear placeholder="Title"><Option value="Mr">Mr</Option><Option value="Mrs">Mrs</Option><Option value="Ms">Ms</Option><Option value="Dr">Dr</Option></Select>
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12} lg={8}>
+                {/* No `*`: neither field is required alone — the pair is. */}
+                <Form.Item name="first_name" label="First Name" style={FORM_ITEM_STYLE} rules={identityRule(form)}>
+                  <Input />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12} lg={8}>
+                <Form.Item name="last_name" label="Last Name" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="display_name" label="Display Name" style={FORM_ITEM_STYLE}><Input placeholder="Auto-generated if blank" /></Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="company_name" label="Company" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+            </Row>
+            <ContactIdentityNote />
+          </FormSection>
+
+          <FormSection title="Contact Information" icon={<PhoneOutlined />}>
+            <Row gutter={12}>
+              <Col xs={24} sm={12}>
+                <Form.Item name="email" label="Email" style={FORM_ITEM_STYLE}><Input type="email" /></Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="phone_number" label="Phone" style={FORM_ITEM_STYLE}>
+                  <Input onChange={e => form.setFieldsValue({ phone_number: phoneInputHandler(e.target.value) })} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="mobile_number" label="Mobile" style={FORM_ITEM_STYLE}>
+                  <Input onChange={e => form.setFieldsValue({ mobile_number: phoneInputHandler(e.target.value) })} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="website" label="Website" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
+
+          <FormSection title="Address" icon={<EnvironmentOutlined />}>
+            <Row gutter={12}>
+              <Col xs={24} sm={12}>
+                <Form.Item name="address1" label="Address Line 1" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="address2" label="Address Line 2" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Form.Item name="city" label="City" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Form.Item name="state" label="State/Province" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Form.Item name="postal_code" label="Postal Code" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col span={24}>
+                <Form.Item name="country" label="Country" style={FORM_ITEM_STYLE}>
+                  <Select showSearch placeholder="Select country" allowClear optionFilterProp="children">{COUNTRIES.map(c => <Option key={c} value={c}>{c}</Option>)}</Select>
+                </Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
+
+          <FormSection title="Payment Settings" icon={<DollarOutlined />}>
+            <Row gutter={12}>
+              <Col xs={24} sm={12}>
+                <Form.Item name="supplier_terms" label="Payment Terms" style={FORM_ITEM_STYLE}>
+                  <Select allowClear><Option value="Net 15">Net 15</Option><Option value="Net 30">Net 30</Option><Option value="Net 60">Net 60</Option><Option value="Due on receipt">Due on receipt</Option></Select>
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="business_number" label="Business/Tax Number" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="account_number" label="Account Number" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="opening_balance" label="Opening Balance" style={FORM_ITEM_STYLE}><Input type="number" /></Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="expense_category" label="Default Expense Category" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="vendor_type" label="Vendor Type" initialValue="Regular" style={FORM_ITEM_STYLE}>
+                  <Select>
+                    <Option value="Regular">Regular</Option>
+                    <Option value="1099">1099 Vendor</Option>
+                    <Option value="Contractor">Contractor</Option>
+                    <Option value="Government">Government</Option>
+                    <Option value="Credit Card">Credit Card</Option>
+                    <Option value="Loan Lender">Loan Lender</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
+
+          <TaxSettingsSection vatRates={vatRates} form={form} />
+
+          <FormSection title="Notes" icon={<FileTextOutlined />}>
+            <Row gutter={12}>
+              <Col span={24}>
+                <Form.Item name="notes" label="Notes" style={FORM_ITEM_STYLE}><TextArea rows={3} /></Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
         </Form>
       </Drawer>}
 
       {/* Detail Drawer */}
-      <Drawer title="Supplier / Vendor Details" width={560} visible={detailDrawerOpen} onClose={() => setDetailDrawerOpen(false)}>
+      <Drawer title={null} closable width={520} visible={detailDrawerOpen} onClose={() => setDetailDrawerOpen(false)} className="gx-profile-drawer">
         {viewingSupplier && (
           <div>
-            <Row gutter={16} style={{ marginBottom: 16, flexDirection: 'row', flexWrap: 'wrap' }}>
-              <Col span={12}>
-                <Statistic title="Outstanding" value={viewingSupplier?.due_amount?.due_amount || 0} prefix={cSym} precision={2} valueStyle={{ color: '#cf1322' }} />
-              </Col>
-              <Col span={12}>
-                <Statistic title="Status" value={viewingSupplier?.status || 'Active'} valueStyle={{ color: (viewingSupplier?.status || 'Active') === 'Active' ? '#3f8600' : '#cf1322' }} />
-              </Col>
-            </Row>
-            <Tabs defaultActiveKey="1">
-              <TabPane tab="Info" key="1">
-                <p><strong>Name:</strong> {viewingSupplier.display_name || `${viewingSupplier.first_name || ''} ${viewingSupplier.last_name || ''}`.trim()}</p>
-                <p><strong>Company:</strong> {viewingSupplier.company_name || '-'}</p>
-                <p><strong>Email:</strong> {viewingSupplier.email || '-'}</p>
-                <p><strong>Phone:</strong> {formatPhone(viewingSupplier.phone_number) || '-'}</p>
-                <p><strong>Address:</strong> {[viewingSupplier.address1, viewingSupplier.city, viewingSupplier.state, viewingSupplier.postal_code, viewingSupplier.country].filter(Boolean).join(', ') || '-'}</p>
-                <p><strong>Payment Terms:</strong> {viewingSupplier.supplier_terms || '-'}</p>
-                <p><strong>Business #:</strong> {viewingSupplier.business_number || '-'}</p>
-                <p><strong>Vendor Type:</strong> <Tag color={viewingSupplier.vendor_type === '1099' ? 'red' : viewingSupplier.vendor_type === 'Contractor' ? 'blue' : viewingSupplier.vendor_type === 'Credit Card' ? 'purple' : viewingSupplier.vendor_type === 'Loan Lender' ? 'volcano' : 'default'}>{viewingSupplier.vendor_type || 'Regular'}</Tag></p>
-                <p><strong>Notes:</strong> {viewingSupplier.notes || '-'}</p>
-              </TabPane>
-              <TabPane tab="Expenses" key="2">
-                {viewingSupplier.expenses && viewingSupplier.expenses.length > 0 ? (
-                  <Table size="small" dataSource={viewingSupplier.expenses} rowKey="id" pagination={false}
-                    columns={[
-                      { title: 'ID', dataIndex: 'id' },
-                      { title: 'Amount', dataIndex: 'amount', render: v => `${cSym} ${Number(v || 0).toFixed(2)}` },
-                      { title: 'Status', dataIndex: 'approval_status', render: v => <Tag color={v === 'Paid' ? 'green' : 'orange'}>{v}</Tag> },
-                      { title: 'Account', dataIndex: 'payment_account' },
-                    ]} />
-                ) : <p style={{ color: '#999' }}>No expenses recorded</p>}
-              </TabPane>
-            </Tabs>
+            {(() => {
+              const nm = viewingSupplier.display_name || `${viewingSupplier.first_name || ''} ${viewingSupplier.last_name || ''}`.trim() || 'Supplier';
+              const initials = nm.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+              const active = (viewingSupplier.status || 'Active') === 'Active';
+              const addr = [viewingSupplier.address1, viewingSupplier.address2, viewingSupplier.city, viewingSupplier.state, viewingSupplier.postal_code, viewingSupplier.country].filter(Boolean).join(', ') || '—';
+              const pendingAmount = Number(viewingSupplier?.due_amount?.due_amount ?? viewingSupplier?.due_amount ?? 0) || 0;
+              const allBills = Array.isArray(viewingSupplier.bills) ? viewingSupplier.bills : [];
+              const openBills = Array.isArray(viewingSupplier.openBills) ? viewingSupplier.openBills : [];
+              const fromAll = allBills.filter(b => {
+                const st = (b.approval_status || '').toLowerCase();
+                return st !== 'paid' && st !== 'cancelled' && st !== 'void' && st !== 'draft';
+              });
+              const pendingBills = openBills.length ? openBills : fromAll;
+              const vendorColor = viewingSupplier.vendor_type === '1099' ? 'red' : viewingSupplier.vendor_type === 'Contractor' ? 'blue' : viewingSupplier.vendor_type === 'Credit Card' ? 'purple' : viewingSupplier.vendor_type === 'Loan Lender' ? 'volcano' : 'default';
+              return (
+                <div>
+                  {/* Header */}
+                  <div style={{ textAlign: 'center', padding: '24px 16px 20px' }}>
+                    <Avatar size={72} style={{ background: 'linear-gradient(135deg,#722ed1,#b37feb)', fontSize: 26, fontWeight: 700, marginBottom: 12 }}>{initials || 'S'}</Avatar>
+                    <div style={{ fontSize: 20, fontWeight: 700 }}>{nm}</div>
+                    {viewingSupplier.company_name && <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 8 }}>{viewingSupplier.company_name}</div>}
+                    <div>
+                      <Tag color={active ? 'green' : 'red'} style={{ borderRadius: 20, paddingInline: 12 }}>{viewingSupplier.status || 'Active'}</Tag>
+                      <Tag color={vendorColor} style={{ borderRadius: 20, paddingInline: 12 }}>{viewingSupplier.vendor_type || 'Regular'}</Tag>
+                    </div>
+                  </div>
+
+                  {/* Stat tiles */}
+                  <Row gutter={12} style={{ marginBottom: 20 }}>
+                    <Col span={8}>
+                      <div style={{ backgroundColor: '#fff7e6', border: '1px solid #ffd591', borderRadius: 10, padding: '12px 8px', textAlign: 'center' }}>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Amount Pending</Text>
+                        <Text strong style={{ fontSize: 16, color: '#d46b08' }}>{cSym}{pendingAmount.toFixed(2)}</Text>
+                      </div>
+                    </Col>
+                    <Col span={8}>
+                      <div style={{ borderRadius: 10, border: '1px solid #f0f0f0', padding: '12px 8px', textAlign: 'center' }}>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Open Bills</Text>
+                        <Text strong style={{ fontSize: 16 }}>{pendingBills.length}</Text>
+                      </div>
+                    </Col>
+                    <Col span={8}>
+                      <div style={{ borderRadius: 10, border: '1px solid #f0f0f0', padding: '12px 8px', textAlign: 'center' }}>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Bills</Text>
+                        <Text strong style={{ fontSize: 16 }}>{allBills.length}</Text>
+                      </div>
+                    </Col>
+                  </Row>
+
+                  <Tabs activeKey={detailTab} onChange={setDetailTab} type="card" tabBarStyle={{ marginBottom: 12 }}>
+                    <TabPane tab={<span><TagsOutlined /> Info</span>} key="1">
+                      <Descriptions column={1} size="small" labelStyle={{ width: 110, color: 'rgba(0,0,0,0.45)' }} contentStyle={{ paddingBottom: 8 }}>
+                        <Descriptions.Item label="Display Name">{nm}</Descriptions.Item>
+                        <Descriptions.Item label="Company">{viewingSupplier.company_name || '—'}</Descriptions.Item>
+                        {viewingSupplier.first_name && <Descriptions.Item label="First Name">{viewingSupplier.first_name}</Descriptions.Item>}
+                        {viewingSupplier.last_name && <Descriptions.Item label="Last Name">{viewingSupplier.last_name}</Descriptions.Item>}
+                        <Descriptions.Item label="Date Entered">{viewingSupplier.date_entered ? moment(viewingSupplier.date_entered).format('MM/DD/YYYY') : '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Email">{viewingSupplier.email ? <a href={`mailto:${viewingSupplier.email}`}>{viewingSupplier.email}</a> : '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Phone">{formatPhone(viewingSupplier.phone_number) || '—'}</Descriptions.Item>
+                        {viewingSupplier.mobile_number && <Descriptions.Item label="Mobile">{formatPhone(viewingSupplier.mobile_number)}</Descriptions.Item>}
+                        {viewingSupplier.website && <Descriptions.Item label="Website">{viewingSupplier.website}</Descriptions.Item>}
+                        <Descriptions.Item label="Address">{addr}</Descriptions.Item>
+                        <Descriptions.Item label="Terms">{viewingSupplier.supplier_terms || '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Tax Status">{viewingSupplier.taxable != null ? (Number(viewingSupplier.taxable) ? 'Taxable' : 'Non-Taxable') : 'Taxable'}</Descriptions.Item>
+                        <Descriptions.Item label="Default Tax Rate">{describeTaxRate(viewingSupplier, vatRates)}</Descriptions.Item>
+                        {viewingSupplier.business_number && <Descriptions.Item label="Business #">{viewingSupplier.business_number}</Descriptions.Item>}
+                        {viewingSupplier.account_number && <Descriptions.Item label="Account #">{viewingSupplier.account_number}</Descriptions.Item>}
+                        {viewingSupplier.expense_category && <Descriptions.Item label="Expense Cat."><Tag>{viewingSupplier.expense_category}</Tag></Descriptions.Item>}
+                        {viewingSupplier.opening_balance ? (
+                          <Descriptions.Item label="Opening Balance">
+                            {cSym}{Number(viewingSupplier.opening_balance).toFixed(2)}
+                            {viewingSupplier.as_of ? <span style={{ color: 'rgba(0,0,0,0.45)' }}> as of {moment(viewingSupplier.as_of).format('MM/DD/YYYY')}</span> : null}
+                          </Descriptions.Item>
+                        ) : null}
+                      </Descriptions>
+                      {(viewingSupplier.notes && viewingSupplier.notes !== 'null') && (
+                        <>
+                          <Divider style={{ margin: '12px 0' }} />
+                          <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 6 }}>Notes</div>
+                          <div>{viewingSupplier.notes}</div>
+                        </>
+                      )}
+                    </TabPane>
+                    <TabPane tab={<span><FileTextOutlined /> Bills</span>} key="2">
+                      {allBills.length > 0 ? (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <Text type="secondary">{pendingBills.length} open / {allBills.length} total bills</Text>
+                            <Space size={6}>
+                              <Button size="small" icon={<FileAddOutlined />} onClick={() => history.push(`/main/vendors/bills/enter?vendor=${viewingSupplier.id}`)}>Enter Bill</Button>
+                              <Button size="small" icon={<SearchOutlined />} onClick={() => history.push('/main/vendors/bills/tracker')}>Get Bills</Button>
+                            </Space>
+                          </div>
+                          <Table size="small" dataSource={allBills} rowKey={(r) => r.id} pagination={false} scroll={{ x: 520 }}
+                            columns={[
+                              { title: '#', dataIndex: 'id', width: 50 },
+                              { title: 'Ref #', dataIndex: 'ref_no', width: 100, ellipsis: true, render: v => v || '—' },
+                              { title: 'Date', dataIndex: 'payment_date', width: 95, render: v => v ? moment(v).format('MM/DD/YYYY') : '—' },
+                              { title: 'Due', dataIndex: 'due_date', width: 95, render: (v, r) => { const d = v || r.payment_date; return d ? moment(d).format('MM/DD/YYYY') : '—'; } },
+                              { title: 'Amount', dataIndex: 'amount', width: 90, align: 'right', render: v => `${cSym} ${Number(v || 0).toFixed(2)}` },
+                              { title: 'Pending', key: 'pending', width: 90, align: 'right',
+                                render: (_, r) => { const p = (Number(r.amount) || 0) - (Number(r.paid_amount) || 0); return p > 0 ? <Text strong style={{ color: '#fa541c' }}>{cSym} {p.toFixed(2)}</Text> : <Text type="secondary">—</Text>; } },
+                              { title: 'Status', dataIndex: 'approval_status', width: 90,
+                                render: v => { const s = (v || '').toLowerCase(); return <Tag color={s === 'paid' ? 'green' : s === 'overdue' ? 'red' : s === 'pending' ? 'orange' : 'default'}>{v}</Tag>; } },
+                            ]} />
+                        </>
+                      ) : <Empty description="No bills for this supplier" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                    </TabPane>
+                  </Tabs>
+                </div>
+              );
+            })()}
           </div>
         )}
       </Drawer>

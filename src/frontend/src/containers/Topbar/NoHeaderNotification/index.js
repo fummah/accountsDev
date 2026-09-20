@@ -16,12 +16,6 @@ const NoHeaderNotification = () => {
            }}
         />
       </div>
-      <div className="gx-no-header-horizontal-top">
-        <div className="gx-no-header-horizontal-top-center">
-          <i className="icon icon-alert gx-mr-3"/>
-          <p className="gx-mb-0 gx-text-truncate"><IntlMessages id="app.announced"/></p>
-        </div>
-      </div>
     </div>
   )
 };

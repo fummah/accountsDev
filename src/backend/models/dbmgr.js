@@ -8,6 +8,29 @@ const { app } = require('electron');
 // In production, place it under userData so it's writable (ASAR is read-only).
 function resolveDbPath() {
     const devPath = path.join(__dirname, '../db/accounts.db');
+
+    // Explicit override (tooling / verification runs against another company
+    // file). Never set in normal app runs, so production behaviour is unchanged.
+    //
+    // SAFETY: the override must point at a file that is NOT the live database.
+    // A verification run that silently falls back to the real company file is
+    // exactly the failure this guard exists to prevent — losing real bookkeeping
+    // data to a test is unacceptable, so a bad override throws instead.
+    const override = process.env.ACCULEDGER_DB_PATH;
+    if (override && String(override).trim()) {
+        const resolved = path.resolve(String(override).trim());
+        const live = path.resolve(devPath);
+        if (resolved === live) {
+            throw new Error(
+                `ACCULEDGER_DB_PATH must not point at the live database (${live}). ` +
+                'Verification runs must use a copy.'
+            );
+        }
+        const dir = path.dirname(resolved);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        return resolved;
+    }
+
     try {
         const isPackaged = app && app.isPackaged;
         if (!isPackaged) {

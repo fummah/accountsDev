@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Card, Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Space } from 'antd';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
 const ManageAssets = () => {
+  const { symbol: cSym } = useCurrency();
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [form] = Form.useForm();
 
@@ -127,7 +129,7 @@ const ManageAssets = () => {
         dataSource={data}
         pagination={{
           total: data.length,
-          pageSize: 10,
+          defaultPageSize: 10,
           showSizeChanger: true,
           showTotal: total => `Total ${total} items`
         }}
@@ -177,8 +179,8 @@ const ManageAssets = () => {
           >
             <InputNumber
               style={{ width: '100%' }}
-              formatter={value => `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-              parser={value => value.replace(/\$\s?|(,*)/g, '')}
+              formatter={value => `${cSym} ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+              parser={value => value.replace(/[^\d.,-]/g, '')}
             />
           </Form.Item>
 

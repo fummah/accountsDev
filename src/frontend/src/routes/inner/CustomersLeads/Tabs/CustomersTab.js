@@ -8,6 +8,7 @@ import CustomersList from "components/Inner/Customers/CustomersList";
 import AddCustomer from 'components/Inner/Customers/AddCustomer';
 import CustomerDetails from 'components/Inner/Customers/CustomerDetails';
 import Toast from "components/AppNotification/toast.js";
+import { deriveDisplayName } from "utils/contactIdentity";
 import dayjs from 'dayjs';
 import {CategoryContext} from "appContext/TypeContext.js";
 
@@ -56,7 +57,9 @@ const CustomersTab = () => {
       const last_name = userData.last_name;
       const suffix = userData.suffix;
       const email = userData.email;
-      const display_name = userData.display_name;
+      // Shared rule: explicit -> personal name -> company (was an inline
+      // equivalent expression; routed through the one definition).
+      const display_name = deriveDisplayName(userData);
       const company_name = userData.company_name;
       const phone_number = userData.phone_number;
       const mobile_number = userData.mobile_number;
@@ -78,18 +81,21 @@ const CustomersTab = () => {
       const as_of = userData.as_of ? dayjs(userData.as_of).format('YYYY-MM-DD') : null;
       const delivery_option = userData.delivery_option;
       const language = userData.language;
+      const taxable = userData.taxable != null ? userData.taxable : true;
+      const default_tax_rate = userData.default_tax_rate != null ? userData.default_tax_rate : null;
+      const default_tax_rate_id = userData.default_tax_rate_id != null ? userData.default_tax_rate_id : null;
 
       let result;
         
       if (userData.id) {
         const id = userData.id;
         const customerData = {id,title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-          fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language, notes};
+          fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes,taxable,default_tax_rate,default_tax_rate_id};
         result = await window.electronAPI.updateCustomer(customerData);   
       }
       else{
         result = await window.electronAPI.insertCustomer(title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-          fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes);   
+          fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes,taxable,default_tax_rate,default_tax_rate_id);   
            } 
            
         
@@ -103,7 +109,9 @@ const CustomersTab = () => {
           handleUserClose();
       }
       } else {
-        setMessage('Failed to save customer. Please try again.');
+        // Prefer the backend's reason (e.g. the identity rule) over a generic
+        // failure — the API and the form share one message.
+        setMessage(result.error || 'Failed to save customer. Please try again.');
         setShowError(true);
       }
     } catch (error) {

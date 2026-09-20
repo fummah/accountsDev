@@ -134,7 +134,7 @@ const EntitiesManager = () => {
               columns={columns}
               dataSource={(entities || []).map(e => ({ ...e, key: e.id }))}
               loading={loading}
-              pagination={{ pageSize: 10 }}
+              pagination={{ defaultPageSize: 10 }}
             />
           </Card>
         </Col>

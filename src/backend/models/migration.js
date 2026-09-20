@@ -85,13 +85,10 @@ function runMigrations() {
       if (m.version > currentVersion) {
         console.log(`[migration]   Running v${m.version}: ${m.description}`);
         m.up(db);
-        upsertMeta(m.version, null);
       }
     }
 
-    const now = new Date().toISOString();
-    db.run(`INSERT INTO app_metadata (id, schema_version, initialized, installed_at, last_updated) VALUES (1, ?, 1, ?, ?)`,
-      [latestVersion, now, now]);
+    upsertMeta(latestVersion, true);
 
     _lastResult = { isFirstInstall, isUpdate: false, previousVersion: 0, currentVersion: latestVersion };
     console.log(`[migration] Initialized at v${latestVersion} (${isFirstInstall ? 'fresh install' : 'existing DB upgrade'})`);
@@ -104,12 +101,9 @@ function runMigrations() {
       if (m.version > currentVersion) {
         console.log(`[migration]   Running v${m.version}: ${m.description}`);
         m.up(db);
-        upsertMeta(m.version, null);
       }
     }
-    const now = new Date().toISOString();
-    db.run(`UPDATE app_metadata SET schema_version = ?, initialized = 1, last_updated = ? WHERE id = 1`,
-      [latestVersion, now]);
+    upsertMeta(latestVersion, true);
     _lastResult = { isFirstInstall: false, isUpdate: false, previousVersion: currentVersion, currentVersion: latestVersion };
     return _lastResult;
   }
@@ -125,9 +119,7 @@ function runMigrations() {
       }
     }
 
-    const now = new Date().toISOString();
-    db.run(`UPDATE app_metadata SET schema_version = ?, last_updated = ? WHERE id = 1`,
-      [latestVersion, now]);
+    upsertMeta(latestVersion, null);
 
     _lastResult = { isFirstInstall: false, isUpdate: true, previousVersion: currentVersion, currentVersion: latestVersion };
     console.log(`[migration] Update complete: v${previousVersion} -> v${latestVersion}`);

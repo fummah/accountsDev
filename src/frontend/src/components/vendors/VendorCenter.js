@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Modal, Form, Input, Divider } from 'antd';
-import { ArrowLeftOutlined, ShopOutlined, DollarOutlined, FileTextOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Statistic, Table, Button, Space, Tabs, message, Modal, Form, Input } from 'antd';
+import { ArrowLeftOutlined, ShopOutlined, DollarOutlined, FileTextOutlined, ClockCircleOutlined, ImportOutlined, PhoneOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
-import { formatPhone, phoneInputHandler } from '../../utils/phone';
+import { formatPhone } from '../../utils/phone';
+import CsvImportModal from '../common/CsvImportModal';
+import FormSection, { FORM_ITEM_STYLE, MODAL_BODY_SCROLL_STYLE, MODAL_WIDTH } from '../shared/FormSection';
+import ContactIdentityNote from '../shared/ContactIdentityNote';
+import TaxSettingsSection from '../shared/TaxSettingsSection';
+import { deriveDisplayName, identityRule } from '../../utils/contactIdentity';
+import { resolveTaxRateFields } from '../../utils/taxRate';
 
 const { TabPane } = Tabs;
 
@@ -28,7 +34,13 @@ const VendorCenter = () => {
   const [activeKey, setActiveKey] = useState('vendors');
 
   const [showAddVendor, setShowAddVendor] = React.useState(false);
+  const [importVisible, setImportVisible] = React.useState(false);
   const [vendorForm] = Form.useForm();
+  const [vatRates, setVatRates] = useState([]);
+
+  useEffect(() => {
+    window.electronAPI.getAllVat?.().then(v => setVatRates(Array.isArray(v) ? v : [])).catch(() => {});
+  }, []);
 
   const onCreateVendor = async (values) => {
     try {
@@ -38,19 +50,23 @@ const VendorCenter = () => {
       const last_name = '';
       const suffix = '';
       const email = values.email || '';
-      const display_name = values.display_name || values.first_name || '';
-      const company_name = '';
+      // Shared rule: explicit -> personal name -> company. The old expression
+      // was `values.display_name || values.first_name`, which ignored BOTH the
+      // last name and the company name, so a company-only vendor was stored
+      // with a blank display name and rendered as an empty row.
+      const display_name = deriveDisplayName(values);
+      const company_name = values.company_name || '';
       const phone_number = values.phone_number || '';
       const mobile_number = values.mobile_number || '';
       const fax = '';
       const other = '';
       const website = '';
       const address1 = values.address1 || '';
-      const address2 = '';
+      const address2 = values.address2 || '';
       const city = values.city || '';
       const state = values.state || '';
       const postal_code = values.zip || '';
-      const country = '';
+      const country = values.country || '';
       const supplier_terms = '';
       const business_number = '';
       const account_number = '';
@@ -59,15 +75,23 @@ const VendorCenter = () => {
       const as_of = null;
       const entered_by = 'system';
       const notes = '';
+      const vendor_type = 'Regular'; // VendorCenter has no vendor_type field; default
+      const tax = resolveTaxRateFields(values, vatRates);
 
-      const res = await window.electronAPI.insertSupplier(title, first_name, middle_name, last_name, suffix, email, display_name, company_name, phone_number, mobile_number, fax, other, website, address1, address2, city, state, postal_code, country, supplier_terms, business_number, account_number, expense_category, opening_balance, as_of, entered_by, notes);
+      const res = await window.electronAPI.insertSupplier(title, first_name, middle_name, last_name, suffix, email, display_name, company_name, phone_number, mobile_number, fax, other, website, address1, address2, city, state, postal_code, country, supplier_terms, business_number, account_number, expense_category, opening_balance, as_of, entered_by, notes, vendor_type,
+        values.taxable != null ? values.taxable : true,
+        tax.default_tax_rate,
+        tax.default_tax_rate_id
+      );
       if (res && res.success) {
         message.success('Vendor added');
         setShowAddVendor(false);
         vendorForm.resetFields();
         await loadData();
       } else {
-        message.error('Failed to add vendor');
+        // Show the backend's reason when it gives one (e.g. the identity rule)
+        // instead of a generic failure — the API and the form agree on the text.
+        message.error((res && res.error) || 'Failed to add vendor');
       }
     } catch (err) {
       console.error('Error adding vendor', err);
@@ -248,6 +272,9 @@ const VendorCenter = () => {
               <Button type="primary" onClick={() => setShowAddVendor(true)}>
                 Add Vendor
               </Button>
+              <Button icon={<ImportOutlined />} style={{ marginLeft: 8 }} onClick={() => setImportVisible(true)}>
+                Import CSV
+              </Button>
             </div>
             <Table
               columns={vendorColumns}
@@ -258,80 +285,122 @@ const VendorCenter = () => {
             <div style={{ marginTop: 16 }}>
               <Button icon={<ArrowLeftOutlined />} onClick={() => window.history.back()}>Back</Button>
             </div>
+              <CsvImportModal
+                visible={importVisible}
+                onClose={() => setImportVisible(false)}
+                title="Import Vendors / Suppliers"
+                description="Paste a QuickBooks supplier CSV export. Recognizes 'Vendor', 'Company', 'Balance Total', 'Bill from 1..5', 'Main Phone', 'Alt. Phone', 'Fax' and 'First/M.I./Last Name' columns."
+                importFn={(csv, opts) => window.electronAPI.importSuppliersCsv(csv, opts)}
+                onImported={loadData}
+              />
               <Modal
                 title="Add Vendor"
                 visible={showAddVendor}
                 onCancel={() => { setShowAddVendor(false); vendorForm.resetFields(); }}
                 onOk={() => vendorForm.submit()}
-                okText="Create"
+                okText="Create Vendor"
+                width={MODAL_WIDTH}
+                bodyStyle={MODAL_BODY_SCROLL_STYLE}
+                destroyOnClose
               >
                 <Form form={vendorForm} layout="vertical" onFinish={onCreateVendor}>
-                  <Row gutter={16}>
-                    <Col span={16}>
-                      <Form.Item name="first_name" label="Vendor Name" rules={[{ required: true, message: 'Please enter vendor name' }]}>
-                        <Input />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item name="display_name" label="Display Name">
-                        <Input />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                  <Row gutter={16}>
-                    <Col span={12}>
-                      <Form.Item name="email" label="Email">
-                        <Input placeholder="vendor@example.com" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="phone_number" label="Phone">
-                        <Input
-                          placeholder="(XXX) XXX-XXXX"
-                          maxLength={14}
-                          onChange={e => {
-                            const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
-                            let formatted = digits;
-                            if (digits.length > 6) formatted = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
-                            else if (digits.length > 3) formatted = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
-                            else if (digits.length > 0) formatted = `(${digits}`;
-                            vendorForm.setFieldsValue({ phone_number: formatted });
-                          }}
-                        />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                  <Form.Item name="address1" label="Street Address">
-                    <Input placeholder="123 Main St" />
-                  </Form.Item>
-                  <Form.Item name="address2" label="Address Line 2">
-                    <Input placeholder="Suite 100" />
-                  </Form.Item>
-                  <Row gutter={16}>
-                    <Col span={8}>
-                      <Form.Item name="city" label="City">
-                        <Input placeholder="City" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={6}>
-                      <Form.Item name="state" label="State">
-                        <Input placeholder="State" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={6}>
-                      <Form.Item name="zip" label="ZIP Code">
-                        <Input placeholder="00000" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={4}>
-                      <Form.Item name="country" label="Country">
-                        <Input placeholder="US" />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                  <Form.Item name="opening_balance" label="Opening Balance">
-                    <Input />
-                  </Form.Item>
+                  <FormSection title="Vendor Information" icon={<ShopOutlined />}>
+                    <Row gutter={12}>
+                      <Col xs={24} md={12} lg={8}>
+                        {/* Label is "First Name", not "Vendor Name": the field is
+                            the personal-name half of the pair, and calling it
+                            "Vendor Name" implied the whole identity belonged here.
+                            No `*` on either field — the requirement is the pair. */}
+                        <Form.Item name="first_name" label="First Name" style={FORM_ITEM_STYLE} rules={identityRule(vendorForm)}>
+                          <Input />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12} lg={8}>
+                        <Form.Item name="display_name" label="Display Name" style={FORM_ITEM_STYLE}>
+                          <Input placeholder="Auto-generated if blank" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12} lg={8}>
+                        <Form.Item name="company_name" label="Company Name" style={FORM_ITEM_STYLE}>
+                          <Input />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <ContactIdentityNote />
+                  </FormSection>
+
+                  <FormSection title="Contact Information" icon={<PhoneOutlined />}>
+                    <Row gutter={12}>
+                      <Col xs={24} sm={12}>
+                        <Form.Item name="email" label="Email" style={FORM_ITEM_STYLE}>
+                          <Input placeholder="vendor@example.com" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} sm={12}>
+                        <Form.Item name="phone_number" label="Phone" style={FORM_ITEM_STYLE}>
+                          <Input
+                            placeholder="(XXX) XXX-XXXX"
+                            maxLength={14}
+                            onChange={e => {
+                              const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                              let formatted = digits;
+                              if (digits.length > 6) formatted = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+                              else if (digits.length > 3) formatted = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
+                              else if (digits.length > 0) formatted = `(${digits}`;
+                              vendorForm.setFieldsValue({ phone_number: formatted });
+                            }}
+                          />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  </FormSection>
+
+                  <FormSection title="Address" icon={<EnvironmentOutlined />}>
+                    <Row gutter={12}>
+                      <Col xs={24} sm={12}>
+                        <Form.Item name="address1" label="Street Address" style={FORM_ITEM_STYLE}>
+                          <Input placeholder="123 Main St" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} sm={12}>
+                        <Form.Item name="address2" label="Address Line 2" style={FORM_ITEM_STYLE}>
+                          <Input placeholder="Suite 100" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} sm={8}>
+                        <Form.Item name="city" label="City" style={FORM_ITEM_STYLE}>
+                          <Input placeholder="City" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} sm={8}>
+                        <Form.Item name="state" label="State" style={FORM_ITEM_STYLE}>
+                          <Input placeholder="State" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} sm={8}>
+                        <Form.Item name="zip" label="ZIP Code" style={FORM_ITEM_STYLE}>
+                          <Input placeholder="00000" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={24}>
+                        <Form.Item name="country" label="Country" style={FORM_ITEM_STYLE}>
+                          <Input placeholder="US" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  </FormSection>
+
+                  <FormSection title="Payment Settings" icon={<DollarOutlined />}>
+                    <Row gutter={12}>
+                      <Col xs={24} sm={12}>
+                        <Form.Item name="opening_balance" label="Opening Balance" style={FORM_ITEM_STYLE}>
+                          <Input />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  </FormSection>
+
+                  <TaxSettingsSection vatRates={vatRates} form={vendorForm} />
                 </Form>
               </Modal>
           </TabPane>

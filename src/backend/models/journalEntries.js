@@ -1,4 +1,5 @@
 const db = require('./dbmgr');
+const Settings = require('./settings');
 
 const JournalEntries = {
   createTable: () => {
@@ -72,14 +73,22 @@ const JournalEntries = {
     try { db.prepare('CREATE INDEX IF NOT EXISTS idx_jl_journal_id ON journal_lines(journal_id)').run(); } catch {}
   },
 
-  // ── Post a balanced journal entry ────────────────────────────────────────
+  // ── Post a balanced journal entry (the single posting engine) ────────
   post: (entry) => {
     const lines = entry.lines || [];
     if (!lines.length) throw new Error('Journal entry must have at least one line.');
+    // Enforce closing date (no postings on or before closingDate)
+    const closingDate = Settings.get('closingDate');
+    if (closingDate && entry.date && typeof entry.date === 'string' && entry.date <= closingDate) {
+      throw new Error(`Posting date ${entry.date} is on or before closing date ${closingDate}`);
+    }
     const totalDebit  = lines.reduce((s, l) => s + Number(l.debit  || 0), 0);
     const totalCredit = lines.reduce((s, l) => s + Number(l.credit || 0), 0);
     if (Math.abs(totalDebit - totalCredit) > 0.005) {
       throw new Error(`Entry out of balance: debit ${totalDebit.toFixed(2)} ≠ credit ${totalCredit.toFixed(2)}`);
+    }
+    if (lines.some(l => Number(l.debit || 0) < 0 || Number(l.credit || 0) < 0)) {
+      throw new Error('Journal lines must not contain negative amounts');
     }
     // Safety: ensure required columns exist (in case migration was skipped)
     try {
@@ -91,33 +100,81 @@ const JournalEntries = {
       if (!cols.has('source_id')) db.prepare("ALTER TABLE journal_entries ADD COLUMN source_id INTEGER").run();
       if (!cols.has('memo')) db.prepare("ALTER TABLE journal_entries ADD COLUMN memo TEXT").run();
       if (!cols.has('status')) db.prepare("ALTER TABLE journal_entries ADD COLUMN status TEXT DEFAULT 'Posted'").run();
+      if (!cols.has('entered_by')) db.prepare("ALTER TABLE journal_entries ADD COLUMN entered_by TEXT").run();
+      if (!cols.has('entity_id')) db.prepare("ALTER TABLE journal_entries ADD COLUMN entity_id INTEGER").run();
+      if (!cols.has('class')) db.prepare("ALTER TABLE journal_entries ADD COLUMN class TEXT").run();
+      if (!cols.has('location')) db.prepare("ALTER TABLE journal_entries ADD COLUMN location TEXT").run();
+      if (!cols.has('department')) db.prepare("ALTER TABLE journal_entries ADD COLUMN department TEXT").run();
     } catch (migErr) { console.error('[journalEntries.post] column check:', migErr.message); }
 
     const postEntry = db.transaction(() => {
       const je = db.prepare(`
-        INSERT INTO journal_entries (date, reference, description, source_type, source_id, memo, status, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'Posted', ?, datetime('now'))
+        INSERT INTO journal_entries (date, reference, description, source_type, source_id, memo, status, created_by, entered_by, entity_id, class, location, department, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'Posted', ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
         entry.date, entry.reference || null, entry.description || null,
         entry.source_type || null, entry.source_id || null,
-        entry.memo || null, entry.created_by || null
+        entry.memo || null, entry.created_by || entry.entered_by || null,
+        entry.entered_by || entry.created_by || null,
+        entry.entity_id || null, entry.class || null, entry.location || null, entry.department || null
       );
       const jid = je.lastInsertRowid;
       for (const line of lines) {
+        // Single engine accepts account by id OR by name/number
+        let accountId = line.account_id || line.accountId || null;
+        let accountName = line.account || line.accountName || null;
+        if (!accountId && accountName) {
+          const row = db.prepare("SELECT id, name FROM chart_of_accounts WHERE name = ? OR number = ? OR (number || ' - ' || name) = ? LIMIT 1")
+            .get(accountName, accountName, accountName);
+          if (row) { accountId = row.id; accountName = row.name; }
+        }
         db.prepare(`
-          INSERT INTO journal_lines (journal_id, entry_id, account_id, debit, credit, description, class, location, department)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(jid, jid, line.account_id, Number(line.debit || 0), Number(line.credit || 0),
+          INSERT INTO journal_lines (journal_id, entry_id, account_id, account, debit, credit, description, class, location, department)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(jid, jid, accountId || null, accountName || null,
+               Number(line.debit || 0), Number(line.credit || 0),
                line.description || null, line.class || null, line.location || null, line.department || null);
       }
       return { success: true, id: Number(jid) };
     });
-    return postEntry();
+    const result = postEntry();
+    // Audit every posted GL entry (incl. auto-posted from invoices, bills,
+    // payments, deposits, transfers, credit notes, recurring runs).
+    if (result && result.success) {
+      try {
+        const AuditLog = require('./auditLog');
+        AuditLog.log({
+          userId: entry.entered_by || entry.created_by || 'system',
+          action: 'journalPosted',
+          entityType: 'journal',
+          entityId: String(result.id),
+          details: {
+            date: entry.date, reference: entry.reference || null,
+            source_type: entry.source_type || null, source_id: entry.source_id != null ? entry.source_id : null,
+            debit: totalDebit, credit: totalCredit,
+            lines: lines.length,
+          },
+        });
+      } catch (auditErr) { console.error('[journalEntries.post] audit log failed:', auditErr.message); }
+    }
+    return result;
   },
 
   // ── Void a journal entry ─────────────────────────────────────────────────
   voidEntry: (id) => {
     const res = db.prepare("UPDATE journal_entries SET status = 'Void', created_at = datetime('now') WHERE id = ?").run(id);
+    if (res.changes > 0) {
+      try {
+        const AuditLog = require('./auditLog');
+        AuditLog.log({
+          userId: 'system',
+          action: 'journalVoided',
+          entityType: 'journal',
+          entityId: String(id),
+          details: { reason: 'voided by source operation' },
+        });
+      } catch (auditErr) { console.error('[journalEntries.voidEntry] audit log failed:', auditErr.message); }
+    }
     return { success: res.changes > 0 };
   },
 
@@ -142,7 +199,331 @@ const JournalEntries = {
         ORDER BY jl.id
       `).all(e.id);
     }
+    // Attach drill-down source info (number / party / date)
+    return JournalEntries.attachSourceInfo(entries);
+  },
+
+  // ── Resolve source details (number, party, date) for drill-down ──────────
+  attachSourceInfo: (entries) => {
+    if (!Array.isArray(entries)) return entries;
+    const groups = {};
+    for (const e of entries) {
+      if (!e.source_type || !e.source_id) continue;
+      (groups[e.source_type] || (groups[e.source_type] = [])).push(e.source_id);
+    }
+    const ph = (ids) => ids.map(() => '?').join(',');
+    const partyName = (r) => {
+      if (!r) return '';
+      return r.display_name || [r.first_name, r.last_name].filter(Boolean).join(' ') || r.company_name || '';
+    };
+    const apply = (rows, type, pick) => {
+      const map = new Map(rows.map(r => [r.id, r]));
+      for (const e of entries) if (e.source_type === type) { const r = map.get(e.source_id); if (r) e.source = pick(r); }
+    };
+    try {
+      if (groups.invoice) apply(db.prepare(`SELECT i.id, i.number, i.start_date, c.id AS customer_id, c.display_name, c.first_name, c.last_name, c.company_name FROM invoices i LEFT JOIN customers c ON c.id = i.customer WHERE i.id IN (${ph(groups.invoice)})`).all(...groups.invoice), 'invoice', r => ({ number: r.number || '', party: partyName(r), partyType: 'customer', partyId: r.customer_id || null, date: r.start_date || '' }));
+    } catch (e) { console.error('[journalEntries] invoice source lookup failed:', e.message); }
+    try {
+      if (groups.expense || groups.bill_payment) {
+        const ids = (groups.expense || []).concat(groups.bill_payment || []);
+        const map = new Map(db.prepare(`SELECT e.id, e.ref_no, e.payment_date, s.id AS supplier_id, s.display_name, s.first_name, s.last_name, s.company_name FROM expenses e LEFT JOIN suppliers s ON s.id = e.payee WHERE e.id IN (${ph(ids)})`).all(...ids).map(r => [r.id, r]));
+        for (const e of entries) if (e.source_type === 'expense' || e.source_type === 'bill_payment') { const r = map.get(e.source_id); if (r) e.source = { number: r.ref_no || '', party: partyName(r), partyType: 'supplier', partyId: r.supplier_id || null, date: r.payment_date || '' }; }
+      }
+    } catch (e) { console.error('[journalEntries] bill source lookup failed:', e.message); }
+    try {
+      if (groups.payment) apply(db.prepare(`SELECT p.id, p.reference, p.date, c.id AS customer_id, c.display_name, c.first_name, c.last_name, c.company_name FROM payments p LEFT JOIN invoices i ON i.id = p.invoiceId LEFT JOIN customers c ON c.id = i.customer WHERE p.id IN (${ph(groups.payment)})`).all(...groups.payment), 'payment', r => ({ number: r.reference || ('PMT-' + r.id), party: partyName(r), partyType: 'customer', partyId: r.customer_id || null, date: (r.date || '').slice(0, 10) }));
+    } catch (e) { console.error('[journalEntries] payment source lookup failed:', e.message); }
+    try {
+      if (groups.deposit) apply(db.prepare(`SELECT d.id, d.reference, d.date, c.name AS bank_name FROM deposits d LEFT JOIN chart_of_accounts c ON c.id = d.bank_account_id WHERE d.id IN (${ph(groups.deposit)})`).all(...groups.deposit), 'deposit', r => ({ number: r.reference || ('DEP-' + r.id), party: r.bank_name || '', date: r.date || '' }));
+    } catch (e) { console.error('[journalEntries] deposit source lookup failed:', e.message); }
+    try {
+      if (groups.transaction) {
+        const rows = db.prepare(`SELECT t.id, t.reference, t.date, t.payee_name FROM transactions t WHERE t.id IN (${ph(groups.transaction)})`).all(...groups.transaction);
+        const map = new Map(rows.map(r => [r.id, r]));
+        const billRefs = [];
+        for (const e of entries) {
+          if (e.source_type !== 'transaction') continue;
+          const r = map.get(e.source_id);
+          if (!r) continue;
+          const desc = e.description || '';
+          const checkM = desc.match(/^Check\s*#(\S+)\s+to\s+(.+)$/i);
+          if (checkM) {
+            e.source = { kind: 'check', id: e.source_id, number: checkM[1], party: checkM[2].trim(), date: (r.date || '').slice(0, 10) };
+            continue;
+          }
+          const payM = desc.match(/^Payment for bill\s+(\S+)\s*[-]\s*(.*)$/i);
+          if (payM) { billRefs.push({ e, ref: payM[1].replace(/[^0-9A-Za-z-]/g, ''), party: payM[2].trim() }); continue; }
+          e.source = { kind: 'transaction', id: e.source_id, number: r.reference || ('TX-' + r.id), party: r.payee_name || '', date: (r.date || '').slice(0, 10) };
+        }
+        const refs = [...new Set(billRefs.map(b => b.ref))];
+        const billMap = new Map();
+        for (const ref of refs) {
+          const b = db.prepare(`SELECT e.id, e.ref_no, e.payment_date, s.id AS supplier_id, s.display_name, s.first_name, s.last_name, s.company_name FROM expenses e LEFT JOIN suppliers s ON s.id = e.payee WHERE e.ref_no = ? LIMIT 1`).get(ref);
+          if (b) billMap.set(ref, b);
+        }
+        for (const { e, ref, party } of billRefs) {
+          const b = billMap.get(ref);
+          e.source = b
+            ? { kind: 'bill', id: b.id, number: b.ref_no || ref, party: party || partyName(b), partyType: 'supplier', partyId: b.supplier_id || null, date: b.payment_date || '' }
+            : { kind: 'bill', id: null, number: ref, party, date: '' };
+        }
+      }
+    } catch (e) { console.error('[journalEntries] transaction source lookup failed:', e.message); }
+    try {
+      if (groups.vendor_credit) apply(db.prepare(`SELECT v.id, v.reference, v.date, s.id AS supplier_id, s.display_name, s.first_name, s.last_name, s.company_name FROM vendor_credits v LEFT JOIN suppliers s ON s.id = v.supplier_id WHERE v.id IN (${ph(groups.vendor_credit)})`).all(...groups.vendor_credit), 'vendor_credit', r => ({ number: r.reference || ('VC-' + r.id), party: partyName(r), partyType: 'supplier', partyId: r.supplier_id || null, date: r.date || '' }));
+    } catch (e) { console.error('[journalEntries] vendor credit source lookup failed:', e.message); }
+    try {
+      if (groups.credit_note) apply(db.prepare(`SELECT cn.id, cn.credit_note_number, cn.date, cn.customer_name FROM credit_notes cn WHERE cn.id IN (${ph(groups.credit_note)})`).all(...groups.credit_note), 'credit_note', r => ({ number: r.credit_note_number || ('CN-' + r.id), party: r.customer_name || '', date: r.date || '' }));
+    } catch (e) { console.error('[journalEntries] credit note source lookup failed:', e.message); }
+    try {
+      // Reconciliation adjustments post with source_id = the bank account id.
+      if (groups.reconciliation) {
+        const rows = db.prepare(`SELECT r.accountId, r.accountName, MAX(r.id) AS recId, r.statementDate, r.statementBalance FROM reconciliations r WHERE r.accountId IN (${ph(groups.reconciliation)}) GROUP BY r.accountId`).all(...groups.reconciliation);
+        const map = new Map(rows.map(r => [r.accountId, r]));
+        for (const e of entries) {
+          if (e.source_type !== 'reconciliation') continue;
+          const r = map.get(e.source_id);
+          if (!r) continue;
+          e.source = { kind: 'reconciliation', id: r.recId, number: r.accountName || ('Bank #' + r.accountId), party: r.accountName || '', date: r.statementDate || '', statementBalance: r.statementBalance ?? null };
+        }
+      }
+    } catch (e) { console.error('[journalEntries] reconciliation source lookup failed:', e.message); }
     return entries;
+  },
+
+  // ── Full source detail for the drill-down modal ─────────────────────────
+  getSourceDetail: (sourceType, sourceId) => {
+    const st = sourceType;
+    const id = Number(sourceId);
+    // transfer/intercompany look up by reference string and seed needs no id,
+    // so only require a numeric id for every other source type.
+    const needsNumericId = !['transfer', 'intercompany_transfer', 'seed'].includes(st);
+    if (needsNumericId && !id) return null;
+    const partyName = (r) => r && (r.display_name || [r.first_name, r.last_name].filter(Boolean).join(' ') || r.company_name || '');
+    try {
+      // INVOICE
+      if (st === 'invoice') {
+        const inv = db.prepare(`
+          SELECT i.*, c.display_name, c.first_name, c.last_name, c.company_name
+          FROM invoices i LEFT JOIN customers c ON c.id = i.customer WHERE i.id = ?
+        `).get(id);
+        if (!inv) return null;
+        const lines = db.prepare(`SELECT il.*, p.name AS product_name FROM invoice_lines il LEFT JOIN products p ON il.product = p.id WHERE il.invoice_id = ?`).all(id);
+        const subtotal = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+        return {
+          type: 'invoice', label: 'Invoice', number: inv.number, date: inv.start_date,
+          party: partyName(inv), partyId: inv.customer || null, partyType: 'customer', partyLabel: 'Customer', status: inv.status,
+          total: subtotal * (1 + Number(inv.vat || 0) / 100), memo: inv.message,
+          lines: lines.map(l => ({ description: l.description || l.product_name || '', quantity: l.quantity, rate: l.rate, amount: l.amount, account: '' })),
+        };
+      }
+      // BILL / EXPENSE
+      if (st === 'expense' || st === 'bill_payment') {
+        const exp = db.prepare(`
+          SELECT e.*, s.display_name, s.first_name, s.last_name, s.company_name, c.name AS payment_account_name
+          FROM expenses e
+          LEFT JOIN suppliers s ON e.payee = s.id
+          LEFT JOIN chart_of_accounts c ON e.payment_account = c.id
+          WHERE e.id = ?
+        `).get(id);
+        if (!exp) return null;
+        const lines = db.prepare(`SELECT * FROM expense_lines WHERE expense_id = ?`).all(id);
+        const total = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+        return {
+          type: 'bill', label: st === 'bill_payment' ? 'Bill Payment' : 'Bill', number: exp.ref_no, date: exp.payment_date,
+          party: partyName(exp), partyId: exp.payee || null, partyType: 'supplier', partyLabel: 'Vendor', status: exp.approval_status || exp.status,
+          total: total || exp.amount || 0, memo: exp.memo,
+          lines: lines.map(l => ({ description: l.description || '', quantity: 1, rate: l.amount, amount: l.amount, account: l.category || '' })),
+        };
+      }
+      // PAYMENT
+      if (st === 'payment') {
+        const pay = db.prepare(`
+          SELECT p.*, i.number AS invoice_number, c.display_name, c.first_name, c.last_name, c.company_name
+          FROM payments p
+          LEFT JOIN invoices i ON p.invoiceId = i.id
+          LEFT JOIN customers c ON p.customerId = c.id
+          WHERE p.id = ?
+        `).get(id);
+        if (!pay) return null;
+        return {
+          type: 'payment', label: 'Payment', number: pay.reference || ('PMT-' + pay.id), date: (pay.date || '').slice(0, 10),
+          party: partyName(pay), partyId: pay.customerId || null, partyType: 'customer', partyLabel: 'Customer', status: pay.status,
+          total: pay.amount, memo: pay.memo,
+          lines: [{ description: pay.invoice_number ? `Invoice ${pay.invoice_number}` : 'Payment received', quantity: 1, rate: pay.amount, amount: pay.amount, account: '' }],
+        };
+      }
+      // DEPOSIT
+      if (st === 'deposit') {
+        const Deposits = require('./deposits');
+        const dep = Deposits.getById(id);
+        if (!dep) return null;
+        const allocLines = (dep.allocations || []).map(a => ({ description: a.description || 'Deposit allocation', quantity: 1, rate: a.amount, amount: a.amount, account: a.account_name || '' }));
+        const paymentLines = (dep.payments || []).map(p => ({ description: `Payment${p.invoice_number ? ' · ' + p.invoice_number : ''}${p.customer_name ? ' — ' + p.customer_name : ''}`, quantity: 1, rate: p.amount, amount: p.amount, account: 'Undeposited Funds' }));
+        return {
+          type: 'deposit', label: 'Deposit', number: dep.reference || ('DEP-' + dep.id), date: dep.date,
+          party: dep.bank_account_name, partyLabel: 'Bank Account', status: dep.status,
+          total: dep.total_amount, memo: dep.memo,
+          lines: allocLines.length ? allocLines : paymentLines,
+        };
+      }
+      // TRANSACTION (check / bill payment / expense / generic)
+      if (st === 'transaction') {
+        const tx = db.prepare(`
+          SELECT t.*, c.name AS account_name FROM transactions t LEFT JOIN chart_of_accounts c ON t.accountId = c.id WHERE t.id = ?
+        `).get(id);
+        if (!tx) return null;
+        const typeLabel = (tx.type || 'Transaction').replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
+        let splitLines = [];
+        try {
+          const parsed = typeof tx.categories === 'string' ? JSON.parse(tx.categories) : tx.categories;
+          if (Array.isArray(parsed)) splitLines = parsed;
+        } catch {}
+        const lines = splitLines.length
+          ? splitLines.map(sl => ({ description: sl.description || sl.account || '', quantity: 1, rate: sl.amount, amount: sl.amount, account: sl.account || sl.category || '' }))
+          : [{ description: tx.description || '', quantity: 1, rate: tx.amount, amount: tx.amount, account: tx.account_name || '' }];
+        return {
+          type: 'transaction', label: typeLabel, number: tx.reference || ('TX-' + tx.id), date: (tx.date || '').slice(0, 10),
+          party: tx.payee_name, partyLabel: 'Payee', status: tx.status,
+          total: tx.amount || Math.max(Number(tx.debit) || 0, Number(tx.credit) || 0), memo: tx.description,
+          lines,
+        };
+      }
+      // VENDOR CREDIT
+      if (st === 'vendor_credit') {
+        const vc = db.prepare(`
+          SELECT vc.*, COALESCE(s.display_name, s.first_name || ' ' || s.last_name, '') AS supplier_name
+          FROM vendor_credits vc LEFT JOIN suppliers s ON s.id = vc.supplier_id WHERE vc.id = ?
+        `).get(id);
+        if (!vc) return null;
+        return {
+          type: 'vendor_credit', label: 'Vendor Credit', number: vc.reference || ('VC-' + vc.id), date: vc.date,
+          party: vc.supplier_name, partyId: vc.supplier_id || null, partyType: 'supplier', partyLabel: 'Vendor', status: vc.status,
+          total: vc.amount, memo: vc.memo,
+          lines: [{ description: vc.memo || 'Vendor Credit', quantity: 1, rate: vc.amount, amount: vc.amount, account: '' }],
+        };
+      }
+      // CREDIT NOTE
+      if (st === 'credit_note') {
+        const CreditNotes = require('./creditNotes');
+        const cn = CreditNotes.getById(id);
+        if (!cn) return null;
+        return {
+          type: 'credit_note', label: 'Credit Note', number: cn.credit_note_number, date: cn.date,
+          party: cn.customer_name, partyLabel: 'Customer', status: cn.status,
+          total: cn.total, memo: cn.reason || cn.notes,
+          lines: (cn.lines || []).map(l => ({ description: l.description || '', quantity: l.quantity, rate: l.unit_price, amount: l.amount, account: '' })),
+        };
+      }
+      // QUOTE
+      if (st === 'quote') {
+        const q = db.prepare(`
+          SELECT q.*, c.display_name, c.first_name, c.last_name, c.company_name
+          FROM quotes q LEFT JOIN customers c ON c.id = q.customer WHERE q.id = ?
+        `).get(id);
+        if (!q) return null;
+        const lines = db.prepare(`SELECT ql.*, p.name AS product_name FROM quote_lines ql LEFT JOIN products p ON ql.product = p.id WHERE ql.quote_id = ?`).all(id);
+        const subtotal = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+        return {
+          type: 'quote', label: 'Quote', number: q.number || ('QT-' + q.id), date: q.start_date,
+          party: partyName(q), partyId: q.customer || null, partyType: 'customer', partyLabel: 'Customer', status: q.status,
+          total: subtotal * (1 + Number(q.vat || 0) / 100), memo: q.message,
+          lines: lines.map(l => ({ description: l.description || l.product_name || '', quantity: l.quantity, rate: l.rate, amount: l.amount, account: '' })),
+        };
+      }
+      // RECURRING TEMPLATE
+      if (st === 'recurring') {
+        const rt = db.prepare('SELECT * FROM recurring_transactions WHERE id = ?').get(id);
+        if (!rt) return null;
+        let payload = {};
+        try { payload = typeof rt.payload === 'string' ? JSON.parse(rt.payload || '{}') : (rt.payload || {}); } catch {}
+        return {
+          type: 'recurring', label: 'Recurring Transaction', number: 'REC-' + rt.id, date: rt.nextDate,
+          party: payload.customerName || rt.kind || '', partyLabel: 'Recurring', status: rt.status,
+          total: rt.amount, memo: rt.description,
+          lines: [{ description: rt.description || 'Recurring transaction', quantity: 1, rate: rt.amount, amount: rt.amount, account: rt.kind || '' }],
+        };
+      }
+      // JOURNAL ENTRY (reversal / void)
+      if (st === 'journal') {
+        const je = db.prepare('SELECT * FROM journal_entries WHERE id = ?').get(id);
+        if (!je) return null;
+        const lines = db.prepare(`
+          SELECT jl.*, c.name AS accountName, c.number AS accountNumber
+          FROM journal_lines jl LEFT JOIN chart_of_accounts c ON jl.account_id = c.id
+          WHERE jl.journal_id = ? ORDER BY jl.id
+        `).all(id);
+        return {
+          type: 'journal', label: je.source_type === 'reversal' ? 'Reversal' : 'Void', number: je.reference || ('#' + je.id), date: je.date,
+          party: je.entered_by || je.created_by || '', partyLabel: 'Entered By', status: je.status,
+          total: lines.reduce((s, l) => s + (Number(l.debit) || 0), 0), memo: je.description,
+          lines: lines.map(l => ({ description: l.description || '', account: l.accountName || '', quantity: 1, rate: Number(l.debit) || Number(l.credit) || 0, amount: Number(l.debit) || Number(l.credit) || 0 })),
+        };
+      }
+// BANK RECONCILIATION ADJUSTMENT (source_id = the bank account id)
+      if (st === 'reconciliation') {
+        const acct = db.prepare('SELECT name, number FROM chart_of_accounts WHERE id = ?').get(id);
+        const rec = acct
+          ? db.prepare('SELECT * FROM reconciliations WHERE accountId = ? ORDER BY statementDate DESC, id DESC LIMIT 1').get(acct.id)
+          : null;
+        const label = (rec && rec.accountName) || (acct && acct.name) || ('Bank #' + id);
+        return {
+          type: 'reconciliation', label: 'Bank Reconciliation Adjustment', number: label, date: rec ? rec.statementDate : '',
+          party: label, partyLabel: 'Bank Account', status: 'Posted',
+          total: rec && rec.statementBalance != null ? rec.statementBalance : null,
+          memo: rec ? `Statement date ${rec.statementDate || ''}` : 'Bank reconciliation adjustment',
+          lines: [],
+        };
+      }
+// TRANSFER / INTERCOMPANY TRANSFER (source_id = the shared reference)
+      if (st === 'transfer' || st === 'intercompany_transfer') {
+        const tx = db.prepare(`
+          SELECT * FROM transactions
+          WHERE reference = ? AND LOWER(type) IN ('transfer_in','transfer_out','intercompany')
+          ORDER BY id ASC LIMIT 1
+        `).get(String(sourceId));
+        if (!tx) return null;
+        const acct = db.prepare('SELECT name FROM chart_of_accounts WHERE id = ?').get(tx.accountId);
+        const isInter = st === 'intercompany_transfer' || String(tx.type || '').toLowerCase() === 'intercompany';
+        return {
+          type: isInter ? 'intercompany_transfer' : 'transfer',
+          label: isInter ? 'Intercompany Transfer' : 'Bank Transfer',
+          number: tx.reference || ('TR-' + tx.id), date: (tx.date || '').slice(0, 10),
+          party: isInter ? (tx.isIntercompany ? 'Intercompany' : '') : acct?.name || '',
+          partyLabel: 'Bank Account', status: tx.status || 'Posted',
+          total: tx.amount || Math.max(Number(tx.debit) || 0, Number(tx.credit) || 0), memo: tx.description,
+          lines: [{ description: tx.description || acct?.name || 'Bank transfer', quantity: 1, rate: tx.amount || Math.max(Number(tx.debit) || 0, Number(tx.credit) || 0), amount: tx.amount || Math.max(Number(tx.debit) || 0, Number(tx.credit) || 0), account: acct?.name || '' }],
+        };
+      }
+      // PAYROLL RUN (payroll runs are not journal-posted; show the run summary)
+      if (st === 'payroll') {
+        const run = db.prepare(`
+          SELECT pr.*
+          FROM payroll_runs pr
+          WHERE pr.id = ?
+        `).get(id);
+        if (!run) return null;
+        return {
+          type: 'payroll', label: 'Payroll Run', number: 'PR-' + run.id, date: run.processed_date,
+          party: 'Payroll', partyLabel: 'Payroll', status: run.status,
+          total: run.total_net_pay, memo: run.notes,
+          lines: [{ description: `Pay period ${run.pay_period_start || ''} → ${run.pay_period_end || ''}`, quantity: run.payments_count, rate: run.total_net_pay, amount: run.total_net_pay, account: '' }],
+        };
+      }
+      // SEED SAMPLE DATA
+      if (st === 'seed') {
+        return {
+          type: 'seed', label: 'Sample Data', number: 'SEED-' + (sourceId != null ? sourceId : ''), date: '',
+          party: 'System', partyLabel: 'Seed', status: 'Posted',
+          total: null, memo: 'Sample journal entry created during system seeding',
+          lines: [],
+        };
+      }
+      return null;
+    } catch (e) {
+      console.error('[journalEntries] getSourceDetail failed:', e.message);
+      return { error: e.message };
+    }
   },
 
   // ── Lines for a specific account ─────────────────────────────────────────
@@ -161,6 +542,20 @@ const JournalEntries = {
       ORDER BY je.date DESC, je.id DESC
       LIMIT ${Number(limit)}
     `).all(...params);
+  },
+
+  // ── Fetch a single journal entry with its lines (drill-down) ──────────
+  getById: (id) => {
+    const entry = db.prepare('SELECT * FROM journal_entries WHERE id = ?').get(id);
+    if (!entry) return null;
+    entry.lines = db.prepare(`
+      SELECT jl.*, c.name AS accountName, c.number AS accountNumber
+      FROM journal_lines jl
+      LEFT JOIN chart_of_accounts c ON jl.account_id = c.id
+      WHERE jl.journal_id = ?
+      ORDER BY jl.id
+    `).all(id);
+    return entry;
   },
 
   // ── Check if a source has already been journalised ──────────────────────
@@ -190,6 +585,11 @@ const JournalEntries = {
   // DR Accounts Receivable (full total) / CR each income account per invoice line
   postInvoice: (invoice) => {
     if (JournalEntries.hasPosting('invoice', invoice.id)) return { skipped: true };
+    // Never re-post voided/voided invoices (guards against startup auto-repost reviving them).
+    try {
+      const invRow = db.prepare("SELECT LOWER(COALESCE(status, '')) AS status FROM invoices WHERE id = ?").get(Number(invoice.id));
+      if (invRow && (invRow.status === 'void' || invRow.status === 'voided')) return { skipped: true };
+    } catch (_) {}
     const COA = require('./chartOfAccounts');
     const ar = COA.getSystemAccount('Accounts Receivable') || COA.getByName('Accounts Receivable');
     if (!ar) return { error: 'Accounts Receivable account not found in COA' };
@@ -204,7 +604,7 @@ const JournalEntries = {
     try {
       invoiceLines = db.prepare(`
         SELECT il.amount, il.quantity, il.description, il.product,
-               p.income_account
+               p.income_account, p.income_account_id
         FROM invoice_lines il
         LEFT JOIN products p ON il.product = p.id
         WHERE il.invoice_id = ?
@@ -224,7 +624,11 @@ const JournalEntries = {
       if (lineAmt <= 0) continue;
 
       let incomeAcctId = null;
-      if (line.income_account) {
+      if (line.income_account_id) {
+        const byId = db.prepare("SELECT id FROM chart_of_accounts WHERE id = ? AND status = 'Active'").get(Number(line.income_account_id));
+        if (byId) incomeAcctId = byId.id;
+      }
+      if (!incomeAcctId && line.income_account) {
         const acct = db.prepare("SELECT id FROM chart_of_accounts WHERE name = ? OR number = ? LIMIT 1").get(line.income_account, line.income_account);
         if (acct) incomeAcctId = acct.id;
       }
@@ -264,7 +668,29 @@ const JournalEntries = {
     if (JournalEntries.hasPosting('payment', payment.id)) return { skipped: true };
     const COA = require('./chartOfAccounts');
     const ar = COA.getSystemAccount('Accounts Receivable');
-    const bank = COA.getSystemAccount('Undeposited Funds') || COA.getByName('Undeposited Funds');
+    let bank = COA.getSystemAccount('Undeposited Funds') || COA.getByName('Undeposited Funds');
+    // Honor an explicit "Deposit To" account if it resolves; otherwise undeposited funds.
+    // Resolve by unique Account ID first (preferred), then by name/number (legacy).
+    // Only Bank/Cash/Undeposited Funds type accounts are valid deposit targets —
+    // depositing into an arbitrary account would mispost the register.
+    if (payment.bankAccountName) {
+      const idMatch = /^\d+$/.test(String(payment.bankAccountName).trim())
+        ? db.prepare("SELECT * FROM chart_of_accounts WHERE id = ?").get(Number(payment.bankAccountName))
+        : null;
+      const chosen = idMatch
+        || COA.getByName(payment.bankAccountName)
+        || COA.getSystemAccount(payment.bankAccountName)
+        || db.prepare('SELECT * FROM chart_of_accounts WHERE number = ? LIMIT 1').get(payment.bankAccountName);
+      if (chosen) {
+        const type = String(chosen.type || chosen.accountType || '').toLowerCase();
+        const isDepositTarget = type === 'bank' || type === 'cash' || type === 'undeposited funds'
+          || /undeposited/i.test(chosen.name || '');
+        if (!isDepositTarget) {
+          return { error: `Deposit To account "${chosen.name || chosen.accountName}" is not a bank account.` };
+        }
+        bank = chosen;
+      }
+    }
     if (!ar || !bank) return { error: 'Required COA accounts not found (AR/Bank)' };
 
     const amount = Number(payment.amount || 0);
@@ -301,9 +727,19 @@ const JournalEntries = {
     let expenseLines = [];
     try {
       expenseLines = db.prepare(
-        `SELECT amount, description, category FROM expense_lines WHERE expense_id = ?`
+        `SELECT amount, description, category, account_id, line_type FROM expense_lines WHERE expense_id = ?`
       ).all(Number(expense.id));
-    } catch { expenseLines = []; }
+    } catch {
+      // `line_type` is owned by models/expenses.js, which may not have been
+      // loaded yet (this model does not require it). Fall back to the original
+      // projection rather than swallowing the error and posting nothing at all —
+      // an empty line set silently falls through to the expense-level total.
+      try {
+        expenseLines = db.prepare(
+          `SELECT amount, description, category, account_id FROM expense_lines WHERE expense_id = ?`
+        ).all(Number(expense.id));
+      } catch { expenseLines = []; }
+    }
 
     const debitLines = [];
     let totalDebit = 0;
@@ -312,9 +748,25 @@ const JournalEntries = {
       const lineAmt = Number(line.amount) || 0;
       if (lineAmt <= 0) continue;
 
-      // Match category text to COA account name (case-insensitive), fall back if unmatched
+      // Prefer the stored account_id (exact account), fall back to name match
       let acctId = null;
-      if (line.category) {
+      if (line.account_id) {
+        const byId = db.prepare(`SELECT id FROM chart_of_accounts WHERE id = ? AND status = 'Active'`).get(Number(line.account_id));
+        if (byId) acctId = byId.id;
+      }
+
+      // An INVENTORY line capitalises stock, so it belongs to Inventory Asset.
+      // If its stored account is missing or has been deactivated, resolve the
+      // system account directly instead of falling through to an expense
+      // account: booking stock as an expense understates the balance sheet and
+      // overstates profit. `models/expenses.js` resolves this at write time, so
+      // this branch is the backstop for legacy or hand-edited rows.
+      if (!acctId && String(line.line_type || '').trim().toLowerCase() === 'item') {
+        const inv = COA.getSystemAccount('Inventory Asset');
+        if (inv && inv.id != null) acctId = Number(inv.id);
+      }
+
+      if (!acctId && line.category) {
         const matched = db.prepare(
           `SELECT id FROM chart_of_accounts
            WHERE LOWER(name) = LOWER(?) AND status = 'Active'
@@ -371,7 +823,7 @@ const JournalEntries = {
     let expenseLines = [];
     try {
       expenseLines = db.prepare(
-        `SELECT amount, description, category FROM expense_lines WHERE expense_id = ?`
+        `SELECT amount, description, category, account_id FROM expense_lines WHERE expense_id = ?`
       ).all(Number(expense.id));
     } catch { expenseLines = []; }
 
@@ -382,7 +834,11 @@ const JournalEntries = {
       const lineAmt = Number(line.amount) || 0;
       if (lineAmt <= 0) continue;
       let acctId = null;
-      if (line.category) {
+      if (line.account_id) {
+        const byId = db.prepare(`SELECT id FROM chart_of_accounts WHERE id = ? AND status = 'Active'`).get(Number(line.account_id));
+        if (byId) acctId = byId.id;
+      }
+      if (!acctId && line.category) {
         const matched = db.prepare(
           `SELECT id FROM chart_of_accounts
            WHERE LOWER(name) = LOWER(?) AND status = 'Active'
@@ -433,7 +889,11 @@ const JournalEntries = {
       if (lineAmt <= 0) continue;
       const acctName = line.account || line.category || '';
       let acctId = null;
-      if (acctName) {
+      if (line.accountId) {
+        const byId = db.prepare("SELECT id FROM chart_of_accounts WHERE id = ? AND status = 'Active'").get(Number(line.accountId));
+        if (byId) acctId = byId.id;
+      }
+      if (!acctId && acctName) {
         const matched = db.prepare(
           "SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status = 'Active' LIMIT 1"
         ).get(acctName);
@@ -573,6 +1033,8 @@ JournalEntries.seedSampleData = () => {
 };
 
 JournalEntries.createTable();
-JournalEntries.seedSampleData();
+
+// seedSampleData is NOT called automatically — it remains available
+// for explicit invocation when demo/training data is desired.
 
 module.exports = JournalEntries;

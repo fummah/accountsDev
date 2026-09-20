@@ -212,8 +212,8 @@ const ProjectsCenter = () => {
     { title: 'Date', dataIndex: 'start_date', key: 'start_date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Due', dataIndex: 'last_date', key: 'last_date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: v => {
-      const colors = { Paid: 'green', Sent: 'blue', Draft: 'default', Overdue: 'red', Pending: 'orange', Cancelled: 'red', 'Partially Paid': 'orange', Unpaid: 'volcano' };
-      return <Tag color={colors[v] || 'default'}>{v || 'Draft'}</Tag>;
+      const colors = { Open: 'blue', 'Partially Paid': 'orange', Paid: 'green', Draft: 'default', Void: 'volcano', Cancelled: 'default' };
+      return <Tag color={colors[v] || 'default'}>{v || 'Open'}</Tag>;
     }},
     { title: 'Total', key: 'total', width: 100, align: 'right', render: (_, r) => {
       const sub = Number(r.subtotal || r.total || 0);
@@ -227,8 +227,8 @@ const ProjectsCenter = () => {
     { title: 'Date', dataIndex: 'start_date', key: 'start_date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Expiry', dataIndex: 'last_date', key: 'last_date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: v => {
-      const colors = { Open: 'blue', Sent: 'blue', Draft: 'default', Accepted: 'green', Declined: 'red', Expired: 'orange', Invoiced: 'cyan', Cancelled: 'red' };
-      return <Tag color={colors[v] || 'default'}>{v || 'Open'}</Tag>;
+      const colors = { Pending: 'gold', Accepted: 'green', Declined: 'red', Converted: 'purple' };
+      return <Tag color={colors[v] || 'default'}>{v || 'Pending'}</Tag>;
     }},
     { title: 'Total', key: 'total', width: 100, align: 'right', render: (_, r) => {
       const sub = Number(r.subtotal || r.total || 0);
@@ -298,7 +298,7 @@ const ProjectsCenter = () => {
         </Space>
 
         <Table columns={columns} dataSource={filtered} loading={loading} rowKey="id"
-          pagination={{ pageSize: 15, showSizeChanger: true, showTotal: t => `${t} projects` }} size="middle" />
+          pagination={{ defaultPageSize: 15, showSizeChanger: true, showTotal: t => `${t} projects` }} size="middle" />
       </Card>
 
       {/* Create/Edit Modal */}
@@ -391,7 +391,7 @@ const ProjectsCenter = () => {
 
             {detailTab === '2' && (
               <div>
-                <Table columns={tsColumns} dataSource={timesheets} rowKey={(r, i) => r.id || i} size="small" pagination={{ pageSize: 10 }} style={{ marginBottom: 16 }} />
+                <Table columns={tsColumns} dataSource={timesheets} rowKey={(r, i) => r.id || i} size="small" pagination={{ defaultPageSize: 10 }} style={{ marginBottom: 16 }} />
                 <Card size="small" title="Add Timesheet Entry">
                   <Form form={timesheetForm} layout="vertical">
                     <Row gutter={8} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -436,7 +436,7 @@ const ProjectsCenter = () => {
                 )}
                 {selectedProject.customerId && (
                   <Table columns={invoiceColumns} dataSource={projectInvoices} rowKey="id" size="small"
-                    loading={invoicesLoading} pagination={{ pageSize: 5, showTotal: t => `${t} invoices` }}
+                    loading={invoicesLoading} pagination={{ defaultPageSize: 5, showTotal: t => `${t} invoices` }}
                     locale={{ emptyText: 'No invoices yet for this customer' }}
                     summary={() => projectInvoices.length > 0 ? (
                       <Table.Summary.Row>
@@ -468,7 +468,7 @@ const ProjectsCenter = () => {
                 )}
                 {selectedProject.customerId && (
                   <Table columns={quoteColumns} dataSource={projectQuotes} rowKey="id" size="small"
-                    loading={quotesLoading} pagination={{ pageSize: 5, showTotal: t => `${t} quotes` }}
+                    loading={quotesLoading} pagination={{ defaultPageSize: 5, showTotal: t => `${t} quotes` }}
                     locale={{ emptyText: 'No quotes yet for this customer' }}
                     summary={() => projectQuotes.length > 0 ? (
                       <Table.Summary.Row>

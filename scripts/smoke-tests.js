@@ -1,5 +1,10 @@
 // Simple smoke tests for core accounting flows
 // Run with: node scripts/smoke-tests.js
+//
+// Runs against a SCRATCH COPY of the company file: loading the model layer runs
+// createTable() and the migration runner, which would otherwise rewrite the live
+// bookkeeping database. Must come before any model require.
+require('./lib/testDb.js').useScratchCopy({ label: 'smoke-tests' });
 
 const ChartOfAccounts = require('../src/backend/models/chartOfAccounts');
 const Transactions = require('../src/backend/models/transactions');

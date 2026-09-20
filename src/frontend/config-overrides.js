@@ -72,7 +72,7 @@ const fixPostcssLoader = () => config => {
   return config;
 };
 
-module.exports = override(
+const baseConfig = override(
   addLessLoader({
     javascriptEnabled: true,
     lessOptions: {
@@ -84,3 +84,33 @@ module.exports = override(
     VERSION: JSON.stringify(require('./package.json').version),
   })
 );
+
+/**
+ * TerserPlugin defaults to `parallel: true`, which spawns (cpus - 1) jest-worker
+ * PROCESSES, each with its own V8 heap. On a memory-constrained machine that
+ * extra copy is what turns the production build into
+ *
+ *     # Fatal process out of memory: Zone
+ *     FATAL ERROR: Zone Allocation failed - process out of memory      (exit 134)
+ *
+ * which is NOT the JS heap and cannot be fixed with --max-old-space-size.
+ *
+ * Set ACCULEDGER_BUILD_SERIAL=1 to minify in-process instead. The emitted
+ * bundle is byte-identical either way — `parallel` only decides WHERE the
+ * minification runs, not what it produces — so this is safe to use whenever
+ * the machine is short on RAM. Default behaviour is unchanged.
+ */
+const serialMinifyWhenAsked = (config) => {
+  if (process.env.ACCULEDGER_BUILD_SERIAL !== '1') return config;
+  const minimizers = config && config.optimization && config.optimization.minimizer;
+  if (Array.isArray(minimizers)) {
+    for (const m of minimizers) {
+      if (m && m.options && typeof m.options === 'object') {
+        m.options.parallel = false;
+      }
+    }
+  }
+  return config;
+};
+
+module.exports = (config, env) => serialMinifyWhenAsked(baseConfig(config, env));

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { getCurrencySymbol } from '../../../../utils/currency';
+import { getCurrencySymbol, useCurrency } from '../../../../utils/currency';
 import {
   Card,
   Form,
@@ -18,6 +18,7 @@ const { Title } = Typography;
 const { Option } = Select;
 
 const PlanningBudgeting = () => {
+  const { symbol: cSym } = useCurrency();
   const [form] = Form.useForm();
   const [budgets, setBudgets] = useState([]);
 
@@ -117,10 +118,9 @@ const PlanningBudgeting = () => {
                 rules={[{ required: true, message: "Please enter amount" }]}
               >
                 <InputNumber
-                  prefix="$"
+                  prefix={cSym}
                   min={0}
                   style={{ width: "100%" }}
-                  placeholder="e.g. 50000"
                 />
               </Form.Item>
 
@@ -129,7 +129,7 @@ const PlanningBudgeting = () => {
                 name="forecast"
               >
                 <InputNumber
-                  prefix="$"
+                  prefix={cSym}
                   min={0}
                   style={{ width: "100%" }}
                   placeholder="e.g. 60000"
@@ -150,7 +150,7 @@ const PlanningBudgeting = () => {
             <Table
               dataSource={budgets}
               columns={columns}
-              pagination={{ pageSize: 5 }}
+              pagination={{ defaultPageSize: 5 }}
               scroll={{ x: true }}
             />
           </Card>

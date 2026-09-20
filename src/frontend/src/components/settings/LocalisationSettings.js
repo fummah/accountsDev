@@ -124,7 +124,7 @@ const LocalisationSettings = () => {
     <Card title={<><GlobalOutlined /> Multi-Language & Localisation</>}>
       <Tabs defaultActiveKey="1">
         <TabPane tab="Locales" key="1">
-          <Table columns={localeColumns} dataSource={locales} rowKey="code" loading={loading} size="small" pagination={{ pageSize: 15 }} />
+          <Table columns={localeColumns} dataSource={locales} rowKey="code" loading={loading} size="small" pagination={{ defaultPageSize: 15 }} />
         </TabPane>
         <TabPane tab={`Translations (${selectedLocale})`} key="2">
           <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -145,7 +145,7 @@ const LocalisationSettings = () => {
               </Space>
             </Col>
           </Row>
-          <Table columns={transColumns} dataSource={transData} rowKey="key" size="small" pagination={{ pageSize: 20 }} />
+          <Table columns={transColumns} dataSource={transData} rowKey="key" size="small" pagination={{ defaultPageSize: 20 }} />
         </TabPane>
       </Tabs>
 

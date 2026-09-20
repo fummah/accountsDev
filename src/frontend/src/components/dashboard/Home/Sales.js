@@ -2,6 +2,7 @@ import React from "react";
 import Widget from "components/Widget/index";
 import {Table,Select,Row,Col,Button} from "antd";
 import {Area, AreaChart, ResponsiveContainer, Tooltip, XAxis} from "recharts";
+import { useCurrency } from '../../../utils/currency';
 
 const data = [
   {name: '', balance: 0},
@@ -18,6 +19,7 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
 
 
 const Sales = ({ Invoiced, ExpenseList }) => {
+  const { symbol: cSym } = useCurrency();
 
   return (
       <Widget
@@ -35,7 +37,7 @@ const Sales = ({ Invoiced, ExpenseList }) => {
         <Col lg={12} md={12} sm={12} xs={24}>
 
           <div className="ant-row-flex">
-            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">${formattedNumber(Invoiced)}</h2>
+            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">{cSym}{formattedNumber(Invoiced)}</h2>
           </div>
           <p className="gx-text-grey">Total sales</p>
          

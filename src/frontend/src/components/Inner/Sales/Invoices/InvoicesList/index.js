@@ -157,13 +157,17 @@ const InvoicesList = ({ dataList, loading = false, total = 0, page = 1, pageSize
             typeof onStatusFilterChange === 'function' && onStatusFilterChange(value)
           }
         >
+          {/* Invoice financial states + quote workflow states share this filter. */}
           <Select.Option value="Open">Open</Select.Option>
-          <Select.Option value="Pending">Pending</Select.Option>
-          <Select.Option value="Paid">Paid</Select.Option>
           <Select.Option value="Partially Paid">Partially Paid</Select.Option>
+          <Select.Option value="Paid">Paid</Select.Option>
+          <Select.Option value="Pending">Pending</Select.Option>
+          <Select.Option value="Accepted">Accepted</Select.Option>
+          <Select.Option value="Declined">Declined</Select.Option>
+          <Select.Option value="Converted">Converted</Select.Option>
+          <Select.Option value="Draft">Draft</Select.Option>
+          <Select.Option value="Void">Void</Select.Option>
           <Select.Option value="Cancelled">Cancelled</Select.Option>
-          <Select.Option value="Rejected">Rejected</Select.Option>
-          <Select.Option value="Invoiced">Invoiced</Select.Option>
         </Select>
       </Col>
       <Col xs={24} sm={8} md={10}>

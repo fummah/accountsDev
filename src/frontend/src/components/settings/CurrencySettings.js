@@ -202,7 +202,7 @@ const CurrencySettings = () => {
                     </Select>
                     <span style={{ marginLeft: 8, color: '#888' }}>All amounts across the app default to this currency.</span>
                   </div>
-                  <Table dataSource={currencies} columns={currencyColumns} rowKey="code" size="small" pagination={{ pageSize: 12 }} />
+                  <Table dataSource={currencies} columns={currencyColumns} rowKey="code" size="small" pagination={{ defaultPageSize: 12 }} />
                 </Card>
               </Col>
               <Col span={8}>
@@ -222,7 +222,7 @@ const CurrencySettings = () => {
             <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
               <Col span={16}>
                 <Card size="small" title="Rate History" extra={<Space><Button size="small" onClick={load} icon={<ReloadOutlined />}>Refresh</Button><Button size="small" type="primary" loading={fetchingLive} onClick={fetchLiveRates} icon={<GlobalOutlined />}>Fetch Live</Button></Space>}>
-                  <Table dataSource={rates} columns={rateColumns} rowKey="id" size="small" pagination={{ pageSize: 15 }} />
+                  <Table dataSource={rates} columns={rateColumns} rowKey="id" size="small" pagination={{ defaultPageSize: 15 }} />
                 </Card>
               </Col>
               <Col span={8}>

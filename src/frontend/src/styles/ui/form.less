@@ -35,10 +35,20 @@
       padding-bottom: 0;
     }
 
-    & .ant-row {
-      -ms-flex-direction: column;
-      flex-direction: column;
-    }
+    // DO NOT force `flex-direction: column` on `.ant-row` here.
+    //
+    // antd's Row/Col grid *is* a row flex container (`.ant-row{display:flex;
+    // flex-direction:row;flex-wrap:wrap}` + `.ant-col-*{flex:0 0 N%}`).
+    // Forcing a column on every row inside a vertical form turned every
+    // `<Row><Col xs={24} md={12} lg={8}>` into a vertical stack of half-width
+    // fields — i.e. the "fields are stacked, not side by side" bug that
+    // affected every `layout="vertical"` form in the app (Add Customer,
+    // Add Vendor, New Lead, ...).
+    //
+    // Stacking the label above its control is already handled by antd itself
+    // via `.ant-form-vertical .ant-form-item-row{flex-direction:column}` and
+    // `.ant-form-vertical .ant-form-item .ant-form-item-control{width:100%}`,
+    // so removing this rule restores the grid and costs nothing.
   }
 
   &-extra {

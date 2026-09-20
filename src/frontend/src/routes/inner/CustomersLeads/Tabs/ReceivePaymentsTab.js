@@ -11,6 +11,7 @@ import {
   message,
 } from "antd";
 import { DollarOutlined } from "@ant-design/icons";
+import { useCurrency } from "../../../../utils/currency";
 
 const { Option } = Select;
 
@@ -20,6 +21,7 @@ const dummyCustomers = [
 ];
 
 const ReceivePaymentsTab = () => {
+  const { symbol: cSym } = useCurrency();
   const [form] = Form.useForm();
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [invoices, setInvoices] = useState([]);
@@ -169,9 +171,9 @@ const ReceivePaymentsTab = () => {
             style={{ width: "100%" }}
             min={1}
             formatter={(value) =>
-              `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+              `${cSym} ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
             }
-            parser={(value) => value.replace(/\$\s?|(,*)/g, "")}
+            parser={(value) => value.replace(/[^\d.,-]/g, "")}
           />
         </Form.Item>
 

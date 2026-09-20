@@ -25,7 +25,7 @@ const Company = {
         fy_start TEXT,
         vat_rate REAL,
         tax_name TEXT,
-        terms INTEGER,
+        terms TEXT,
         bank_name TEXT,
         account_number TEXT,
         branch_code TEXT,

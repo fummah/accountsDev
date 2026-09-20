@@ -1,9 +1,11 @@
-import React from "react";
+import React, { useState } from "react";
 import Widget from "components/Widget/index";
 import {Link} from "react-router-dom";
-import {Table,Select,Row,Col,Button} from "antd";
+import {Table,Select,DatePicker,Space,Row,Col,Button} from "antd";
 import {PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer} from "recharts";
 import { useRedirectToItem } from 'util/navigation';
+import { useCurrency } from '../../../utils/currency';
+import usePeriodData from "./usePeriodData";
 
 
 // Colors for each section of the pie chart
@@ -17,9 +19,33 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
 }).format(number); 
 };
 
+const PERIODS = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'thisWeek', label: 'This Week' },
+  { value: 'lastWeek', label: 'Last Week' },
+  { value: 'thisMonth', label: 'This Month' },
+  { value: 'lastMonth', label: 'Last Month' },
+  { value: 'custom', label: 'Custom Range' },
+];
 
-const Expenses = ({ Expensed, ExpenseList }) => {
+const Expenses = ({ Expensed, ExpenseList, DailyRevenue, DailyExpenses, DailyCategories, MonthlyExpenses = {}, MonthlyCategories = {} }) => {
   const redirectToItem = useRedirectToItem();
+  const { symbol: cSym } = useCurrency();
+  const [period, setPeriod] = useState('thisMonth');
+  const [customRange, setCustomRange] = useState([]);
+
+  const data = usePeriodData({
+    period, customRange,
+    DailyRevenue, DailyExpenses, DailyCategories,
+    MonthlyExpenses, MonthlyCategories,
+    Expensed,
+  });
+
+  const useDaily = Array.isArray(DailyCategories) || Array.isArray(DailyExpenses);
+  const displayExp = data.expenses || (Number(Expensed) || 0);
+  const pieData = useDaily ? data.categories : (Array.isArray(ExpenseList) ? ExpenseList : []);
+
 const columns = [
   {
     title: 'Policyholder Name',
@@ -53,34 +79,47 @@ const columns = [
       <Widget
       title={
         <h2 className="h4 gx-text-capitalize gx-mb-0">
-          Expenses</h2>
+          Account Payable</h2>
       } extra={
-        <Select className="gx-mb-2 gx-select-sm" defaultValue="10">
-        <Option value="10">THis Month</Option>
-        <Option value="20">Last Month</Option>
-      </Select>
+        <Space wrap>
+          <Select className="gx-mb-2 gx-select-sm" value={period} onChange={setPeriod} style={{ minWidth: 120 }}>
+            {PERIODS.map(p => <Option key={p.value} value={p.value}>{p.label}</Option>)}
+          </Select>
+          {period === 'custom' && (
+            <DatePicker.RangePicker
+              allowClear={false}
+              size="small"
+              value={customRange.length === 2 ? customRange : null}
+              onChange={(d) => setCustomRange(d || [])}
+            />
+          )}
+        </Space>
     }>
       <Row>
         <Col lg={12} md={12} sm={12} xs={24}>
 
           <div className="ant-row-flex">
-            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">${formattedNumber(Expensed)}</h2>
+            <h2 className="gx-mr-2 gx-mb-0 gx-fs-xxxl gx-font-weight-medium">{cSym}{formattedNumber(displayExp)}</h2>
             <h4 className="gx-pt-2 gx-chart-up">0% <i className="icon icon-menu-up gx-fs-sm"/></h4>
           </div>
-          <p className="gx-text-grey">Spending for December</p>
-          <p className="gx-text-primary gx-mb-0 gx-pointer gx-d-block gx-mb-0 gx-mt-10">
-          <Button className="gx-mr-2">
-            <i className="icon icon-icon-listing-dbrd gx-fs-lg gx-d-inline-flex gx-vertical-align-left"/> 
-            <Link to={{ pathname: "/inner/expenses", state: { tabKey: "2" } }}> View All Spending</Link>
+          <p className="gx-text-grey">Spending for {data.label}</p>
+          <Space wrap className="gx-mt-10">
+            <Button className="gx-mr-2">
+              <i className="icon icon-icon-listing-dbrd gx-fs-lg gx-d-inline-flex gx-vertical-align-left"/>
+              <Link to="/main/vendors/bills/enter"> Enter Bill</Link>
             </Button>
-            </p>
+            <Button className="gx-mr-2">
+              <i className="icon icon-icon-listing-dbrd gx-fs-lg gx-d-inline-flex gx-vertical-align-left"/>
+              <Link to="/main/vendors/bills/tracker"> Bill Management</Link>
+            </Button>
+          </Space>
         </Col>
         <Col lg={12} md={12} sm={12} xs={24}>
         <div className="">
         <ResponsiveContainer height={150}>
         <PieChart>
         <Pie
-          data={ExpenseList}
+          data={pieData}
           cx="50%"
           cy="50%"
           innerRadius={20}
@@ -89,7 +128,7 @@ const columns = [
           paddingAngle={5}
           dataKey="value"
         >
-          {ExpenseList.map((entry, index) => (
+          {pieData.map((entry, index) => (
             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
           ))}
         </Pie>
@@ -101,7 +140,7 @@ const columns = [
         </Col>
         </Row>
         
-      
+        
     </Widget>
   );
 };

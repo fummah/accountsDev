@@ -8,6 +8,12 @@ function registerCrmHandlers() {
     catch (e) { return { error: e.message }; }
   });
 
+  // Leads linked to one customer (Customer → Leads view).
+  ipcMain.handle('crm-list-leads-by-customer', async (event, customerId) => {
+    try { return CRM.listLeadsByCustomer(customerId); }
+    catch (e) { return { error: e.message }; }
+  });
+
   ipcMain.handle('crm-get-lead', async (event, id) => {
     try { return CRM.getLead(id); }
     catch (e) { return { error: e.message }; }

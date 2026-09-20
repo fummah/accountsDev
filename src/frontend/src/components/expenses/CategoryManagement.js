@@ -85,7 +85,7 @@ const CategoryManagement = () => {
         }
       >
         <Table columns={columns} dataSource={categories} loading={loading} rowKey="id"
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} categories` }} size="middle" />
+          pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `${t} categories` }} size="middle" />
       </Card>
 
       <Modal title={editing ? 'Edit Category' : 'Add Category'} visible={modalOpen}

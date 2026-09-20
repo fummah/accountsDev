@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Input, Select, Space, Modal, Form, DatePicker, message, Card, Row, Col } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Table, Button, Input, Select, Space, Modal, Form, DatePicker, message, Card } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, UserOutlined, MailOutlined, IdcardOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import {
+  FormSection, FormGrid, FormCol, DocumentActionBar, FORM_ITEM_STYLE, MODAL_BODY_SCROLL_STYLE,
+} from '../shared/FormSection';
 
 const { Option } = Select;
 const { Search } = Input;
@@ -221,124 +224,141 @@ const EmployeeList = () => {
       }}
       footer={null}
       width={800}
+      bodyStyle={MODAL_BODY_SCROLL_STYLE}
     >
       <Form
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
       >
-        <Row gutter={16}>
-          <Col span={8}>
-            <Form.Item
-              name="first_name"
-              label="First Name"
-              rules={[{ required: true, message: 'Please enter first name' }]}
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item
-              name="middle_name"
-              label="Middle Name"
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item
-              name="last_name"
-              label="Last Name"
-              rules={[{ required: true, message: 'Please enter last name' }]}
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-        </Row>
+        <FormSection title="Employee Information" icon={<UserOutlined />}>
+          <FormGrid>
+            <FormCol>
+              <Form.Item
+                name="first_name"
+                label="First Name"
+                style={FORM_ITEM_STYLE}
+                rules={[{ required: true, message: 'Please enter first name' }]}
+              >
+                <Input />
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item
+                name="middle_name"
+                label="Middle Name"
+                style={FORM_ITEM_STYLE}
+              >
+                <Input />
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item
+                name="last_name"
+                label="Last Name"
+                style={FORM_ITEM_STYLE}
+                rules={[{ required: true, message: 'Please enter last name' }]}
+              >
+                <Input />
+              </Form.Item>
+            </FormCol>
+          </FormGrid>
+        </FormSection>
 
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item
-              name="email"
-              label="Email"
-              rules={[
-                { required: true, message: 'Please enter email' },
-                { type: 'email', message: 'Please enter valid email' }
-              ]}
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item
-              name="phone"
-              label="Phone"
-            >
-              <Input />
-            </Form.Item>
-          </Col>
-        </Row>
+        <FormSection title="Contact Information" icon={<MailOutlined />}>
+          <FormGrid columns={2}>
+            <FormCol>
+              <Form.Item
+                name="email"
+                label="Email"
+                style={FORM_ITEM_STYLE}
+                rules={[
+                  { required: true, message: 'Please enter email' },
+                  { type: 'email', message: 'Please enter valid email' }
+                ]}
+              >
+                <Input />
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item
+                name="phone"
+                label="Phone"
+                style={FORM_ITEM_STYLE}
+              >
+                <Input />
+              </Form.Item>
+            </FormCol>
+          </FormGrid>
+        </FormSection>
 
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item
-              name="department"
-              label="Department"
-              rules={[{ required: true, message: 'Please select department' }]}
-            >
-              <Select showSearch optionFilterProp="children" placeholder="Select department">
-                {departments.map(d => <Option key={d.id} value={d.name}>{d.name}</Option>)}
-              </Select>
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item
-              name="date_hired"
-              label="Date Hired"
-              rules={[{ required: true, message: 'Please select date' }]}
-            >
-              <DatePicker style={{ width: '100%' }} />
-            </Form.Item>
-          </Col>
-        </Row>
+        <FormSection title="Employment Details" icon={<IdcardOutlined />}>
+          <FormGrid columns={2}>
+            <FormCol>
+              <Form.Item
+                name="department"
+                label="Department"
+                style={FORM_ITEM_STYLE}
+                rules={[{ required: true, message: 'Please select department' }]}
+              >
+                <Select showSearch optionFilterProp="children" placeholder="Select department">
+                  {departments.map(d => <Option key={d.id} value={d.name}>{d.name}</Option>)}
+                </Select>
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item
+                name="date_hired"
+                label="Date Hired"
+                style={FORM_ITEM_STYLE}
+                rules={[{ required: true, message: 'Please select date' }]}
+              >
+                <DatePicker style={{ width: '100%' }} />
+              </Form.Item>
+            </FormCol>
+          </FormGrid>
 
-        <Row gutter={16}>
-          <Col span={8}>
-            <Form.Item
-              name="salary"
-              label="Salary"
-              rules={[{ required: true, message: 'Please enter salary' }]}
-            >
-              <Input type="number" prefix={cSym} />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item
-              name="role"
-              label="Role"
-            >
-              <Select showSearch optionFilterProp="children" placeholder="Select role" allowClear>
-                {roles.map(r => <Option key={r.id} value={r.name}>{r.name}</Option>)}
-              </Select>
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item
-              name="status"
-              label="Status"
-              rules={[{ required: true, message: 'Please select status' }]}
-            >
-              <Select>
-                <Option value="Active">Active</Option>
-                <Option value="Inactive">Inactive</Option>
-                <Option value="On Leave">On Leave</Option>
-              </Select>
-            </Form.Item>
-          </Col>
-        </Row>
+          <FormGrid>
+            <FormCol>
+              <Form.Item
+                name="salary"
+                label="Salary"
+                style={FORM_ITEM_STYLE}
+                rules={[{ required: true, message: 'Please enter salary' }]}
+              >
+                <Input type="number" prefix={cSym} />
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item
+                name="role"
+                label="Role"
+                style={FORM_ITEM_STYLE}
+              >
+                <Select showSearch optionFilterProp="children" placeholder="Select role" allowClear>
+                  {roles.map(r => <Option key={r.id} value={r.name}>{r.name}</Option>)}
+                </Select>
+              </Form.Item>
+            </FormCol>
+            <FormCol>
+              <Form.Item
+                name="status"
+                label="Status"
+                style={FORM_ITEM_STYLE}
+                rules={[{ required: true, message: 'Please select status' }]}
+              >
+                <Select>
+                  <Option value="Active">Active</Option>
+                  <Option value="Inactive">Inactive</Option>
+                  <Option value="On Leave">On Leave</Option>
+                </Select>
+              </Form.Item>
+            </FormCol>
+          </FormGrid>
+        </FormSection>
 
-        <Form.Item>
-          <Space style={{ float: 'right' }}>
+        <DocumentActionBar
+          left={
             <Button onClick={() => {
               setModalVisible(false);
               setEditingEmployee(null);
@@ -346,11 +366,12 @@ const EmployeeList = () => {
             }}>
               Cancel
             </Button>
-            <Button type="primary" htmlType="submit" loading={loading}>
-              {editingEmployee ? 'Update' : 'Add'} Employee
-            </Button>
-          </Space>
-        </Form.Item>
+          }
+        >
+          <Button type="primary" htmlType="submit" loading={loading}>
+            {editingEmployee ? 'Update' : 'Add'} Employee
+          </Button>
+        </DocumentActionBar>
       </Form>
     </Modal>
   );

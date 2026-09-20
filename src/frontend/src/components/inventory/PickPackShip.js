@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, Select, Input, InputNumber, DatePicker, message, Tag, Space, Row, Col, Steps, Tabs, Descriptions } from 'antd';
 import { ShoppingOutlined, CheckCircleOutlined, InboxOutlined, CarOutlined, PlusOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
+import { ensureTrailingEmptyLine, removeLineAndEnsureEmpty } from '../../utils/lineItems';
 
 const { Option } = Select;
 const { Step } = Steps;
@@ -11,6 +13,7 @@ const STATUS_COLORS = { Open: 'blue', Picking: 'orange', Picked: 'gold', Packed:
 const STATUS_STEP = { Open: 0, Picking: 1, Picked: 2, Packed: 3, Shipped: 4, Delivered: 5 };
 
 const PickPackShip = () => {
+  const { symbol: cSym } = useCurrency();
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [items, setItems] = useState([]);
@@ -95,16 +98,24 @@ const PickPackShip = () => {
     loadData();
   };
 
-  const addLine = () => setOrderLines([...orderLines, { item_id: null, description: '', quantity: 1, unit_price: 0 }]);
-  const removeLine = (idx) => { if (orderLines.length > 1) setOrderLines(orderLines.filter((_, i) => i !== idx)); };
+  const makeEmptyOrderLine = () => ({ item_id: null, description: '', quantity: 1, unit_price: 0 });
+  const addLine = () => setOrderLines(prev => [...prev, makeEmptyOrderLine()]);
+  const removeLine = (idx) => setOrderLines(prev => removeLineAndEnsureEmpty(prev, (_, i) => i !== idx, makeEmptyOrderLine));
   const updateLine = (idx, field, value) => {
-    const lines = [...orderLines];
-    lines[idx][field] = value;
-    if (field === 'item_id') {
-      const item = items.find(i => i.id === value);
-      if (item) { lines[idx].description = item.name; lines[idx].unit_price = item.price || 0; }
-    }
-    setOrderLines(lines);
+    setOrderLines(prev => {
+      const next = prev.map((l, i) => {
+        if (i !== idx) return l;
+        const updated = { ...l, [field]: value };
+        if (field === 'item_id') {
+          const item = items.find(it => it.id === value);
+          if (item) { updated.description = item.name; updated.unit_price = item.price || 0; }
+        }
+        return updated;
+      });
+      // Item selected → make sure a fresh empty line waits below.
+      if (field === 'item_id' && value) return ensureTrailingEmptyLine(next, makeEmptyOrderLine);
+      return next;
+    });
   };
 
   const columns = [
@@ -213,7 +224,7 @@ const PickPackShip = () => {
           <Form.Item name="tracking_number" label="Tracking Number"><Input /></Form.Item>
           <Form.Item name="shipping_method" label="Shipping Method"><Input placeholder="e.g. Ground, Express, Overnight" /></Form.Item>
           <Form.Item name="estimated_delivery" label="Estimated Delivery"><DatePicker style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="shipping_cost" label="Shipping Cost"><InputNumber min={0} prefix="$" style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="shipping_cost" label="Shipping Cost"><InputNumber min={0} prefix={cSym} style={{ width: '100%' }} /></Form.Item>
         </Form>
       </Modal>
     </Card>

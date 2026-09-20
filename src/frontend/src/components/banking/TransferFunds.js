@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Form, Input, InputNumber, Select, DatePicker, Button, Table, message, Card, Row, Col, Statistic, Typography, Tag, Space, Alert } from 'antd';
-import { SwapOutlined, BankOutlined, DownloadOutlined, HistoryOutlined, SearchOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import { Form, Input, InputNumber, Select, DatePicker, Button, Table, message, Card, Row, Col, Statistic, Typography, Tag, Space, Alert, Tooltip } from 'antd';
+import { SwapOutlined, BankOutlined, DownloadOutlined, HistoryOutlined, SearchOutlined, ArrowRightOutlined, BookOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+
+import AccountSelect from '../shared/AccountSelect';
+import JournalEntryDetailModal from '../accountant/JournalEntryDetailModal';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
@@ -20,6 +23,7 @@ const TransferFunds = () => {
   const [toBalance, setToBalance] = useState(0);
   const [fromAccountId, setFromAccountId] = useState(null);
   const [toAccountId, setToAccountId] = useState(null);
+  const [journalDetailId, setJournalDetailId] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
@@ -169,6 +173,15 @@ const TransferFunds = () => {
     return accounts.find(a => String(a.id) === String(toAccountId));
   }, [accounts, toAccountId]);
 
+  const openTransferJournal = async (record) => {
+    if (!record || !record.reference) { message.info('No journal entry posted for this transfer'); return; }
+    try {
+      const res = await window.electronAPI.journalGetBySource?.('transfer', record.reference);
+      if (res && !res.error && res.id) setJournalDetailId(res.id);
+      else message.info('No journal entry posted for this transfer');
+    } catch { message.error('Failed to load journal entry'); }
+  };
+
   const historyColumns = [
     { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-', sorter: (a, b) => new Date(a.date || 0) - new Date(b.date || 0) },
     { title: 'From Account', dataIndex: 'fromAccountId', key: 'fromAccountId', width: 140, render: v => getAccName(v) },
@@ -180,6 +193,11 @@ const TransferFunds = () => {
       const s = (r.status || 'active').toLowerCase();
       return s === 'voided' ? <Tag color="red">Void</Tag> : <Tag color="green">Active</Tag>;
     }},
+    { title: 'Actions', key: 'actions', width: 90, render: (_, r) => (
+      <Space size="small">
+        <Tooltip title="View journal entry"><Button type="text" size="small" icon={<BookOutlined />} onClick={() => openTransferJournal(r)} /></Tooltip>
+      </Space>
+    )},
   ];
 
   return (
@@ -222,11 +240,7 @@ const TransferFunds = () => {
           <Row gutter={16}>
             <Col xs={24} sm={12}>
               <Form.Item name="fromAccount" label="From Account" rules={[{ required: true, message: 'Select source account' }]}>
-                <Select showSearch optionFilterProp="children" placeholder="Select source account" onChange={(val) => { setFromAccountId(val); refreshBalance(val, setFromBalance); }}>
-                  {bankAccounts.map(a => (
-                    <Option key={a.id} value={a.id}>{a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}</Option>
-                  ))}
-                </Select>
+                <AccountSelect accounts={bankAccounts} placeholder="Select source account" onChange={(val) => { setFromAccountId(val); refreshBalance(val, setFromBalance); }} />
               </Form.Item>
               {fromAccount && (
                 <div style={{ marginBottom: 16, padding: '8px 12px', background: '#f6ffed', borderRadius: 4 }}>
@@ -237,11 +251,7 @@ const TransferFunds = () => {
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="toAccount" label="To Account" rules={[{ required: true, message: 'Select destination account' }]}>
-                <Select showSearch optionFilterProp="children" placeholder="Select destination account" onChange={(val) => { setToAccountId(val); refreshBalance(val, setToBalance); }}>
-                  {bankAccounts.map(a => (
-                    <Option key={a.id} value={a.id}>{a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}</Option>
-                  ))}
-                </Select>
+                <AccountSelect accounts={bankAccounts} placeholder="Select destination account" onChange={(val) => { setToAccountId(val); refreshBalance(val, setToBalance); }} />
               </Form.Item>
               {toAccount && (
                 <div style={{ marginBottom: 16, padding: '8px 12px', background: '#e6f7ff', borderRadius: 4 }}>
@@ -259,7 +269,7 @@ const TransferFunds = () => {
           <Row gutter={16}>
             <Col xs={24} sm={8}>
               <Form.Item name="amount" label="Transfer Amount" rules={[{ required: true, message: 'Enter amount' }, { type: 'number', min: 0.01, message: 'Amount must be greater than 0' }]}>
-                <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="0.00" formatter={v => `$ ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} parser={v => v.replace(/\$\s?|(,*)/g, '')} />
+                <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="0.00" formatter={v => `${cSym} ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} parser={v => v.replace(/[^\d.,-]/g, '')} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={8}>
@@ -297,7 +307,7 @@ const TransferFunds = () => {
           dataSource={filteredHistory}
           rowKey={(r, i) => r.id || i}
           size="small"
-          pagination={{ pageSize: 10, showSizeChanger: true, showTotal: t => `${t} transfers` }}
+          pagination={{ defaultPageSize: 10, showSizeChanger: true, showTotal: t => `${t} transfers` }}
           scroll={{ x: 700 }}
           locale={{ emptyText: 'No transfers recorded yet' }}
           summary={() => filteredHistory.length > 0 ? (
@@ -309,6 +319,12 @@ const TransferFunds = () => {
           ) : null}
         />
       </Card>
+
+      <JournalEntryDetailModal
+        journalEntryId={journalDetailId}
+        visible={!!journalDetailId}
+        onClose={() => setJournalDetailId(null)}
+      />
     </div>
   );
 };

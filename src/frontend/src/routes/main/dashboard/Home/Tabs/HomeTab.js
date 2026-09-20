@@ -1,5 +1,6 @@
 import React, { useState, useEffect, Suspense, lazy } from "react";
 import { Col, Row, Spin, Skeleton } from "antd";
+import { useHistory } from "react-router-dom";
 
 import { Area, AreaChart, Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
 import ChartCard from "components/dashboard/Home/ChartCard";
@@ -20,6 +21,7 @@ import FinancialHealth from "components/dashboard/Home/FinancialHealth";
 const CompanySnapshot = lazy(() => import("components/dashboard/Home/CompanySnapshot"));
 
 const HomeTab = () => {
+  const history = useHistory();
   const [loading, setLoading] = useState(true);
   const [chartsReady, setChartsReady] = useState(false);
   const [message, setMessage] = useState('');
@@ -134,7 +136,8 @@ const HomeTab = () => {
 
                 <Col xl={6} lg={12} md={12} sm={12} xs={24}>
           {chartsReady ? (
-          <ChartCard prize={invoicepaidtrend.length > 0 ? invoicepaidtrend[invoicepaidtrend.length - 1]?.number || 0 : 0} title="0" icon="crm"
+          <div style={{ cursor: 'pointer' }} onClick={() => { const now = new Date(); const f = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`; const t = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; history.push(`/main/customers/invoices/list?status=Paid&from=${f}&to=${t}`); }}>
+          <ChartCard prize={invoicepaidtrend.length > 0 ? invoicepaidtrend[invoicepaidtrend.length - 1]?.paid_count || 0 : 0} title="0" icon="crm"
                      children={<ResponsiveContainer width="100%" height={100}>
                        <AreaChart data={invoicepaidtrend}
                                   margin={{top: 0, right: 0, left: 0, bottom: 0}}>
@@ -150,13 +153,17 @@ const HomeTab = () => {
                                fillOpacity={1}/>
                        </AreaChart>
                      </ResponsiveContainer>}
-                     styleName="up" desc="Paid Invoices"/>
+                     styleName="up" desc="Paid This Month"/>
+          </div>
           ) : (
-            <ChartCard prize={0} title="0" icon="crm" styleName="up" desc="Paid Invoices" children={<Skeleton active paragraph={{ rows: 1 }} />} />
+            <div style={{ cursor: 'pointer' }} onClick={() => { const now = new Date(); const f = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`; const t = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; history.push(`/main/customers/invoices/list?status=Paid&from=${f}&to=${t}`); }}>
+            <ChartCard prize={0} title="0" icon="crm" styleName="up" desc="Paid This Month" children={<Skeleton active paragraph={{ rows: 1 }} />} />
+            </div>
           )}
         </Col>
         <Col xl={6} lg={12} md={12} sm={12} xs={24}>
           {chartsReady ? (
+          <div style={{ cursor: 'pointer' }} onClick={() => history.push('/main/customers/list')}>
           <ChartCard prize={customertrend.length > 0 ? customertrend[customertrend.length - 1]?.number || 0 : 0}  title="0" icon="user"
                      children={<ResponsiveContainer width="100%" height={100}>
                        <AreaChart data={customertrend}
@@ -173,12 +180,16 @@ const HomeTab = () => {
                        </AreaChart>
                      </ResponsiveContainer>}
                      styleName="down" desc="Total Customers"/>
+          </div>
           ) : (
+            <div style={{ cursor: 'pointer' }} onClick={() => history.push('/main/customers/list')}>
             <ChartCard prize={0} title="0" icon="user" styleName="down" desc="Total Customers" children={<Skeleton active paragraph={{ rows: 1 }} />} />
+            </div>
           )}
         </Col>
         <Col xl={6} lg={12} md={12} sm={12} xs={24}>
           {chartsReady ? (
+          <div style={{ cursor: 'pointer' }} onClick={() => history.push('/main/vendors/list')}>
           <ChartCard prize={suppliertrend.length > 0 ? suppliertrend[suppliertrend.length - 1]?.number || 0 : 0} title="0" icon="card"
                      children={<ResponsiveContainer width="100%" height={100}>
 
@@ -189,8 +200,11 @@ const HomeTab = () => {
                        </LineChart>
                      </ResponsiveContainer>}
                      styleName="down" desc="Total Suppliers"/>
+          </div>
           ) : (
+            <div style={{ cursor: 'pointer' }} onClick={() => history.push('/main/vendors/list')}>
             <ChartCard prize={0} title="0" icon="card" styleName="down" desc="Total Suppliers" children={<Skeleton active paragraph={{ rows: 1 }} />} />
+            </div>
           )}
         </Col>
               </Row>
@@ -202,17 +216,28 @@ const HomeTab = () => {
           <ProfitAndLoss 
             CurrentBalance = {(Number(openinvoicemoney) || 0) - (Number(openexpensemoney) || 0)} 
             Invoiced = {Number(openinvoicemoney) || 0} 
-            Expensed = {Number(openexpensemoney) || 0}/>
+            Expensed = {Number(openexpensemoney) || 0}
+            DailyRevenue = {dashboardSummary?.dailyRevenue}
+            DailyExpenses = {dashboardSummary?.dailyExpenses}
+            DailyCategories = {dashboardSummary?.dailyExpenseCategories}
+            MonthlyRevenue = {dashboardSummary?.monthlyPerformance || []}
+            MonthlyExpenses = {dashboardSummary?.monthlyExpensesMap || {}}
+            MonthlyCategories = {dashboardSummary?.monthlyExpenseCategoriesMap || {}}/>
         </Col>
         <Col xl={10} lg={24} md={10} sm={24} xs={24}>
-        <Expenses Expensed = {openexpensemoney} ExpenseList = {expenselist}/>
+        <Expenses Expensed = {openexpensemoney} ExpenseList = {expenselist}
+          DailyRevenue = {dashboardSummary?.dailyRevenue}
+          DailyExpenses = {dashboardSummary?.dailyExpenses}
+          DailyCategories = {dashboardSummary?.dailyExpenseCategories}
+          MonthlyExpenses = {dashboardSummary?.monthlyExpensesMap || {}}
+          MonthlyCategories = {dashboardSummary?.monthlyExpenseCategoriesMap || {}}/>
         </Col>
 
         <Col xl={14} lg={24} md={14} sm={24} xs={24}>
           <CashFlowTrend summary={dashboardSummary}/>
         </Col>
         <Col xl={10} lg={24} md={10} sm={24} xs={24}>
-          <InvoicesCard Report = {report}/>
+          <InvoicesCard Report = {{ ...report, ...dashboardSummary }}/>
         </Col>
         <Col xl={8} lg={24} md={8} sm={24} xs={24}>
           <AccountsReceivable Invoiced = {openinvoicemoney} ExpenseList = {expenselist}/>

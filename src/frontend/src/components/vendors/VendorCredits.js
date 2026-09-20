@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Modal, Form, DatePicker, Input, InputNumber, Select, message, Tag, Space, Row, Col, Typography, Empty } from 'antd';
-import { PlusOutlined, SwapOutlined, HistoryOutlined, FileTextOutlined } from '@ant-design/icons';
+import { PlusOutlined, SwapOutlined, HistoryOutlined, FileTextOutlined, EditOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 
@@ -21,6 +21,7 @@ const VendorCredits = ({ history }) => {
   const [credits, setCredits] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form] = Form.useForm();
 
   useEffect(() => { loadCredits(); loadSuppliers(); }, []);
@@ -40,26 +41,53 @@ const VendorCredits = ({ history }) => {
     } catch {}
   };
 
-  const handleCreate = async (values) => {
+  const openCreate = () => {
+    setEditingId(null);
+    form.resetFields();
+    setShowModal(true);
+  };
+
+  const openEdit = async (record) => {
+    try {
+      setEditingId(record.id);
+      form.setFieldsValue({
+        supplier_id: record.supplier_id,
+        date: record.date ? moment(record.date) : moment(),
+        amount: Number(record.amount || 0),
+        reference: record.reference || '',
+        memo: record.memo || '',
+      });
+      setShowModal(true);
+    } catch { message.error('Failed to load credit'); }
+  };
+
+  const handleSave = async (values) => {
     try {
       setLoading(true);
-      const res = await window.electronAPI.vendorCreditsCreate({
+      const payload = {
         supplier_id: values.supplier_id,
         date: values.date ? values.date.format('YYYY-MM-DD') : moment().format('YYYY-MM-DD'),
         amount: Number(values.amount) || 0,
         reference: values.reference || '',
         memo: values.memo || '',
-      });
+      };
+      let res;
+      if (editingId) {
+        res = await window.electronAPI.vendorCreditsUpdate?.(editingId, payload);
+      } else {
+        res = await window.electronAPI.vendorCreditsCreate(payload);
+      }
       if (res && res.success) {
-        message.success('Vendor credit created');
+        message.success(editingId ? 'Vendor credit updated' : 'Vendor credit created');
         setShowModal(false);
+        setEditingId(null);
         form.resetFields();
         await loadCredits();
       } else {
-        message.error(res?.error || 'Failed to create credit');
+        message.error(res?.error || 'Failed to save credit');
       }
     } catch (err) {
-      message.error('Failed to create credit');
+      message.error('Failed to save credit');
     } finally { setLoading(false); }
   };
 
@@ -95,10 +123,13 @@ const VendorCredits = ({ history }) => {
     { title: 'Memo', dataIndex: 'memo', key: 'memo', ellipsis: true },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 100,
       render: s => <Tag color={creditStatusColor(s)}>{s || 'Active'}</Tag> },
-    { title: 'Actions', key: 'actions', width: 80,
+    { title: 'Actions', key: 'actions', width: 160,
       render: (_, r) => (
         r.status === 'Active'
-          ? <Button size="small" danger onClick={() => handleVoid(r)}>Void</Button>
+          ? <Space>
+              <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>Edit</Button>
+              <Button size="small" danger onClick={() => handleVoid(r)}>Void</Button>
+            </Space>
           : null
       ),
     },
@@ -110,48 +141,57 @@ const VendorCredits = ({ history }) => {
         <h2 style={{ margin: 0 }}><SwapOutlined style={{ marginRight: 8 }} />Vendor Credits</h2>
         <Space>
           <Button icon={<FileTextOutlined />} onClick={() => history?.push('/main/vendors/bills/tracker')}>
-            Bill Tracker
+            Bill Management
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setShowModal(true)}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             New Credit
           </Button>
         </Space>
       </div>
 
       <Card>
-        <Table columns={columns} dataSource={credits} rowKey="id" loading={loading}
-          pagination={{ pageSize: 20, showTotal: t => `${t} credits` }} size="middle"
-          locale={{ emptyText: <Empty description="No vendor credits yet" /> }} />
+        {credits.length === 0 && !loading ? (
+          <Empty description="No vendor credits yet. Create one to get started." />
+        ) : (
+          <Table dataSource={credits} columns={columns} rowKey="id" loading={loading} size="small"
+            pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `${t} credits` }} />
+        )}
       </Card>
 
-      <Modal title="Create Vendor Credit" visible={showModal} onOk={() => form.submit()}
-        onCancel={() => { setShowModal(false); form.resetFields(); }}
-        confirmLoading={loading} okText="Create Credit" width={520} destroyOnClose>
-        <Form form={form} layout="vertical" onFinish={handleCreate} preserve={false}>
-          <Form.Item name="supplier_id" label="Vendor" rules={[{ required: true, message: 'Select vendor' }]}>
-            <Select showSearch optionFilterProp="children" placeholder="Select vendor">
+      <Modal
+        title={editingId ? 'Edit Vendor Credit' : 'New Vendor Credit'}
+        visible={showModal}
+        onOk={() => form.submit()}
+        onCancel={() => { setShowModal(false); setEditingId(null); form.resetFields(); }}
+        okText={editingId ? 'Update' : 'Create'}
+        width={500}
+        destroyOnClose
+      >
+        <Form form={form} layout="vertical" onFinish={handleSave} preserve={false}>
+          <Form.Item name="supplier_id" label="Vendor" rules={[{ required: true, message: 'Select a vendor' }]}>
+            <Select placeholder="Select vendor" showSearch optionFilterProp="children">
               {suppliers.map(s => (
-                <Option key={s.id} value={s.id}>{s.display_name || `${s.first_name} ${s.last_name}`}</Option>
+                <Option key={s.id} value={s.id}>{s.display_name || s.name || `${s.first_name || ''} ${s.last_name || ''}`.trim()}</Option>
               ))}
             </Select>
           </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="date" label="Credit Date" initialValue={moment()}>
-                <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+              <Form.Item name="date" label="Date" rules={[{ required: true }]}>
+                <DatePicker style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item name="amount" label="Amount" rules={[{ required: true, message: 'Enter amount' }]}>
-                <InputNumber style={{ width: '100%' }} min={0.01} step={0.01} prefix={cSym} />
+                <InputNumber min={0} step={0.01} prefix={cSym} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="reference" label="Reference / Credit Note #">
-            <Input placeholder="e.g. CN-001" />
+          <Form.Item name="reference" label="Reference">
+            <Input placeholder="Credit memo number or reference" />
           </Form.Item>
           <Form.Item name="memo" label="Memo">
-            <Input.TextArea rows={2} placeholder="Reason for credit" />
+            <Input.TextArea rows={2} placeholder="Optional notes" />
           </Form.Item>
         </Form>
       </Modal>

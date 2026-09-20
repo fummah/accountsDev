@@ -1,20 +1,203 @@
-.ant-drawer {
+/* Force dark sidebar menu text to white (overrides stale #038fdd blue) */
+.gx-app-sidebar .ant-menu-dark,
+.gx-app-sidebar .ant-menu-dark .ant-menu-sub,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item-group-title,
+.gx-drawer-sidebar .ant-menu-dark,
+.gx-drawer-sidebar .ant-menu-dark .ant-menu-sub,
+.gx-drawer-sidebar .ant-menu-dark .ant-menu-item-group-title {
+    color: #ffffff !important;
+}
+
+.gx-app-sidebar .ant-menu-dark .ant-menu-item,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item > a,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item > a > span,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item > span,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item > a *,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-title,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-title > span,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-title > a,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-title > a > span,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-title *,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-selected > .ant-menu-submenu-title,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item-group-title > span {
+    color: #ffffff !important;
+}
+
+/* Broad safety net: force white on any text/anchor inside sidebar menu items,
+   regardless of antd nesting or extra wrapper elements. */
+.gx-app-sidebar .ant-menu .ant-menu-item,
+.gx-app-sidebar .ant-menu .ant-menu-item a,
+.gx-app-sidebar .ant-menu .ant-menu-item a span,
+.gx-app-sidebar .ant-menu .ant-menu-submenu-title,
+.gx-app-sidebar .ant-menu .ant-menu-submenu-title a,
+.gx-app-sidebar .ant-menu .ant-menu-submenu-title span,
+.gx-app-sidebar .ant-menu .ant-menu-item a *,
+.gx-app-sidebar .ant-menu .ant-menu-submenu-title * {
+    color: #ffffff !important;
+}
+
+.gx-app-sidebar .ant-menu-dark .ant-menu-item:hover,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item-active,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-title:hover,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item-selected,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item-selected > a,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item-selected > a > span,
+.gx-app-sidebar .ant-menu-dark .ant-menu-item-selected > a:hover,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-selected > .ant-menu-submenu-title,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-selected > .ant-menu-submenu-title > span,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-open > .ant-menu-submenu-title,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-open > .ant-menu-submenu-title > span {
+    color: #fa8c15 !important;
+}
+
+/* Active/selected: underline in white for emphasis against the navy background */
+.gx-app-sidebar .ant-menu-dark .ant-menu-item-selected::after,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-selected > .ant-menu-submenu-title::after {
+    border-right-color: #ffffff !important;
+}
+
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-title .ant-menu-submenu-arrow:before,
+.gx-app-sidebar .ant-menu-dark .ant-menu-submenu-title .ant-menu-submenu-arrow:after {
+    background: #ffffff !important;
+}
+
+/* Submenu popups render in the body; highlight active/selected in orange */
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item > a,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item > a > span,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item > span {
+    color: #ffffff !important;
+}
+
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item:hover,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item-active,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item-selected,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item-selected > a,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-item-selected > a > span,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-submenu-selected > .ant-menu-submenu-title,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu-submenu-open > .ant-menu-submenu-title {
+    color: #fa8c15 !important;
+}
+
+/* Only the mobile/app sidebar drawer should be forced full-width. Normal
+   content drawers (e.g. Supplier/Vendor Details) must keep their set width,
+   otherwise the mask layers above the panel and blocks clicks (close X, tabs). */
+.gx-drawer-sidebar.ant-drawer {
     width: 100% !important;
 }
 
-.ant-drawer .ant-drawer-content-wrapper {
-    width: 100% !important;
-}
-
-.ant-drawer-right .ant-drawer-content-wrapper {
-    width: 100% !important;
-}
-
-.ant-drawer.ant-drawer-open .ant-drawer-content-wrapper {
-    width: 100% !important;
-}
-
-.ant-drawer-content-wrapper {
+.gx-drawer-sidebar .ant-drawer-content-wrapper,
+.gx-drawer-sidebar.ant-drawer-right .ant-drawer-content-wrapper,
+.gx-drawer-sidebar.ant-drawer-open .ant-drawer-content-wrapper {
     width: 100% !important;
     max-width: 100% !important;
 }
+
+/* ---------------------------------------------------------------------------
+   Restore antd's Row/Col grid inside vertical forms.
+
+   The vendored Jumbo theme (public/css/style.min.css) ships:
+       .ant-form-vertical .ant-row { flex-direction: column }
+   and the same rule used to be in src/styles/ui/form.less.
+
+   antd's Row/Col grid is a *row* flex container — `.ant-row{display:flex;
+   flex-direction:row;flex-wrap:wrap}` with `.ant-col-md-12{flex:0 0 50%}` and
+   friends. Forcing `column` made every `<Row><Col xs md lg>` inside a
+   `layout="vertical"` form render as a vertical stack of half-width fields,
+   i.e. "the fields are stacked instead of side by side" — which affected
+   Add Customer, Add Vendor, New Lead and every other vertical form.
+
+   antd already stacks each label above its control on its own, via
+   `.ant-form-vertical .ant-form-item-row{flex-direction:column}` and
+   `.ant-form-vertical .ant-form-item .ant-form-item-control{width:100%}`,
+   so restoring `row` here only brings back the grid and costs nothing.
+
+   IMPORTANT: antd 4.24 renders each Form.Item's label+control wrapper as
+   `<div class="ant-row ant-form-item-row">`. An unscoped
+   `.ant-form-vertical .ant-row { flex-direction: row }` therefore ALSO hits
+   that wrapper and forces the label to sit BESIDE its control. The restore is
+   scoped with `:not(.ant-form-item-row)` so it only ever applies to real
+   Row/Col grids, and the item row is explicitly pinned back to `column`.
+
+   `!important` is deliberate: it must win no matter which of the two
+   stylesheets declares the rule.
+   --------------------------------------------------------------------------- */
+.ant-form-vertical .ant-row:not(.ant-form-item-row) {
+    -ms-flex-direction: row !important;
+    flex-direction: row !important;
+}
+
+/* The label + control wrapper must always stack (label on top, control below).
+   This is the one rule that guarantees "LABEL ON TOP" for every standard field
+   in every vertical form, regardless of what the theme or other CSS does. */
+.ant-form-vertical .ant-form-item-row {
+    -ms-flex-direction: column !important;
+    flex-direction: column !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive width for right-hand form drawers (Add/Edit Supplier/Vendor,
+   and any other contact drawer that opts in with `className="app-form-drawer"`).
+
+   Desktop target: 600px — comfortable for the 2- and 3-column field grids
+   without going full-screen. Tablet: ~80vw. Mobile: full width. The drawer
+   still slides in from the right; only its width changes.
+
+   The compiled Jumbo theme (bundled into main.css) sets
+       .ant-drawer-right .ant-drawer-content-wrapper { width: 50% !important }
+   with the SAME (0,2,0) specificity, and main.css is injected after this file,
+   so an equal-specificity rule would lose. Prefixing the opt-in class with
+   `.ant-drawer` lifts these to (0,3,0) and wins regardless of load order.
+   --------------------------------------------------------------------------- */
+.ant-drawer.app-form-drawer .ant-drawer-content-wrapper {
+    width: 600px !important;
+    max-width: 95vw;
+}
+
+@media (max-width: 991px) {
+    .ant-drawer.app-form-drawer .ant-drawer-content-wrapper {
+        width: 80vw !important;
+    }
+}
+
+@media (max-width: 575px) {
+    .ant-drawer.app-form-drawer .ant-drawer-content-wrapper {
+        width: 100vw !important;
+        max-width: 100vw;
+    }
+}
+
+/* ---------------------------------------------------------------------------
+   Wider right-hand DETAIL drawer (CRM → Leads → View Lead). Same approach as
+   .app-form-drawer but roomier for the tabbed lead detail. Desktop target 680px;
+   tablet ~88vw; mobile full width. Still slides in from the right and keeps the
+   CRM page visible behind it. `.ant-drawer` prefix gives it the specificity to
+   beat the compiled theme's `width: 50% !important` regardless of load order.
+   --------------------------------------------------------------------------- */
+.ant-drawer.app-detail-drawer .ant-drawer-content-wrapper {
+    width: 680px !important;
+    max-width: 95vw;
+}
+
+@media (max-width: 991px) {
+    .ant-drawer.app-detail-drawer .ant-drawer-content-wrapper {
+        width: 88vw !important;
+    }
+}
+
+@media (max-width: 575px) {
+    .ant-drawer.app-detail-drawer .ant-drawer-content-wrapper {
+        width: 100vw !important;
+        max-width: 100vw;
+    }
+}
+
+/* Long, unbroken values (emails, URLs, addresses) must wrap inside the detail
+   drawer instead of forcing a horizontal scrollbar. `overflow-wrap` inherits,
+   so one rule covers every value line in the body. */
+.ant-drawer.app-detail-drawer .ant-drawer-body {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+

@@ -95,6 +95,27 @@ function registerSettingsHandlers() {
       return { error: e.message };
     }
   });
+
+  // Quote Template Customization (kept separate from the invoice template so
+  // quotes keep their own branding / topology settings).
+  ipcMain.handle('get-quote-template', async () => {
+    try {
+      return Settings.get('quoteTemplate') || {};
+    } catch (e) {
+      console.error('Error getting quote template:', e);
+      return { error: e.message };
+    }
+  });
+
+  ipcMain.handle('save-quote-template', async (_event, templateSettings) => {
+    try {
+      Settings.set('quoteTemplate', templateSettings || {});
+      return { success: true };
+    } catch (e) {
+      console.error('Error saving quote template:', e);
+      return { error: e.message };
+    }
+  });
 }
 
 module.exports = registerSettingsHandlers;

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Input, DatePicker, Select, Modal, Form, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../../../utils/currency';
 
 const { RangePicker } = DatePicker;
 
 export default function IncomeTrackerTab() {
+  const { symbol: cSym } = useCurrency();
   const [incomeData, setIncomeData] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -140,7 +142,7 @@ export default function IncomeTrackerTab() {
       <Table 
         columns={columns} 
         dataSource={incomeData} 
-        pagination={{ pageSize: 10 }}
+        pagination={{ defaultPageSize: 10 }}
         loading={loading}
         locale={{
           emptyText: loading ? 'Loading...' : 'No income transactions found'
@@ -169,7 +171,7 @@ export default function IncomeTrackerTab() {
             </Select>
           </Form.Item>
           <Form.Item label="Amount" name="amount" rules={[{ required: true }]}> 
-            <Input type="number" prefix="$" />
+            <Input type="number" prefix={cSym} />
           </Form.Item>
           <Form.Item label="Notes" name="notes">
             <Input.TextArea rows={3} />

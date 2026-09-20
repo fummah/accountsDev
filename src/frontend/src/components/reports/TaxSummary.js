@@ -133,7 +133,7 @@ const TaxSummary = () => {
         </Row>
 
         <Divider orientation="left">Tax Filing Records</Divider>
-        <Table dataSource={taxRecords} columns={taxColumns} rowKey={(r, i) => r.id || i} size="small" pagination={{ pageSize: 15 }} loading={loading} />
+        <Table dataSource={taxRecords} columns={taxColumns} rowKey={(r, i) => r.id || i} size="small" pagination={{ defaultPageSize: 15 }} loading={loading} />
 
         <Divider orientation="left">Tax Breakdown</Divider>
         <Table dataSource={vatData} columns={vatColumns} rowKey={(r, i) => r.id || i} size="small" pagination={false} loading={loading} />

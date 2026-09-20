@@ -54,7 +54,7 @@ async function register() {
 			const threshold = extractAmount(q);
 			const all = Invoices.getAllInvoices().all || [];
 			const today = new Date().toISOString().slice(0,10);
-			let overdue = all.filter(i => (i.status === 'Pending' || i.status === 'Overdue') && i.last_date < today);
+			let overdue = all.filter(i => ['open', 'partially paid', 'pending', 'overdue', 'unpaid', 'sent'].includes(String(i.status || '').toLowerCase()) && i.last_date < today);
 			if (threshold) overdue = overdue.filter(i => Number(i.amount || 0) >= threshold);
 			const total = sum(overdue, r => Number(r.amount || 0));
 			return { answerType: 'list', data: overdue.slice(0, 20), summary: `${overdue.length} overdue invoices totalling ${total.toFixed(2)}` };

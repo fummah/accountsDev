@@ -1,16 +1,23 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useHistory } from 'react-router-dom';
 import {
   Card, Table, Button, Space, Modal, Form, Input, Select, message,
   Drawer, Tabs, Tag, Badge, Progress, Row, Col, Statistic, Popconfirm,
   Timeline, Divider, Empty, Alert, InputNumber, DatePicker, Tooltip,
+  Radio, Spin,
 } from 'antd';
 import { useCurrency } from '../../utils/currency';
+import { ensureTrailingEmptyLine } from '../../utils/lineItems';
+import { Z } from '../../utils/layers';
+import CustomerContactFields, { CONTACT_FIELD_NAMES } from './shared/CustomerContactFields';
+import SendEmailModal from './shared/SendEmailModal';
+import { QuoteStatusBadge, normalizeStatus } from '../StatusBadge';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, UserAddOutlined,
   PhoneOutlined, MailOutlined, GlobalOutlined, EnvironmentOutlined,
   ClockCircleOutlined, CheckCircleOutlined, WarningOutlined,
   CalendarOutlined, BarChartOutlined, FunnelPlotOutlined, TeamOutlined,
-  TrophyOutlined, ReloadOutlined,
+  TrophyOutlined, ReloadOutlined, SearchOutlined, LinkOutlined, UserOutlined,
 } from '@ant-design/icons';
 import {
   BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
@@ -43,6 +50,43 @@ const PIE_COLORS = ['#1890ff','#52c41a','#fa8c16','#f5222d','#722ed1','#eb2f96',
 
 const stageMap = Object.fromEntries(STAGES.map(s => [s.key, s]));
 const prioMap  = Object.fromEntries(PRIORITIES.map(p => [p.key, p]));
+
+// How a lead's contact identity is established.
+const MODE_EXISTING = 'existing';   // pick an existing Customer (linked by id)
+const MODE_SCRATCH  = 'scratch';    // capture contact details from scratch
+
+/** Compose the legacy free-text `address` column from the structured parts. */
+const composeAddress = (c = {}) => {
+  if (!c) return '';
+  if (c.address1 || c.address2 || c.city || c.state || c.postal_code || c.country) {
+    return [c.address1, c.address2, [c.city, c.state, c.postal_code].filter(Boolean).join(' '), c.country]
+      .filter(Boolean).join(', ');
+  }
+  return c.address || '';
+};
+
+/** The customer contact columns, copied 1:1 onto the lead's own columns. */
+const contactFieldsFromCustomer = (c = {}) => ({
+  first_name:     c.first_name     || '',
+  last_name:      c.last_name      || '',
+  display_name:   c.display_name   || '',
+  company_name:   c.company_name   || '',
+  email:          c.email          || '',
+  phone_number:   c.phone_number   || '',
+  mobile_number:  c.mobile_number  || '',
+  address1:       c.address1       || '',
+  address2:       c.address2       || '',
+  city:           c.city           || '',
+  state:          c.state          || '',
+  postal_code:    c.postal_code    || '',
+  country:        c.country        || '',
+  website:        c.website        || '',
+  // Legacy mirrored columns, kept in sync so the kanban / list / drawer keep working.
+  company:        c.company_name   || '',
+  phone:          c.phone_number   || c.mobile_number || '',
+  address:        composeAddress(c),
+});
+
 const Leads = () => {
   const { symbol: cSym } = useCurrency();
   const fmtMoney = v => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -70,6 +114,10 @@ const Leads = () => {
   const [leadQuotes, setLeadQuotes]           = useState([]);
   const [quoteLines, setQuoteLines]           = useState([{ description:'', quantity:1, rate:0, amount:0 }]);
   const [convertThenQuote, setConvertThenQuote] = useState(false);
+  // Quote created from the modal → optional immediate email (same shared modal
+  // the standard Create Quote screen uses).
+  const [emailModalOpen, setEmailModalOpen]   = useState(false);
+  const [emailTarget, setEmailTarget]         = useState(null);
 
   const [draggedLead, setDraggedLead]         = useState(null);
   const [dragOverStage, setDragOverStage]     = useState(null);
@@ -77,11 +125,42 @@ const Leads = () => {
   const [employees, setEmployees]             = useState([]);
   const [empModalOpen, setEmpModalOpen]       = useState(false);
   const [products, setProducts]               = useState([]);
+  // Saved tax entities (the `vat` table) for the lead-quote tax dropdown.
+  const [vatRates, setVatRates]               = useState([]);
+  const [leadQuoteVatPercent, setLeadQuoteVatPercent] = useState(0);
+  const [vatModalOpen, setVatModalOpen]       = useState(false);
 
   const [leadForm]  = Form.useForm();
   const [actForm]   = Form.useForm();
   const [quoteForm] = Form.useForm();
   const [empForm]   = Form.useForm();
+  const [vatForm]   = Form.useForm();
+
+  const history = useHistory();
+
+  // ── New/Edit Lead: creation mode + existing-customer picker ──────────────────
+  // mode determines whether the lead is linked to an existing Customer by id,
+  // or whether its contact details are captured from scratch.
+  const [createMode, setCreateMode]           = useState(MODE_EXISTING);
+  const [customerOptions, setCustomerOptions] = useState([]);
+  const [customerSearching, setCustomerSearching] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [selectedCustomer, setSelectedCustomer]   = useState(null);
+  const [duplicateWarning, setDuplicateWarning]   = useState(null);
+  const customerSearchTimer = useRef(null);
+
+  // Server-side customer search (there are 60k+ customers — never load them all).
+  const searchCustomers = useCallback((term) => {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    customerSearchTimer.current = setTimeout(async () => {
+      setCustomerSearching(true);
+      try {
+        const res = await window.electronAPI.getCustomersPaginated?.(1, 25, term || '', '');
+        setCustomerOptions(Array.isArray(res?.data) ? res.data : []);
+      } catch (_) { setCustomerOptions([]); }
+      finally { setCustomerSearching(false); }
+    }, 300);
+  }, []);
 
   // ── Data ─────────────────────────────────────────────────────────────────────
   const fetchLeads = useCallback(async () => {
@@ -125,10 +204,31 @@ const Leads = () => {
     } catch {}
   }, []);
 
+  // The tax entities a lead quote can be linked to (the same `vat` rates the
+  // standard Create Quote screen offers).
+  const fetchVatRates = useCallback(async () => {
+    try {
+      const v = await window.electronAPI.getAllVat?.();
+      setVatRates(Array.isArray(v) ? v : []);
+    } catch { setVatRates([]); }
+  }, []);
+
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
   useEffect(() => { fetchMeta(); },  [fetchMeta]);
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  useEffect(() => { fetchVatRates(); }, [fetchVatRates]);
+
+  const handleAddVat = async () => {
+    try {
+      const vals = await vatForm.validateFields();
+      await window.electronAPI.insertVat?.(vals.vat_name || '', Number(vals.vat_percentage) || 0, null);
+      message.success('Tax rate added');
+      setVatModalOpen(false);
+      vatForm.resetFields();
+      await fetchVatRates();
+    } catch (e) { if (!e?.errorFields) message.error('Failed to add Tax rate'); }
+  };
 
   const fetchDrawerActs = async (leadId) => {
     setDrawerLoading(true);
@@ -146,22 +246,156 @@ const Leads = () => {
   const refresh = () => { fetchLeads(); fetchMeta(); };
 
   // ── Lead CRUD ────────────────────────────────────────────────────────────────
-  const openNewLead = () => {
-    setEditingLead(null); leadForm.resetFields(); setLeadModalOpen(true);
+  const resetLeadModeState = (mode = MODE_EXISTING) => {
+    setCreateMode(mode);
+    setSelectedCustomerId(null);
+    setSelectedCustomer(null);
+    setDuplicateWarning(null);
+    setCustomerOptions([]);
   };
-  const openEditLead = (lead) => {
-    setEditingLead(lead);
-    leadForm.setFieldsValue({
-      ...lead,
-      tags: lead.tags ? (typeof lead.tags === 'string' ? JSON.parse(lead.tags) : lead.tags) : [],
-      expected_close_date: lead.expected_close_date ? moment(lead.expected_close_date) : null,
-    });
+
+  const openNewLead = () => {
+    setEditingLead(null);
+    leadForm.resetFields();
+    resetLeadModeState(MODE_EXISTING);
+    searchCustomers('');           // seed the picker with the first page
     setLeadModalOpen(true);
   };
+
+  const openEditLead = (lead) => {
+    setEditingLead(lead);
+    const linkedId = lead.customer_id || null;
+    setCreateMode(linkedId ? MODE_EXISTING : MODE_SCRATCH);
+    setSelectedCustomerId(linkedId);
+    setSelectedCustomer(linkedId ? {
+      id: linkedId,
+      display_name: lead.linked_customer_name || lead.customer_name || `Customer #${linkedId}`,
+      email: lead.linked_customer_email || '',
+      company_name: lead.linked_customer_company || '',
+    } : null);
+    setDuplicateWarning(null);
+    leadForm.setFieldsValue({
+      ...lead,
+      customer_id: linkedId,
+      tags: lead.tags ? (typeof lead.tags === 'string' ? (() => { try { return JSON.parse(lead.tags); } catch { return []; } })() : lead.tags) : [],
+      expected_close_date: lead.expected_close_date ? moment(lead.expected_close_date) : null,
+    });
+    if (linkedId) searchCustomers('');
+    setLeadModalOpen(true);
+  };
+
+  /**
+   * Switch between "Existing Customer" and "New / From Scratch".
+   * Mode-specific values are cleared so a stale link or a stale contact block
+   * can never leak into the saved record. If the form already holds meaningful
+   * data we ask before clearing it.
+   */
+  const handleModeChange = (nextMode) => {
+    if (nextMode === createMode) return;
+    const apply = () => {
+      if (nextMode === MODE_EXISTING) {
+        // Leaving scratch: drop the scratch contact block, keep lead-only fields.
+        const cleared = { customer_id: undefined };
+        CONTACT_FIELD_NAMES.forEach(f => { cleared[f] = undefined; });
+        leadForm.setFieldsValue(cleared);
+        setDuplicateWarning(null);
+        searchCustomers('');
+      } else {
+        // Leaving "existing": drop the link so we never half-link a scratch lead.
+        setSelectedCustomerId(null);
+        setSelectedCustomer(null);
+        leadForm.setFieldsValue({ customer_id: undefined });
+      }
+      setCreateMode(nextMode);
+    };
+
+    const hasData = CONTACT_FIELD_NAMES.some(f => {
+      const v = leadForm.getFieldValue(f);
+      return v !== undefined && v !== null && String(v).trim() !== '';
+    });
+    const hasLink = createMode === MODE_EXISTING && !!selectedCustomerId;
+
+    if (hasData || hasLink) {
+      Modal.confirm({
+        title: 'Switch creation mode?',
+        content: 'The details captured for the current mode will be cleared.',
+        okText: 'Switch',
+        cancelText: 'Keep editing',
+        // The New Lead dialog is Z.MODAL (1050); the confirm must clear it.
+        zIndex: Z.CONFIRM,
+        onOk: apply,
+      });
+    } else {
+      apply();
+    }
+  };
+
+  /** Pick an existing customer → link by id and prefill the lead's contact copy. */
+  const handleSelectCustomer = async (customerId) => {
+    setSelectedCustomerId(customerId || null);
+    if (!customerId) { setSelectedCustomer(null); return; }
+    try {
+      const full = await window.electronAPI.getSingleCustomer?.(customerId);
+      if (!full || full.error) throw new Error('Customer not found');
+      setSelectedCustomer(full);
+      leadForm.setFieldsValue({
+        customer_id: customerId,
+        ...contactFieldsFromCustomer(full),
+        // Never touch lead-only fields (stage, priority, value, source…).
+      });
+    } catch (e) {
+      message.error('Could not load that customer');
+      setSelectedCustomerId(null);
+    }
+  };
+  const goToCustomer = (customerId) => {
+    if (!customerId) return;
+    history.push(`/main/customers/details/${customerId}`);
+  };
+
+  // Human-readable label for the currently linked customer.
+  const selectedCustomerName = selectedCustomer
+    ? (selectedCustomer.display_name
+       || `${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}`.trim()
+       || selectedCustomer.company_name
+       || `Customer #${selectedCustomerId}`)
+    : `Customer #${selectedCustomerId}`;
+
+  /**
+   * Duplicate guard for "from scratch": if a customer already exists with the
+   * same email, surface it rather than silently creating a parallel record.
+   */
+  const checkDuplicateCustomer = useCallback(async (email) => {
+    const term = String(email || '').trim();
+    if (!term) { setDuplicateWarning(null); return; }
+    try {
+      const res = await window.electronAPI.getCustomersPaginated?.(1, 5, term, '');
+      const rows = Array.isArray(res?.data) ? res.data : [];
+      const exact = rows.find(r => String(r.email || '').toLowerCase() === term.toLowerCase());
+      setDuplicateWarning(exact ? { id: exact.id, name: exact.display_name || `${exact.first_name || ''} ${exact.last_name || ''}`.trim() || exact.company_name } : null);
+    } catch (_) { setDuplicateWarning(null); }
+  }, []);
+
+  /** Duplicate found → adopt the existing customer as the lead's link. */
+  const linkDuplicateCustomer = async (id) => {
+    setCreateMode(MODE_EXISTING);
+    setDuplicateWarning(null);
+    searchCustomers('');
+    leadForm.setFieldsValue({ customer_id: id });
+    await handleSelectCustomer(id);
+  };
+
   const handleSaveLead = async () => {
     try {
       const v = await leadForm.validateFields();
-      const payload = { ...v, tags: v.tags || [], expected_close_date: v.expected_close_date ? v.expected_close_date.format('YYYY-MM-DD') : null };
+      const payload = {
+        ...v,
+        tags: v.tags || [],
+        expected_close_date: v.expected_close_date ? v.expected_close_date.format('YYYY-MM-DD') : null,
+        // Explicitly send customer_id (including null) so a mode switch
+        // reliably links or unlinks the lead.
+        customer_id: createMode === MODE_EXISTING ? (selectedCustomerId || null) : null,
+      };
       if (editingLead) { await window.electronAPI.crmUpdateLead({ ...editingLead, ...payload }); message.success('Lead updated'); }
       else             { await window.electronAPI.crmCreateLead(payload); message.success('Lead created'); }
       setLeadModalOpen(false); refresh();
@@ -225,7 +459,8 @@ const Leads = () => {
     setQuoteLines([{ description:'', quantity:1, rate:0, amount:0 }]);
     quoteForm.resetFields();
     quoteForm.setFieldsValue({
-      q_status: 'Draft',
+      // No status field: a lead quote is always created Pending, exactly like
+      // the standard Create Quote screen. Status only moves via workflow actions.
       q_email: lead.email || '',
       q_billing: lead.address || '',
       q_start: moment(),
@@ -233,6 +468,7 @@ const Leads = () => {
       q_vat: 0,
       q_message: '',
     });
+    setLeadQuoteVatPercent(0);
     setQuoteModalOpen(true);
   };
 
@@ -257,43 +493,82 @@ const Leads = () => {
     });
   };
 
+  const makeEmptyQuoteLine = () => ({ description: '', quantity: 1, rate: 0, amount: 0, product_id: null });
+
   const selectProduct = (idx, productId) => {
     const prod = products.find(p => p.id === productId);
-    if (prod) {
-      setQuoteLines(prev => prev.map((l, i) => {
+    if (!prod) return; // clearing the dropdown must not auto-add a line
+    const rate = Number(prod.selling_price || prod.price || 0);
+    setQuoteLines(prev => {
+      const updated = prev.map((l, i) => {
         if (i !== idx) return l;
-        const rate = Number(prod.selling_price || prod.price || 0);
         return { ...l, description: prod.name || prod.description, rate, amount: (l.quantity || 1) * rate, product_id: productId };
-      }));
+      });
+      // Product selected → make sure a fresh empty line waits below.
+      return ensureTrailingEmptyLine(updated, makeEmptyQuoteLine);
+    });
+  };
+
+  // Shared create step for "Create Quote" and "Create & Email".
+  // Returns the backend result, or null when client-side validation blocks it.
+  const submitLeadQuote = async () => {
+    await quoteForm.validateFields(['q_email','q_start']);
+    const filledLines = quoteLines.filter(l => (l.description || '').trim());
+    if (!filledLines.length) { message.warning('Add at least one line item'); return null; }
+    const allVals = quoteForm.getFieldsValue();
+    const quoteData = {
+      // No `status`: the backend always creates the quote Pending, matching the
+      // standard Create Quote screen. Status is workflow-owned, never hand-picked.
+      customer_email: allVals.q_email || '',
+      billing_address: allVals.q_billing || '',
+      start_date: allVals.q_start ? allVals.q_start.format('YYYY-MM-DD') : moment().format('YYYY-MM-DD'),
+      last_date: allVals.q_end   ? allVals.q_end.format('YYYY-MM-DD')   : '',
+      vat: Number(allVals.q_vat || 0),
+      message: allVals.q_message || '',
+    };
+    return window.electronAPI.crmCreateQuoteForLead(quoteLeadId, quoteData, filledLines);
+  };
+
+  // Bookkeeping shared by both create paths (close modal, refresh drawer + list).
+  const afterLeadQuoteCreated = async (res) => {
+    setQuoteModalOpen(false);
+    if (res?.customerId && drawerLead?.id === quoteLeadId) {
+      const updated = await window.electronAPI.crmGetLead(quoteLeadId);
+      if (updated && !updated.error) setDrawerLead(updated);
     }
+    fetchLeadQuotes(quoteLeadId);
+    refresh();
   };
 
   const handleCreateQuote = async () => {
     try {
-      const v = await quoteForm.validateFields(['q_status','q_email','q_start']);
-      const filledLines = quoteLines.filter(l => l.description.trim());
-      if (!filledLines.length) { message.warning('Add at least one line item'); return; }
-      const allVals = quoteForm.getFieldsValue();
-      const quoteData = {
-        status: allVals.q_status || 'Draft',
-        customer_email: allVals.q_email || '',
-        billing_address: allVals.q_billing || '',
-        start_date: allVals.q_start ? allVals.q_start.format('YYYY-MM-DD') : moment().format('YYYY-MM-DD'),
-        last_date: allVals.q_end   ? allVals.q_end.format('YYYY-MM-DD')   : '',
-        vat: Number(allVals.q_vat || 0),
-        message: allVals.q_message || '',
-      };
-      const res = await window.electronAPI.crmCreateQuoteForLead(quoteLeadId, quoteData, filledLines);
-      if (res?.success) {
+      const res = await submitLeadQuote();
+      if (!res) return;
+      if (res.success) {
         message.success(`Quote ${res.quoteNumber} created successfully!`);
-        setQuoteModalOpen(false);
-        if (res.customerId && drawerLead?.id === quoteLeadId) {
-          const updated = await window.electronAPI.crmGetLead(quoteLeadId);
-          if (updated && !updated.error) setDrawerLead(updated);
-        }
-        fetchLeadQuotes(quoteLeadId);
-        refresh();
+        await afterLeadQuoteCreated(res);
       } else { message.error(res?.error || 'Quote creation failed'); }
+    } catch (e) { if (!e?.errorFields) message.error('Failed to create quote'); }
+  };
+
+  // Create the quote, then hand straight over to the shared email modal so the
+  // PDF can be sent without leaving the lead — same flow as Create Quote.
+  const handleCreateQuoteAndEmail = async () => {
+    try {
+      const res = await submitLeadQuote();
+      if (!res) return;
+      if (!res.success) { message.error(res?.error || 'Quote creation failed'); return; }
+      const allVals = quoteForm.getFieldsValue();
+      message.success(`Quote ${res.quoteNumber} created successfully!`);
+      await afterLeadQuoteCreated(res);
+      setEmailTarget({
+        id: res.quoteId,
+        number: res.quoteNumber,
+        email: allVals.q_email || '',
+        customerName: drawerLead?.name || '',
+        amount: fmtMoney(quoteLines.reduce((s, l) => s + Number(l.amount || 0), 0)),
+      });
+      setEmailModalOpen(true);
     } catch (e) { if (!e?.errorFields) message.error('Failed to create quote'); }
   };
 
@@ -345,7 +620,18 @@ const Leads = () => {
     { title: 'Source',    dataIndex: 'source',              key: 'source',    render: v => v || '—' },
     { title: 'Close Date',dataIndex: 'expected_close_date', key: 'close',
       render: d => d ? moment(d).format('MM/DD/YYYY') : '—' },
-    { title: '', key: 'actions', width: 160, render: (_, r) => (
+    { title: 'Customer', key: 'customer', width: 150,
+      render: (_, r) => {
+        const linkedId = r.customer_id || r.converted_customer_id;
+        if (!linkedId) return <span style={{ color:'#bfbfbf' }}>—</span>;
+        return (
+          <Button type="link" size="small" style={{ padding: 0, height: 'auto', fontSize: 12 }}
+            onClick={() => goToCustomer(linkedId)}>
+            <LinkOutlined /> {r.linked_customer_name || r.customer_name || `#${linkedId}`}
+          </Button>
+        );
+      } },
+    { title: '', key: 'actions', width: 190, render: (_, r) => (
       <Space size={2}>
         <Button size="small" type="link" icon={<EditOutlined />}    onClick={() => openEditLead(r)} />
         <Button size="small" type="link"                            onClick={() => openDrawer(r)}>View</Button>
@@ -482,7 +768,7 @@ const Leads = () => {
           </div>
           <Table rowKey="id" dataSource={leads} columns={tableColumns} loading={loading} size="small"
             rowSelection={{ selectedRowKeys: selectedKeys, onChange: setSelectedKeys }}
-            pagination={{ pageSize:25, showSizeChanger:true, showTotal: t => `${t} leads` }} />
+            pagination={{ defaultPageSize: 25, showSizeChanger:true, showTotal: t => `${t} leads` }} />
         </TabPane>
 
         {/* ── Activities ─────────────────────────────────────────────────── */}
@@ -604,18 +890,23 @@ const Leads = () => {
 
       {/* ── Lead Drawer ──────────────────────────────────────────────────────── */}
       <Drawer
+        className="app-detail-drawer"
         title={drawerLead ? (
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span>{drawerLead.name}</span>
-            <Space>
+          <div style={{ display:'flex', flexWrap:'wrap', justifyContent:'space-between', alignItems:'center', gap:8, width:'100%' }}>
+            <span style={{ fontWeight:600, flex:'1 1 200px', minWidth:0, overflowWrap:'anywhere' }}>{drawerLead.name}</span>
+            <Space wrap>
               <Button size="small" icon={<EditOutlined />} onClick={() => openEditLead(drawerLead)}>Edit</Button>
+              {(drawerLead.customer_id || drawerLead.converted_customer_id) && (
+                <Button size="small" icon={<UserOutlined />}
+                  onClick={() => goToCustomer(drawerLead.customer_id || drawerLead.converted_customer_id)}>View Customer</Button>
+              )}
               {!drawerLead.converted_customer_id
                 ? <Button size="small" type="primary" icon={<UserAddOutlined />} onClick={() => setConvertTarget(drawerLead)}>Convert</Button>
                 : <Tag color="green"><CheckCircleOutlined /> Customer #{drawerLead.converted_customer_id}</Tag>}
             </Space>
           </div>
         ) : ''}
-        width={520} visible={!!drawerLead} onClose={() => setDrawerLead(null)} destroyOnClose>
+        width={680} visible={!!drawerLead} onClose={() => setDrawerLead(null)} destroyOnClose>
         {drawerLead && (
           <Tabs
             key={drawerLead.id}
@@ -654,15 +945,30 @@ const Leads = () => {
                 {drawerLead.tags && (() => { try { const t = JSON.parse(drawerLead.tags); return t.length > 0 ? (
                   <Col span={24}><div style={{ fontSize:11, color:'#8c8c8c' }}>Tags</div>{t.map(tag => <Tag key={tag}>{tag}</Tag>)}</Col>
                 ) : null; } catch { return null; } })()}
-                {drawerLead.converted_customer_id && (
-                  <Col span={24}>
-                    <div style={{ fontSize:11, color:'#8c8c8c' }}>Linked Customer</div>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <Tag color="green"><CheckCircleOutlined /> {drawerLead.customer_name || `Customer #${drawerLead.converted_customer_id}`}</Tag>
-                      <span style={{ fontSize:11, color:'#8c8c8c' }}>Converted {drawerLead.converted_at ? moment(drawerLead.converted_at).format('MM/DD/YYYY') : ''}</span>
-                    </div>
-                  </Col>
-                )}
+                {(drawerLead.customer_id || drawerLead.converted_customer_id) && (() => {
+                  const linkedId  = drawerLead.customer_id || drawerLead.converted_customer_id;
+                  const converted = !!drawerLead.converted_customer_id;
+                  const linkedName = drawerLead.linked_customer_name
+                    || (converted ? drawerLead.customer_name : null)
+                    || `Customer #${linkedId}`;
+                  return (
+                    <Col span={24}>
+                      <div style={{ fontSize:11, color:'#8c8c8c' }}>{converted ? 'Converted Customer' : 'Linked Customer'}</div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                        <Tag color={converted ? 'green' : 'blue'} style={{ margin:0 }}>
+                          {converted ? <CheckCircleOutlined /> : <LinkOutlined />} {linkedName}
+                        </Tag>
+                        <Button size="small" type="link" style={{ padding:0 }}
+                          onClick={() => goToCustomer(linkedId)}>View Customer</Button>
+                        {converted && drawerLead.converted_at && (
+                          <span style={{ fontSize:11, color:'#8c8c8c' }}>
+                            Converted {moment(drawerLead.converted_at).format('MM/DD/YYYY')}
+                          </span>
+                        )}
+                      </div>
+                    </Col>
+                  );
+                })()}
                 {drawerLead.lost_reason && <Col span={24}><div style={{ fontSize:11, color:'#8c8c8c' }}>Lost Reason</div><div style={{ color:'#f5222d' }}>{drawerLead.lost_reason}</div></Col>}
                 {drawerLead.notes && (
                   <Col span={24}>
@@ -689,13 +995,14 @@ const Leads = () => {
                 ? <Empty description="No quotes yet — click 'Create Quote' to send a quotation" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                 : <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                     {leadQuotes.map(q => {
-                      const statusColors = { Draft:'#8c8c8c', Open:'#1890ff', Sent:'#722ed1', Accepted:'#52c41a', Rejected:'#f5222d', Expired:'#fa8c16' };
+                      // Canonical quote workflow states (backend/services/documentStatus.js).
+                      const statusColors = { Pending:'#faad14', Accepted:'#52c41a', Declined:'#f5222d', Converted:'#722ed1' };
                       const subtotal = Number(q.amount || 0);
                       const vatAmt   = subtotal * (Number(q.vat || 0) / 100);
                       const total    = subtotal + vatAmt;
                       return (
-                        <Card key={q.id} size="small" style={{ borderLeft:`3px solid ${statusColors[q.status] || '#d9d9d9'}` }}
-                          extra={<Tag color={statusColors[q.status] || 'default'}>{q.status}</Tag>}>
+                        <Card key={q.id} size="small" style={{ borderLeft:`3px solid ${statusColors[normalizeStatus(q.status)] || '#d9d9d9'}` }}
+                          extra={<QuoteStatusBadge status={q.status} />}>
                           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                             <div>
                               <div style={{ fontWeight:600 }}>{q.number}</div>
@@ -752,39 +1059,123 @@ const Leads = () => {
       </Drawer>
 
       {/* ── Lead Form Modal ─────────────────────────────────────────────────── */}
-      <Modal title={editingLead ? 'Edit Lead' : 'New Lead'} visible={leadModalOpen} zIndex={1050}
-        onCancel={() => setLeadModalOpen(false)} onOk={handleSaveLead} width={680} okText="Save">
+      <Modal title={editingLead ? 'Edit Lead' : 'New Lead'} visible={leadModalOpen} zIndex={Z.MODAL}
+        onCancel={() => setLeadModalOpen(false)} onOk={handleSaveLead}
+        width={920} okText="Save" style={{ top: 24 }}
+        bodyStyle={{ maxHeight: 'calc(100vh - 190px)', overflowY: 'auto', paddingRight: 12 }}>
         <Form form={leadForm} layout="vertical">
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="name" label="Full Name" rules={[{ required:true, message:'Name required' }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="company" label="Company"><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="phone" label="Phone"><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="website" label="Website"><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="address" label="Address"><Input /></Form.Item></Col>
-            <Col span={12}>
+          {/* ── Section 1: Source ─────────────────────────────────────────── */}
+          <Divider orientation="left" plain style={{ marginTop: 0 }}>
+            <span style={{ fontSize: 12, color: '#8c8c8c' }}>Source</span>
+          </Divider>
+          <div style={{ marginBottom: 16 }}>
+            {/* Both creation modes on one line (wraps only on very small screens). */}
+            <Radio.Group
+              value={createMode}
+              onChange={(e) => handleModeChange(e.target.value)}
+              style={{ display: 'flex', flexWrap: 'wrap', columnGap: 24, rowGap: 8 }}
+            >
+              <Radio value={MODE_EXISTING}><span><LinkOutlined /> Existing Customer</span></Radio>
+              <Radio value={MODE_SCRATCH}><span><UserAddOutlined /> New / From Scratch</span></Radio>
+            </Radio.Group>
+          </div>
+
+          {/* ── Section 2: Customer / Contact Information ─────────────────── */}
+          <Divider orientation="left" plain style={{ marginTop: 0 }}>
+            <span style={{ fontSize: 12, color: '#8c8c8c' }}>Customer-Contact Information</span>
+          </Divider>
+
+          {createMode === MODE_EXISTING ? (
+            <>
+              <Form.Item name="customer_id" label="Customer"
+                rules={[{ required: true, message: 'Select a customer' }]}
+                extra="Linked by customer id — not by name or email. Contact details below are copied onto the lead and editing them here does not change the customer record.">
+                <Select
+                  showSearch allowClear
+                  placeholder="Search by name, display name, company, email, phone or customer #"
+                  filterOption={false}
+                  onSearch={searchCustomers}
+                  onChange={handleSelectCustomer}
+                  suffixIcon={<SearchOutlined />}
+                  notFoundContent={customerSearching ? <Spin size="small" /> : 'No customers found'}>
+                  {customerOptions.map(c => (
+                    <Option key={c.id} value={c.id}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span>
+                          {c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company_name || `Customer #${c.id}`}
+                        </span>
+                        <span style={{ color: '#8c8c8c', fontSize: 11 }}>
+                          {c.company_name ? `${c.company_name} · ` : ''}{c.email || ''} · #{c.id}
+                        </span>
+                      </div>
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+              {selectedCustomerId && (
+                <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Tag color="blue" style={{ margin: 0 }}>
+                    <LinkOutlined /> Linked to {selectedCustomerName}
+                  </Tag>
+                  <Button size="small" icon={<UserOutlined />} onClick={() => goToCustomer(selectedCustomerId)}>
+                    View Customer
+                  </Button>
+                </div>
+              )}
+              <CustomerContactFields form={leadForm} sections={false} showNotes={false} gridColumns="1fr 1fr 1fr" />
+              <Row gutter={12}>
+                <Col span={8}><Form.Item name="website" label="Website"><Input /></Form.Item></Col>
+              </Row>
+            </>
+          ) : (
+            <>
+              {duplicateWarning && (
+                <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+                  message="A customer with this email already exists"
+                  description={
+                    <span>
+                      <strong>{duplicateWarning.name}</strong> (Customer #{duplicateWarning.id}) —{' '}
+                      <Button type="link" size="small" style={{ padding: 0, height: 'auto' }}
+                        onClick={() => linkDuplicateCustomer(duplicateWarning.id)}>link to that customer instead</Button>
+                    </span>
+                  } />
+              )}
+              <CustomerContactFields form={leadForm} sections={false} showNotes={false} gridColumns="1fr 1fr 1fr"
+                onEmailChange={checkDuplicateCustomer} />
+              <Row gutter={12}>
+                <Col span={8}><Form.Item name="website" label="Website"><Input /></Form.Item></Col>
+              </Row>
+            </>
+          )}
+
+          {/* ── Section 3: Lead Details ───────────────────────────────────── */}
+          <Divider orientation="left" plain>
+            <span style={{ fontSize: 12, color: '#8c8c8c' }}>Lead Details</span>
+          </Divider>
+          <Row gutter={12}>
+            <Col span={8}>
               <Form.Item name="pipeline_stage" label="Pipeline Stage" initialValue="new">
                 <Select>{STAGES.map(s => <Option key={s.key} value={s.key}><Tag color={s.color} style={{ marginRight:4 }}>{s.label}</Tag></Option>)}</Select>
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="priority" label="Priority" initialValue="medium">
                 <Select>{PRIORITIES.map(p => <Option key={p.key} value={p.key}><Tag color={p.color}>{p.label}</Tag></Option>)}</Select>
               </Form.Item>
             </Col>
-            <Col span={12}>
-              <Form.Item name="value" label="Deal Value (R)" initialValue={0}>
+            <Col span={8}>
+              <Form.Item name="value" label="Deal Value" initialValue={0}>
                 <InputNumber min={0} style={{ width:'100%' }}
                   formatter={v => `${cSym} ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                   parser={v => v.replace(new RegExp(`${cSym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s?|(,*)`, 'g'), '')} />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="source" label="Lead Source">
                 <Select allowClear>{SOURCES.map(s => <Option key={s} value={s}>{s}</Option>)}</Select>
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="assigned_to" label="Assigned To">
                 <Select allowClear showSearch optionFilterProp="children" placeholder="Select employee"
                   dropdownRender={menu => (
@@ -794,26 +1185,33 @@ const Leads = () => {
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="expected_close_date" label="Expected Close Date">
                 <DatePicker style={{ width:'100%' }} format="MM/DD/YYYY" />
               </Form.Item>
             </Col>
+            {(editingLead?.pipeline_stage === 'lost') && (
+              <Col span={24}><Form.Item name="lost_reason" label="Lost Reason"><Input /></Form.Item></Col>
+            )}
+          </Row>
+
+          {/* ── Section 4: Tags & Notes ───────────────────────────────────── */}
+          <Divider orientation="left" plain>
+            <span style={{ fontSize: 12, color: '#8c8c8c' }}>Tags &amp; Notes</span>
+          </Divider>
+          <Row gutter={12}>
             <Col span={24}>
               <Form.Item name="tags" label="Tags">
                 <Select mode="tags" placeholder="Type and press Enter to add tags…" style={{ width:'100%' }} />
               </Form.Item>
             </Col>
             <Col span={24}><Form.Item name="notes" label="Notes"><TextArea rows={3} /></Form.Item></Col>
-            {(editingLead?.pipeline_stage === 'lost') && (
-              <Col span={24}><Form.Item name="lost_reason" label="Lost Reason"><Input /></Form.Item></Col>
-            )}
           </Row>
         </Form>
       </Modal>
 
       {/* ── Activity Modal ─────────────────────────────────────────────────── */}
-      <Modal title={editingAct ? 'Edit Activity' : 'Log Activity'} visible={actModalOpen} zIndex={1050}
+      <Modal title={editingAct ? 'Edit Activity' : 'Log Activity'} visible={actModalOpen} zIndex={Z.MODAL}
         onCancel={() => setActModalOpen(false)} onOk={handleSaveActivity} okText="Save">
         <Form form={actForm} layout="vertical">
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -846,7 +1244,7 @@ const Leads = () => {
       </Modal>
 
       {/* ── Convert Confirmation ────────────────────────────────────────────── */}
-      <Modal title="Convert Lead to Customer" visible={!!convertTarget} zIndex={1050}
+      <Modal title="Convert Lead to Customer" visible={!!convertTarget} zIndex={Z.MODAL}
         onCancel={() => { setConvertTarget(null); setConvertThenQuote(false); }}
         onOk={handleConvert} okText="Convert" okType="primary">
         {convertTarget && (
@@ -864,17 +1262,22 @@ const Leads = () => {
       </Modal>
 
       {/* ── Lead Quote Creation Modal ─────────────────────────────────────────── */}
-      <Modal title="Create Quotation for Lead" visible={quoteModalOpen} zIndex={1050}
-        onCancel={() => setQuoteModalOpen(false)} onOk={handleCreateQuote}
-        okText="Create Quote" width={780} style={{ top:20 }}>
+      <Modal title="Create Quotation for Lead" visible={quoteModalOpen} zIndex={Z.MODAL}
+        onCancel={() => setQuoteModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setQuoteModalOpen(false)}>Cancel</Button>,
+          <Button key="email" icon={<MailOutlined />} onClick={handleCreateQuoteAndEmail}>Create &amp; Email</Button>,
+          <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleCreateQuote}>Create Quote</Button>,
+        ]}
+        width={780} style={{ top:20 }}>
         <Form form={quoteForm} layout="vertical">
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             <Col span={8}>
-              <Form.Item name="q_status" label="Status" initialValue="Draft">
-                <Select>
-                  {['Draft','Open','Sent','Accepted','Rejected','Expired'].map(s =>
-                    <Option key={s} value={s}>{s}</Option>)}
-                </Select>
+              <Form.Item label="Status">
+                <Space>
+                  <QuoteStatusBadge status="Pending" />
+                  <span style={{ color:'#8c8c8c', fontSize:12 }}>Controlled by workflow actions</span>
+                </Space>
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -893,8 +1296,24 @@ const Leads = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="q_vat" label="Tax %" initialValue={0}>
-                <InputNumber min={0} max={100} style={{ width:'100%' }} addonAfter="%" />
+              <Form.Item name="q_vat" label="Tax Rate (%)" initialValue={0}>
+                <Select allowClear placeholder="Select Tax rate"
+                  onChange={(v) => setLeadQuoteVatPercent(Number(v) || 0)}
+                  dropdownRender={(menu) => (
+                    <>
+                      {menu}
+                      <Divider style={{ margin: '4px 0' }} />
+                      <Button type="link" icon={<PlusOutlined />} onMouseDown={e => e.preventDefault()}
+                        onClick={() => setVatModalOpen(true)} style={{ width:'100%', textAlign:'left' }}>
+                        Add New Tax Rate
+                      </Button>
+                    </>
+                  )}>
+                  <Option value={0}>No Tax (0%)</Option>
+                  {vatRates.map(v => (
+                    <Option key={v.id} value={v.vat_percentage}>{v.vat_name} ({v.vat_percentage}%)</Option>
+                  ))}
+                </Select>
               </Form.Item>
             </Col>
             <Col span={24}>
@@ -951,7 +1370,11 @@ const Leads = () => {
                     </td>
                     <td style={{ padding:'4px 4px', textAlign:'center' }}>
                       <Button size="small" type="link" danger icon={<DeleteOutlined />}
-                        onClick={() => setQuoteLines(prev => prev.filter((_,i) => i !== idx))} />
+                        onClick={() => setQuoteLines(prev => {
+                          const next = prev.filter((_, i) => i !== idx);
+                          if (next.length === 0) return [makeEmptyQuoteLine()];
+                          return ensureTrailingEmptyLine(next, makeEmptyQuoteLine);
+                        })} />
                     </td>
                   </tr>
                 ))}
@@ -965,7 +1388,7 @@ const Leads = () => {
 
           {/* Totals */}
           {(() => {
-            const vatRate  = Number(quoteForm.getFieldValue('q_vat') || 0);
+            const vatRate  = Number(leadQuoteVatPercent) || 0;
             const subtotal = quoteLines.reduce((s,l) => s + Number(l.amount||0), 0);
             const vatAmt   = subtotal * (vatRate / 100);
             const total    = subtotal + vatAmt;
@@ -980,8 +1403,33 @@ const Leads = () => {
         </Form>
       </Modal>
 
+      {/* ── Add New Tax Rate (linked from the lead quote tax dropdown) ───────── */}
+      <Modal title="Add New Tax Rate" visible={vatModalOpen} zIndex={Z.NESTED_MODAL}
+        onOk={handleAddVat} onCancel={() => setVatModalOpen(false)} okText="Add" destroyOnClose>
+        <Form form={vatForm} layout="vertical" preserve={false}>
+          <Form.Item name="vat_name" label="Tax Name" rules={[{ required: true }]}>
+            <Input placeholder="e.g. Standard Rate" />
+          </Form.Item>
+          <Form.Item name="vat_percentage" label="Percentage (%)" rules={[{ required: true }]}>
+            <InputNumber style={{ width:'100%' }} min={0} max={100} step={0.5} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ── Email the quote that was just created from this lead ─────────────── */}
+      <SendEmailModal
+        visible={emailModalOpen}
+        onClose={() => { setEmailModalOpen(false); setEmailTarget(null); }}
+        recipientEmail={emailTarget?.email || ''}
+        documentType="Quote"
+        documentNumber={emailTarget?.number || ''}
+        amount={emailTarget?.amount || ''}
+        customerName={emailTarget?.customerName || ''}
+        documentId={emailTarget?.id || null}
+      />
+
       {/* ── Add Employee Modal ──────────────────────────────────────────────── */}
-      <Modal title="Add New Employee" visible={empModalOpen} zIndex={1100}
+      <Modal title="Add New Employee" visible={empModalOpen} zIndex={Z.NESTED_MODAL}
         onCancel={() => setEmpModalOpen(false)} onOk={handleAddEmployee} okText="Add Employee">
         <Form form={empForm} layout="vertical">
           <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>

@@ -3,6 +3,7 @@ import { Card, Button, InputNumber, Select, Row, Col, Tag, Space, message, Alert
 import { PlusOutlined, DeleteOutlined, ShoppingCartOutlined, ArrowLeftOutlined, DollarOutlined, CreditCardOutlined, MobileOutlined } from '@ant-design/icons';
 import { useHistory } from 'react-router-dom';
 import { useCurrency } from '../../../utils/currency';
+import { ensureTrailingEmptyLine, removeLineAndEnsureEmpty } from '../../../utils/lineItems';
 
 const { Option } = Select;
 
@@ -43,21 +44,29 @@ const NewSale = () => {
     setLines(copy);
   };
 
+  const makeEmptySaleLine = () => ({ itemId: null, quantity: 1, price: 0, name: '' });
+
   const selectItem = (idx, itemId) => {
     const item = items.find(i => i.id === itemId);
-    const copy = [...lines];
-    copy[idx] = {
-      ...copy[idx],
-      itemId,
-      name: item?.name || '',
-      price: Number(item?.unitPrice || item?.price || 0),
-      lineTotal: (Number(copy[idx].quantity) || 1) * Number(item?.unitPrice || item?.price || 0),
-    };
-    setLines(copy);
+    if (!item) return; // clearing the dropdown must not auto-add a line
+    setLines(prev => {
+      const updated = prev.map((l, i) => {
+        if (i !== idx) return l;
+        return {
+          ...l,
+          itemId,
+          name: item.name || '',
+          price: Number(item.unitPrice || item.price || 0),
+          lineTotal: (Number(l.quantity) || 1) * Number(item.unitPrice || item.price || 0),
+        };
+      });
+      // Item selected → make sure a fresh empty line waits below.
+      return ensureTrailingEmptyLine(updated, makeEmptySaleLine);
+    });
   };
 
-  const addLine = () => setLines([...lines, { itemId: null, quantity: 1, price: 0, name: '' }]);
-  const removeLine = (idx) => setLines(lines.length > 1 ? lines.filter((_, i) => i !== idx) : lines);
+  const addLine = () => setLines(prev => [...prev, makeEmptySaleLine()]);
+  const removeLine = (idx) => setLines(prev => removeLineAndEnsureEmpty(prev, (_, i) => i !== idx, makeEmptySaleLine));
 
   const subtotal = lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.price) || 0), 0);
   const tax = 0;

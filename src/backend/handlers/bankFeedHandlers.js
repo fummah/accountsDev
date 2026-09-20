@@ -122,18 +122,58 @@ async function register() {
 		return results;
 	});
 
-	// Apply best suggestions: mark matched transactions as reconciled
+	// Apply best suggestions: reconcile matched transactions against a real
+	// reconciliation record (never a bare isReconciled=1 UPDATE). This keeps the
+	// audit trail, the reconciliation_transactions junction, and the ability to
+	// un-reconcile by deleting the record. Suggestions are grouped per account,
+	// and the statement balance is set to the cleared balance so the record
+	// balances (difference = 0, no adjustment journal needed).
 	ipcMain.handle('bank-apply-suggestions', async (_e, { suggestions = [], minScore = 0.9 } = {}) => {
 		try {
 			const db = require('../models/dbmgr');
-			let updated = 0;
+			const Transactions = require('../models/transactions');
+			const matchedIds = [];
 			for (const s of suggestions) {
 				if (!s || !Array.isArray(s.matches) || s.matches.length === 0) continue;
 				const best = s.matches[0];
 				if (!best || typeof best.txId !== 'number') continue;
 				if (typeof best.score === 'number' && best.score < Number(minScore)) continue;
-				const res = db.prepare(`UPDATE transactions SET isReconciled=1 WHERE id=? AND IFNULL(isReconciled,0)=0`).run(best.txId);
-				updated += (res && res.changes) ? res.changes : 0;
+				matchedIds.push(best.txId);
+			}
+			if (matchedIds.length === 0) return { success: true, updated: 0 };
+
+			// Group the matched transactions by their bank account.
+			const placeholders = matchedIds.map(() => '?').join(',');
+			const rows = db.prepare(
+				`SELECT id, accountId, IFNULL(debit,0) AS debit, IFNULL(credit,0) AS credit
+				 FROM transactions WHERE id IN (${placeholders}) AND IFNULL(isReconciled,0) = 0`
+			).all(...matchedIds);
+
+			const byAccount = {};
+			for (const r of rows) {
+				const key = Number(r.accountId) || 0;
+				byAccount[key] = byAccount[key] || { txIds: [], movement: 0 };
+				byAccount[key].txIds.push(r.id);
+				byAccount[key].movement += (Number(r.debit) || 0) - (Number(r.credit) || 0);
+			}
+
+			let updated = 0;
+			const recDate = new Date().toISOString().slice(0, 10);
+			for (const key of Object.keys(byAccount)) {
+				const grp = byAccount[key];
+				const accountId = Number(key);
+				if (!accountId) continue; // skip transactions not linked to an account
+				const accountName = db.prepare('SELECT name FROM chart_of_accounts WHERE id = ?').get(accountId)?.name || null;
+				// statementBalance = cleared balance => difference 0, no adjustment.
+				Transactions.reconcileTransactions({
+					accountId,
+					accountName,
+					statementDate: recDate,
+					statementBalance: grp.movement,
+					transactions: grp.txIds,
+					reconciledBy: 'bank-feed',
+				});
+				updated += grp.txIds.length;
 			}
 			const AuditLog = require('../models/auditLog');
 			AuditLog.log({ userId: 'system', action: 'bankApplySuggestions', entityType: 'bank', entityId: 'reconcile', details: { updated } });

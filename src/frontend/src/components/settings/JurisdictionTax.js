@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, Select, Input, InputNumber, message, Tag, Space, Row, Col, Switch, Statistic, Divider } from 'antd';
 import { GlobalOutlined, PlusOutlined, CalculatorOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
 const JurisdictionTax = () => {
+  const { symbol: cSym } = useCurrency();
   const [rules, setRules] = useState([]);
   const [jurisdictions, setJurisdictions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -95,7 +97,7 @@ const JurisdictionTax = () => {
         <Col span={16}><span style={{ color: '#888' }}>{rules.length} tax rules loaded</span></Col>
       </Row>
 
-      <Table columns={columns} dataSource={rules} rowKey="id" loading={loading} size="small" pagination={{ pageSize: 20 }} />
+      <Table columns={columns} dataSource={rules} rowKey="id" loading={loading} size="small" pagination={{ defaultPageSize: 20 }} />
 
       <Modal title="Tax Rule" visible={editVisible} onOk={handleSave} onCancel={() => { setEditVisible(false); form.resetFields(); }} width={600}>
         <Form form={form} layout="vertical">
@@ -146,7 +148,7 @@ const JurisdictionTax = () => {
         {calcResult && (
           <div style={{ marginTop: 16 }}>
             <Divider />
-            <Statistic title="Tax Amount" value={calcResult.tax} prefix="$" precision={2} />
+            <Statistic title="Tax Amount" value={calcResult.tax} prefix={cSym} precision={2} />
             <p style={{ marginTop: 8, color: '#666' }}>{calcResult.details}</p>
           </div>
         )}

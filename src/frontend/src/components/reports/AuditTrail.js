@@ -158,7 +158,7 @@ const AuditTrail = () => {
           rowKey="id"
           size="small"
           loading={loading}
-          pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100', '200'] }}
+          pagination={{ defaultPageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100', '200'] }}
           scroll={{ x: 900 }}
         />
       </Card>

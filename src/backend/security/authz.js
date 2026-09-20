@@ -93,6 +93,7 @@ const ROLE_PERMISSIONS = {
     'read:*',
     'write:transactions',
     'write:invoices',
+    'write:quotes',
     'write:journal',
     'write:reconcile',
     'write:fixed-assets'

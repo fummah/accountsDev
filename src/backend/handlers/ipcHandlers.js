@@ -234,10 +234,10 @@ const registerIpcHandlers = () => {
 
   // Handler to insert an customer
   safeHandle('insert-customer', async (event, title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-    fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes) => {
+    fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes,taxable,default_tax_rate,default_tax_rate_id) => {
     try {
       return await Customers.insertCustomer(title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-        fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes);
+        fax,other,website,address1,address2,city,state,postal_code,country,payment_method,terms,tax_number,entered_by,opening_balance,as_of,delivery_option,language,notes,taxable,default_tax_rate,default_tax_rate_id);
     } catch (error) {
       console.error('Error inserting customer:', error);
       return { error: error.message };
@@ -264,10 +264,10 @@ const registerIpcHandlers = () => {
 
   // Handler to insert a supplier
 safeHandle('insert-supplier', async (event, title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-    fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes,vendor_type) => {
+    fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes,vendor_type,taxable,default_tax_rate,default_tax_rate_id) => {
     try {
       return await Suppliers.insertSupplier(title,first_name,middle_name, last_name, suffix,email,display_name,company_name,phone_number,mobile_number,
-        fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes,vendor_type);
+        fax,other,website,address1,address2,city,state,postal_code,country,supplier_terms,business_number,account_number,expense_category,opening_balance,as_of,entered_by,notes,vendor_type,taxable,default_tax_rate,default_tax_rate_id);
     } catch (error) {
       console.error('Error inserting supplier:', error);
       return { error: error.message };
@@ -288,6 +288,15 @@ safeHandle('get-expenses-paginated', async (event, page, pageSize, search) => {
     return await Expenses.getPaginated(page, pageSize, search || '');
   } catch (error) {
     console.error('Error fetching expenses (paginated):', error);
+    return { error: error.message };
+  }
+});
+
+safeHandle('get-open-bills', async (event, payeeId) => {
+  try {
+    return await Expenses.getOpenBills(payeeId);
+  } catch (error) {
+    console.error('Error fetching open bills:', error);
     return { error: error.message };
   }
 });
@@ -401,13 +410,24 @@ safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccou
     const ap = COA.getSystemAccount('Accounts Payable');
     if (!ap) return { success: false, error: 'Accounts Payable account not in COA' };
 
-    // Resolve bank account by name or fallback to first bank
+    // Resolve bank account by ID (preferred) or name. A check may only be drawn
+    // on a real Bank-type account — never silently fall back to the first bank
+    // or to a Cash account.
     let bank = null;
     if (bankAccount) {
-      bank = db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status='Active' LIMIT 1").get(bankAccount);
+      const numericId = Number(bankAccount);
+      if (Number.isFinite(numericId) && numericId > 0) {
+        bank = db.prepare("SELECT * FROM chart_of_accounts WHERE id = ? AND status = 'Active'").get(numericId);
+      }
+      if (!bank) {
+        bank = db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status = 'Active' LIMIT 1").get(String(bankAccount));
+      }
     }
-    if (!bank) bank = db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(type) IN ('bank','cash') AND status='Active' LIMIT 1").get();
-    if (!bank) return { success: false, error: 'No bank/cash account found in COA' };
+    if (!bank) return { success: false, error: `Bank account "${bankAccount || ''}" not found in COA` };
+    const bankType = String(bank.type || '').trim().toLowerCase();
+    if (bankType !== 'bank') {
+      return { success: false, error: `Selected account "${bank.name || ''}" (${bank.type || ''}) is not a Bank account. Checks must be drawn on a Bank account.` };
+    }
 
     const billAmt = Number(amount) || 0;
     if (billAmt <= 0) return { success: false, error: 'Invalid bill amount' };
@@ -440,19 +460,10 @@ safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccou
 
     const pmtDate = paymentDate || new Date().toISOString().slice(0, 10);
 
-    // Post DR AP / CR Bank (payment amount only)
-    JournalEntries.post({
-      date: pmtDate,
-      description: `Bill payment — expense #${expenseId}`,
-      source_type: 'bill_payment',
-      source_id: expenseId,
-      lines: [
-        { account_id: ap.id,   debit: billAmt, credit: 0,       description: 'Accounts Payable cleared' },
-        { account_id: bank.id, debit: 0,       credit: billAmt, description: 'Bank / Cash payment' },
-      ],
-    });
-
-    // Create a Check transaction record for the bank register and printing
+    // Create a Check transaction record for the bank register and printing.
+    // This runs BEFORE the journal post and expense update so a failure
+    // (e.g. duplicate check number) aborts the whole payment — the bill must
+    // never be marked paid without a check record.
     let checkId = null;
     try {
       const txResult = Transactions.insert({
@@ -465,9 +476,25 @@ safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccou
         debit: 0,
         credit: billAmt,
         entered_by: 'system',
+        payee_name: vendorName,
       });
       checkId = txResult?.lastInsertRowid || null;
-    } catch (txErr) { console.warn('[bill-pay] check txn insert failed:', txErr.message); }
+    } catch (txErr) {
+      console.warn('[bill-pay] check txn insert failed:', txErr.message);
+      return { success: false, error: `Bill payment NOT recorded: ${txErr.message}` };
+    }
+
+    // Post DR AP / CR Bank (payment amount only)
+    JournalEntries.post({
+      date: pmtDate,
+      description: `Bill payment — expense #${expenseId}`,
+      source_type: 'bill_payment',
+      source_id: expenseId,
+      lines: [
+        { account_id: ap.id,   debit: billAmt, credit: 0,       description: 'Accounts Payable cleared' },
+        { account_id: bank.id, debit: 0,       credit: billAmt, description: 'Bank / Cash payment' },
+      ],
+    });
 
     // Determine new status
     let newStatus = 'Partially Paid';
@@ -513,9 +540,9 @@ safeHandle('get-quotes', async () => {
   }
 });
 
-safeHandle('get-quotes-paginated', async (event, page, pageSize, search, status) => {
+safeHandle('get-quotes-paginated', async (event, page, pageSize, search, status, dateFrom, dateTo, expFrom, expTo) => {
   try {
-    return await Quotes.getPaginated(page, pageSize, search || '', status || '');
+    return await Quotes.getPaginated(page, pageSize, search || '', status || '', dateFrom || '', dateTo || '', expFrom || '', expTo || '');
   } catch (error) {
     console.error('Error fetching quotes (paginated):', error);
     return { error: error.message };
@@ -534,9 +561,11 @@ safeHandle('get-singleQuote', async (event,quote_id) => {
 });
 
 // Handler to insert an quote
+// Quote status is system controlled — any client-supplied status is discarded;
+// a new quote always starts in the active (Pending) state.
 safeHandle('insert-quote', async (event, status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines) => {
   try {
-    return await Quotes.insertQuote(status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines);
+    return await Quotes.insertQuote(undefined,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines);
   } catch (error) {
     console.error('Error inserting quote:', error);
     return { error: error.message };
@@ -567,9 +596,9 @@ safeHandle('get-products', async () => {
   }
 });
 
-safeHandle('get-products-paginated', async (event, page, pageSize, search, typeFilter) => {
+safeHandle('get-products-paginated', async (event, page, pageSize, search, typeFilter, categoryFilter) => {
   try {
-    return await Products.getPaginated(page, pageSize, search || '', typeFilter || '');
+    return await Products.getPaginated(page, pageSize, search || '', typeFilter || '', categoryFilter || '');
   } catch (error) {
     console.error('Error fetching products (paginated):', error);
     return { error: error.message };
@@ -577,9 +606,9 @@ safeHandle('get-products-paginated', async (event, page, pageSize, search, typeF
 });
 
 // Handler to insert an product
-safeHandle('insert-product', async (event, type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock) => {
+safeHandle('insert-product', async (event, type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock, income_account_id) => {
   try {
-    return await Products.insertProduct(type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock);
+    return await Products.insertProduct(type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock, income_account_id);
   } catch (error) {
     console.error('Error inserting product:', error);
     return { error: error.message };
@@ -693,10 +722,15 @@ try {
 
 // Invoice handlers moved to invoiceHandlers.js
 
-// Handler update Invoice
+// Handler update Quote
+// The edit form may NEVER change the quote status. Status transitions happen
+// only through the explicit quote workflow channels (accept-quote, decline-quote,
+// convert-quote-to-invoice), so any `status` in the payload is stripped here and
+// the model preserves the stored lifecycle value.
 safeHandle('updatequote', async (event,quoteData) => {
   try {
-    return await Quotes.updateQuote(quoteData);
+    const { status, ...safeQuote } = quoteData || {};
+    return await Quotes.updateQuote(safeQuote);
   } catch (error) {    
     console.error('Error updating quote:', error);
     return { error: error.message };
@@ -824,12 +858,14 @@ safeHandle('deletingrecord', async (event,id,table) => {
         const invCount = db.prepare('SELECT COUNT(*) AS cnt FROM invoices WHERE customer = ?').get(id)?.cnt || 0;
         const quoteCount = db.prepare('SELECT COUNT(*) AS cnt FROM quotes WHERE customer = ?').get(id)?.cnt || 0;
         const expCount = db.prepare("SELECT COUNT(*) AS cnt FROM expenses WHERE payee = ? AND category = 'customer'").get(id)?.cnt || 0;
-        const totalLinked = invCount + quoteCount + expCount;
+        const payCount = db.prepare('SELECT COUNT(*) AS cnt FROM payments WHERE customerId = ?').get(id)?.cnt || 0;
+        const totalLinked = invCount + quoteCount + expCount + payCount;
         if (totalLinked > 0) {
           const parts = [];
           if (invCount > 0) parts.push(`${invCount} invoice(s)`);
           if (quoteCount > 0) parts.push(`${quoteCount} quote(s)`);
           if (expCount > 0) parts.push(`${expCount} expense(s)`);
+          if (payCount > 0) parts.push(`${payCount} payment(s)`);
           return { success: false, error: `Cannot delete this customer because they have ${totalLinked} linked transaction(s): ${parts.join(', ')}. Please delete or reassign these transactions first.` };
         }
         return await Vat.deleteRecord(id, table);
@@ -855,15 +891,8 @@ safeHandle('deletingrecord', async (event,id,table) => {
 
 
 
-  // Banking handlers
-  safeHandle('reconcile-transactions', async (event, data) => {
-    try {
-      return await Transactions.reconcileTransactions(data);
-    } catch (error) {
-      console.error('Error reconciling transactions:', error);
-      return { error: error.message };
-    }
-  });
+  // Banking handlers (reconcile-transactions is canonically registered in
+  // bankingHandlers.js; duplicates were removed to keep behavior deterministic)
 
   safeHandle('create-bank-transfer', async (event, data) => {
     try {
@@ -945,6 +974,93 @@ safeHandle('deletingrecord', async (event,id,table) => {
     } catch (error) {
       console.error('Error seeding dummy data:', error);
       return { success: false, error: error.message };
+    }
+  });
+
+  // Global search across customers, suppliers, invoices, quotes, transactions,
+  // expenses and chart-of-accounts. Returns labelled rows with a navigation route.
+  safeHandle('global-search', async (_event, query) => {
+    try {
+      const q = String(query || '').trim();
+      if (!q) return { success: true, results: [] };
+      const db = require('../models/dbmgr');
+      const like = `%${q}%`;
+      const results = [];
+
+      // Customers
+      const custs = db.prepare(
+        `SELECT id, display_name AS title, company_name AS subtitle, 'customer' AS kind
+         FROM customers
+         WHERE display_name LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR company_name LIKE ? OR email LIKE ?
+         ORDER BY display_name LIMIT 8`
+      ).all(like, like, like, like, like);
+      for (const c of custs) results.push({ kind: c.kind, title: c.title || c.subtitle || `Customer #${c.id}`, subtitle: c.subtitle, route: `/main/customers/details/${c.id}` });
+
+      // Suppliers
+      const supps = db.prepare(
+        `SELECT id, name AS title, email AS subtitle, 'supplier' AS kind FROM suppliers
+         WHERE name LIKE ? OR email LIKE ? OR phone LIKE ?
+         ORDER BY name LIMIT 5`
+      ).all(like, like, like);
+      for (const s of supps) results.push({ kind: s.kind, title: s.title || `Supplier #${s.id}`, subtitle: s.subtitle, route: `/main/vendors/details/${s.id}` });
+
+      // Invoices
+      const invs = db.prepare(
+        `SELECT i.id, i.number AS title, COALESCE(c.display_name, c.company_name, '') AS subtitle, 'invoice' AS kind
+         FROM invoices i LEFT JOIN customers c ON i.customer = c.id
+         WHERE i.number LIKE ? OR i.billing_address LIKE ? OR COALESCE(c.display_name,'') LIKE ? OR COALESCE(c.company_name,'') LIKE ?
+         ORDER BY i.id DESC LIMIT 8`
+      ).all(like, like, like, like);
+      for (const n of invs) results.push({ kind: n.kind, title: n.title || `Invoice #${n.id}`, subtitle: n.subtitle, route: `/main/customers/invoices/edit/${n.id}` });
+
+      // Quotes
+      const quotes = db.prepare(
+        `SELECT q.id, q.number AS title, COALESCE(c.display_name, c.company_name, '') AS subtitle, 'quote' AS kind
+         FROM quotes q LEFT JOIN customers c ON q.customer = c.id
+         WHERE q.number LIKE ? OR COALESCE(c.display_name,'') LIKE ? OR COALESCE(c.company_name,'') LIKE ?
+         ORDER BY q.id DESC LIMIT 5`
+      ).all(like, like, like);
+      for (const n of quotes) results.push({ kind: n.kind, title: n.title || `Quote #${n.id}`, subtitle: n.subtitle, route: `/main/customers/quotes/edit/${n.id}` });
+
+      // Transactions (bank register)
+      const txns = db.prepare(
+        `SELECT id, reference AS title, description AS subtitle, type AS kind
+         FROM transactions
+         WHERE reference LIKE ? OR description LIKE ? OR payee_name LIKE ?
+         ORDER BY id DESC LIMIT 8`
+      ).all(like, like, like);
+      for (const t of txns) results.push({ kind: `txn-${(t.kind || 'txn').toLowerCase().replace(/\s+/g, '-')}`, title: t.title || `Transaction #${t.id}`, subtitle: t.subtitle || '', route: `/main/accountant/enter-transaction` });
+
+      // Expenses
+      const exps = db.prepare(
+        `SELECT id, ref_no AS title, description AS subtitle, 'expense' AS kind
+         FROM expenses
+         WHERE ref_no LIKE ? OR description LIKE ? OR category LIKE ? OR payment_method LIKE ?
+         ORDER BY id DESC LIMIT 5`
+      ).all(like, like, like, like);
+      for (const e of exps) results.push({ kind: e.kind, title: e.title || `Expense #${e.id}`, subtitle: e.subtitle || '', route: `/main/vendors/bills/edit/${e.id}` });
+
+      // Chart of Accounts
+      const coa = db.prepare(
+        `SELECT id, name AS title, number AS subtitle, 'account' AS kind
+         FROM chart_of_accounts
+         WHERE name LIKE ? OR number LIKE ?
+         ORDER BY name LIMIT 6`
+      ).all(like, like);
+      for (const a of coa) results.push({ kind: a.kind, title: a.title || `Account #${a.id}`, subtitle: a.subtitle ? `#${a.subtitle}` : '', route: `/main/accountant/general-ledger?account=${a.id}` });
+
+      // Products / Items
+      const prods = db.prepare(
+        `SELECT id, name AS title, sku AS subtitle, 'item' AS kind
+         FROM products
+         WHERE name LIKE ? OR sku LIKE ?
+         ORDER BY name LIMIT 5`
+      ).all(like, like);
+      for (const p of prods) results.push({ kind: p.kind, title: p.title || `Item #${p.id}`, subtitle: p.subtitle || '', route: `/main/inventory/items` });
+
+      return { success: true, results };
+    } catch (e) {
+      return { success: false, error: e.message };
     }
   });
 };

@@ -1,24 +1,30 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Table, Card, Row, Col, Statistic, Button, Modal, Form, Input,
-  Select, DatePicker, Tag, Space, Popconfirm, message, Spin, Tabs, Typography
+  Select, DatePicker, Tag, Space, Popconfirm, message, Spin, Radio, Typography
 } from 'antd';
 import {
   DollarOutlined, PrinterOutlined, EditOutlined, DeleteOutlined,
-  ReloadOutlined, SearchOutlined, WalletOutlined, FileTextOutlined
+  ReloadOutlined, SearchOutlined, WalletOutlined, FileTextOutlined,
+  PlusOutlined, LinkOutlined
 } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../../utils/currency';
+import ReceivePaymentModal from './ReceivePaymentModal';
+import PaymentDetailsModal from './PaymentDetailsModal';
+import ApplyCreditModal from './ApplyCreditModal';
 
-const { TabPane } = Tabs;
 const { Option } = Select;
 const { Text } = Typography;
 
 const METHODS = ['Bank Transfer', 'Cash', 'Check', 'Credit Card', 'EFT/ACH', 'Online', 'Other'];
 
-const fmt = (v) => {
+const fmt = (v, cSym = '$') => {
   const n = Number(v || 0);
-  return (n < 0 ? '-' : '') + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (n < 0 ? '-' : '') + cSym + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+
+const pmtNo = (id) => `PMT-${String(id).padStart(5, '0')}`;
 
 const methodColor = {
   'Bank Transfer': 'blue', 'Cash': 'green', 'Check': 'purple',
@@ -26,13 +32,16 @@ const methodColor = {
 };
 
 /* ─── CustomerPaymentHistory ─────────────────────────────────────────────────
+   The "Payments" tab for a customer: summary cards, "+ Add Payment", and the
+   full payment history (applied + unapplied credits).
    Props:
      customerId  – when set, scoped to one customer
      invoiceId   – when set, scoped to one invoice
      mode        – 'customer' | 'invoice' | 'all'  (default 'all')
      embedded    – boolean, hides outer card chrome when true
 */
-const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded = false }) => {
+const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded = false, onChange }) => {
+  const { symbol: cSym } = useCurrency();
   const [payments, setPayments]     = useState([]);
   const [balance, setBalance]       = useState(null);
   const [loading, setLoading]       = useState(false);
@@ -41,6 +50,11 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
   const [editRecord, setEditRecord] = useState(null);
   const [detailModal, setDetailModal] = useState(false);
   const [detailRecord, setDetailRecord] = useState(null);
+  const [receiveModal, setReceiveModal] = useState(false);
+  const [applyModal, setApplyModal] = useState(false);
+  const [applyRecord, setApplyRecord] = useState(null);
+  const [customerName, setCustomerName] = useState('');
+  const [subTab, setSubTab] = useState('all');
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
@@ -53,6 +67,12 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
         data = await window.electronAPI?.customerPaymentsList?.(customerId) || [];
         const bal = await window.electronAPI?.customerPaymentsBalance?.(customerId);
         setBalance(bal);
+        if (customerName === '') {
+          const cust = await window.electronAPI?.getSingleCustomer?.(customerId);
+          if (cust) {
+            setCustomerName(cust.display_name || `${cust.first_name || ''} ${cust.last_name || ''}`.trim() || cust.company_name || '');
+          }
+        }
       } else {
         const filters = {};
         if (customerId) filters.customerId = customerId;
@@ -63,9 +83,16 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
       message.error('Failed to load payment history');
     }
     setLoading(false);
-  }, [customerId, invoiceId, mode]);
+  }, [customerId, invoiceId, mode, customerName]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Reload this tab AND notify the parent page (customer details) so every
+  // affected total/invoice refreshes instantly after a payment change.
+  const refreshAll = useCallback(() => {
+    load();
+    onChange && onChange();
+  }, [load, onChange]);
 
   const handleEdit = (record) => {
     setEditRecord(record);
@@ -93,7 +120,7 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
       if (res?.success) {
         message.success('Payment updated');
         setEditModal(false);
-        load();
+        refreshAll();
       } else {
         message.error(res?.error || 'Update failed');
       }
@@ -102,7 +129,7 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
 
   const handleDelete = async (id) => {
     const res = await window.electronAPI?.customerPaymentDelete?.(id);
-    if (res?.success) { message.success('Payment deleted'); load(); }
+    if (res?.success) { message.success('Payment deleted'); refreshAll(); }
     else message.error(res?.error || 'Delete failed');
   };
 
@@ -113,15 +140,16 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
       <style>body{font-family:Arial,sans-serif;padding:30px;} h2{color:#1890ff;} table{width:100%;border-collapse:collapse;margin-top:20px;} td,th{border:1px solid #ddd;padding:8px;} th{background:#f0f0f0;}</style>
       </head><body>
       <h2>Payment Receipt</h2>
-      <p><strong>Receipt #:</strong> PMT-${String(record.id).padStart(5,'0')}</p>
+      <p><strong>Receipt #:</strong> ${pmtNo(record.id)}</p>
       <p><strong>Date:</strong> ${record.date || record.createdAt || ''}</p>
       <p><strong>Customer:</strong> ${record.customerName || ''}</p>
       <table>
-        <tr><th>Invoice #</th><th>Payment Method</th><th>Amount</th><th>Reference</th></tr>
+        <tr><th>Payment Method</th><th>Amount</th><th>Applied</th><th>Unapplied</th><th>Reference</th></tr>
         <tr>
-          <td>${record.invoiceNumber || 'Unapplied'}</td>
           <td>${record.paymentMethod || ''}</td>
           <td>${fmt(record.amount)}</td>
+          <td>${fmt(record.applied != null ? record.applied : record.amount)}</td>
+          <td>${fmt(record.unapplied || 0)}</td>
           <td>${record.reference || '-'}</td>
         </tr>
       </table>
@@ -137,6 +165,7 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
     if (!search) return true;
     const s = search.toLowerCase();
     return (
+      pmtNo(p.id).toLowerCase().includes(s) ||
       (p.invoiceNumber || '').toLowerCase().includes(s) ||
       (p.customerName  || '').toLowerCase().includes(s) ||
       (p.paymentMethod || '').toLowerCase().includes(s) ||
@@ -145,36 +174,35 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
     );
   });
 
+  const unappliedList = payments.filter(p => Number(p.unapplied || 0) > 0.005);
+
   const columns = [
     {
-      title: 'Date', dataIndex: 'date', key: 'date', width: 110,
+      title: 'Date', dataIndex: 'date', key: 'date', width: 100,
       render: (v) => v ? moment(v).format('MM/DD/YYYY') : <Text type="secondary">—</Text>,
       sorter: (a, b) => (a.date || '').localeCompare(b.date || ''),
       defaultSortOrder: 'descend',
     },
     {
-      title: 'Customer', dataIndex: 'customerName', key: 'customerName',
-      render: (v) => v || <Text type="secondary">—</Text>,
+      title: 'Payment #', dataIndex: 'id', key: 'id', width: 110,
+      render: (id) => <Text strong>{pmtNo(id)}</Text>,
     },
     {
-      title: 'Invoice #', dataIndex: 'invoiceNumber', key: 'invoiceNumber', width: 110,
-      render: (v) => v || <Tag color="orange">Unapplied</Tag>,
-    },
-    {
-      title: 'Invoice Total', dataIndex: 'invoiceTotal', key: 'invoiceTotal', width: 120, align: 'right',
-      render: (v) => v != null ? fmt(v) : <Text type="secondary">—</Text>,
-    },
-    {
-      title: 'Amount Paid', dataIndex: 'amount', key: 'amount', width: 120, align: 'right',
-      render: (v) => <Text strong style={{ color: '#52c41a' }}>{fmt(v)}</Text>,
+      title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right',
+      render: (v) => <Text strong style={{ color: '#52c41a' }}>{fmt(v, cSym)}</Text>,
       sorter: (a, b) => a.amount - b.amount,
     },
     {
-      title: 'Remaining', key: 'remaining', width: 120, align: 'right',
-      render: (_, r) => {
-        if (r.invoiceTotal == null) return <Tag color="orange">Unapplied</Tag>;
-        const rem = Number(r.invoiceTotal || 0) - Number(r.amount || 0);
-        return <Text style={{ color: rem > 0 ? '#fa541c' : '#52c41a' }}>{fmt(rem)}</Text>;
+      title: 'Applied', dataIndex: 'applied', key: 'applied', width: 120, align: 'right',
+      render: (v) => fmt(v, cSym),
+    },
+    {
+      title: 'Unapplied', dataIndex: 'unapplied', key: 'unapplied', width: 120, align: 'right',
+      render: (v) => {
+        const n = Number(v || 0);
+        return n > 0.005
+          ? <Text strong style={{ color: '#faad14' }}>{fmt(n, cSym)}</Text>
+          : <Text type="secondary">{fmt(0, cSym)}</Text>;
       },
     },
     {
@@ -186,12 +214,15 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
       render: (v) => v || <Text type="secondary">—</Text>,
     },
     {
-      title: 'Actions', key: 'actions', width: 130, fixed: 'right',
+      title: 'Actions', key: 'actions', width: 150, fixed: 'right',
       render: (_, record) => (
-        <Space size={4}>
+        <Space size={4} onClick={e => e.stopPropagation()}>
           <Button size="small" icon={<FileTextOutlined />} onClick={() => { setDetailRecord(record); setDetailModal(true); }} />
-          <Button size="small" icon={<PrinterOutlined />}  onClick={() => handlePrint(record)} />
-          <Button size="small" icon={<EditOutlined />}     onClick={() => handleEdit(record)} />
+          {Number(record.unapplied || 0) > 0.005 && (
+            <Button size="small" type="primary" title="Apply credit to an invoice" icon={<LinkOutlined />} onClick={() => { setApplyRecord(record); setApplyModal(true); }} />
+          )}
+          <Button size="small" icon={<PrinterOutlined />} onClick={() => handlePrint(record)} />
+          <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
           <Popconfirm title="Delete this payment?" onConfirm={() => handleDelete(record.id)} okText="Delete" okType="danger">
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
@@ -200,7 +231,6 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
     },
   ];
 
-  const unapplied = payments.filter(p => !p.invoiceId || p.invoiceId === 0);
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
 
   const content = (
@@ -219,7 +249,7 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
                 <Statistic
                   title={s.title} prefix={s.icon}
                   value={Math.abs(s.value)}
-                  precision={2} prefix="$"
+                  precision={2} prefix={cSym}
                   valueStyle={{ color: s.color, fontSize: 16 }}
                 />
               </Card>
@@ -242,37 +272,57 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
         </Col>
         <Col>
           <Space>
-            <Text type="secondary">{filtered.length} records · {fmt(totalPaid)} total</Text>
+            <Text type="secondary">{filtered.length} records · {fmt(totalPaid, cSym)} total</Text>
             <Button icon={<ReloadOutlined />} onClick={load}>Refresh</Button>
+            {customerId && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setReceiveModal(true)}>Add Payment</Button>
+            )}
           </Space>
         </Col>
       </Row>
 
-      <Tabs defaultActiveKey="all" size="small">
-        <TabPane tab={`All Payments (${filtered.length})`} key="all">
-          <Table
-            dataSource={filtered}
-            columns={columns}
-            rowKey="id"
-            size="small"
-            scroll={{ x: 900 }}
-            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} payments` }}
-          />
-        </TabPane>
-        <TabPane tab={`Unapplied Credits (${unapplied.length})`} key="unapplied">
-          <Table
-            dataSource={unapplied.filter(p => {
-              if (!search) return true;
-              const s = search.toLowerCase();
-              return (p.customerName || '').toLowerCase().includes(s) || (p.paymentMethod || '').toLowerCase().includes(s);
-            })}
-            columns={columns.filter(c => c.key !== 'invoiceNumber' && c.key !== 'invoiceTotal' && c.key !== 'remaining')}
-            rowKey="id"
-            size="small"
-            pagination={{ pageSize: 20 }}
-          />
-        </TabPane>
-      </Tabs>
+      <Radio.Group
+        value={subTab}
+        onChange={e => setSubTab(e.target.value)}
+        size="small"
+        style={{ marginBottom: 12 }}
+      >
+        <Radio.Button value="all">All Payments ({filtered.length})</Radio.Button>
+        <Radio.Button value="unapplied">Unapplied Credits ({unappliedList.length})</Radio.Button>
+      </Radio.Group>
+
+      {subTab === 'all' ? (
+        <Table
+          dataSource={filtered}
+          columns={columns}
+          rowKey="id"
+          size="small"
+          scroll={{ x: 1000 }}
+          pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} payments` }}
+          onRow={(record) => ({
+            onClick: () => { setDetailRecord(record); setDetailModal(true); },
+            style: { cursor: 'pointer' },
+          })}
+        />
+      ) : (
+        <Table
+          dataSource={unappliedList.filter(p => {
+            if (!search) return true;
+            const s = search.toLowerCase();
+            return pmtNo(p.id).toLowerCase().includes(s)
+              || (p.customerName || '').toLowerCase().includes(s)
+              || (p.paymentMethod || '').toLowerCase().includes(s);
+          })}
+          columns={columns}
+          rowKey="id"
+          size="small"
+          pagination={{ defaultPageSize: 20 }}
+          onRow={(record) => ({
+            onClick: () => { setDetailRecord(record); setDetailModal(true); },
+            style: { cursor: 'pointer' },
+          })}
+        />
+      )}
     </Spin>
   );
 
@@ -280,12 +330,39 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
     <>
       {embedded ? content : (
         <Card
-          title={<span><DollarOutlined style={{ marginRight: 8, color: '#1890ff' }} />Payment History</span>}
+          title={<span><DollarOutlined style={{ marginRight: 8, color: '#1890ff' }} />Payments</span>}
           extra={<Button icon={<ReloadOutlined />} onClick={load}>Refresh</Button>}
         >
           {content}
         </Card>
       )}
+
+      {/* Receive Payment modal */}
+      {customerId && (
+        <ReceivePaymentModal
+          customerId={customerId}
+          customerName={customerName || payments[0]?.customerName}
+          visible={receiveModal}
+          onClose={() => setReceiveModal(false)}
+          onSuccess={refreshAll}
+        />
+      )}
+
+      {/* Apply credit modal */}
+      <ApplyCreditModal
+        payment={applyRecord}
+        visible={applyModal}
+        onClose={() => setApplyModal(false)}
+        onSuccess={refreshAll}
+      />
+
+      {/* Detail modal */}
+      <PaymentDetailsModal
+        payment={detailRecord}
+        visible={detailModal}
+        onClose={() => setDetailModal(false)}
+        onPrint={handlePrint}
+      />
 
       {/* Edit Modal */}
       <Modal
@@ -298,7 +375,7 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
       >
         <Form form={form} layout="vertical">
           <Form.Item name="amount" label="Amount" rules={[{ required: true }]}>
-            <Input prefix="$" type="number" min={0} step="0.01" />
+            <Input prefix={cSym} type="number" min={0} step="0.01" />
           </Form.Item>
           <Form.Item name="paymentMethod" label="Payment Method">
             <Select allowClear placeholder="Select method">
@@ -315,41 +392,6 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
-      </Modal>
-
-      {/* Detail Modal */}
-      <Modal
-        title={<span><FileTextOutlined style={{ marginRight: 8 }} />Payment Details</span>}
-        visible={detailModal}
-        onCancel={() => setDetailModal(false)}
-        footer={[
-          <Button key="print" icon={<PrinterOutlined />} onClick={() => handlePrint(detailRecord)}>Print Receipt</Button>,
-          <Button key="close" onClick={() => setDetailModal(false)}>Close</Button>,
-        ]}
-        width={480}
-      >
-        {detailRecord && (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            {[
-              ['Receipt #', `PMT-${String(detailRecord.id).padStart(5,'0')}`],
-              ['Customer', detailRecord.customerName || '—'],
-              ['Invoice #', detailRecord.invoiceNumber || 'Unapplied'],
-              ['Invoice Total', fmt(detailRecord.invoiceTotal)],
-              ['Amount Paid', fmt(detailRecord.amount)],
-              ['Remaining Balance', detailRecord.invoiceTotal != null ? fmt(Number(detailRecord.invoiceTotal) - Number(detailRecord.amount)) : 'N/A'],
-              ['Payment Method', detailRecord.paymentMethod || '—'],
-              ['Payment Date', detailRecord.date ? moment(detailRecord.date).format('MM/DD/YYYY') : '—'],
-              ['Reference', detailRecord.reference || '—'],
-              ['Memo', detailRecord.memo || '—'],
-              ['Recorded On', detailRecord.createdAt ? moment(detailRecord.createdAt).format('MM/DD/YYYY HH:mm') : '—'],
-            ].map(([label, value]) => (
-              <tr key={label} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                <td style={{ padding: '8px 12px', fontWeight: 600, color: '#666', width: '40%' }}>{label}</td>
-                <td style={{ padding: '8px 12px' }}>{value}</td>
-              </tr>
-            ))}
-          </table>
-        )}
       </Modal>
     </>
   );

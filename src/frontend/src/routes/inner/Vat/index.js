@@ -38,14 +38,14 @@ const Vat = () => {
           } 
       setIsSuccess(result.success);  
       if (result.success) {
-        setMessage('Vat added successfully!');
+        setMessage('Tax Rate added successfully!');
         fetchVat();
         if (addVatRef.current) {
           addVatRef.current.resetForm();
           handleUserClose();
       }
       } else {
-        setMessage('Failed to add vat. Please try again.');
+        setMessage('Failed to add tax rate. Please try again.');
         setShowError(true);
       }
     } catch (error) {

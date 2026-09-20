@@ -1,13 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Table, Space, message, Divider, Row, Col, Spin, Modal } from 'antd';
-import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined, SettingOutlined, MailOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Table, Space, message, Divider, Row, Col, Modal } from 'antd';
+import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined, SettingOutlined, MailOutlined, UserOutlined, FileTextOutlined, UnorderedListOutlined, MessageOutlined } from '@ant-design/icons';
 import { handleDocumentPDF } from '../shared/generateDocumentPDF';
 import SendEmailModal from '../shared/SendEmailModal';
-import COUNTRIES from '../../../utils/countries';
-import { phoneInputHandler } from '../../../utils/phone';
+import { confirmSavedDocumentEdit, confirmPaymentImpact, confirmFinancialImpact, useUnsavedChanges } from '../shared/documentEditGuard';
+import CustomerContactFields from '../shared/CustomerContactFields';
+import { deriveDisplayName } from '../../../utils/contactIdentity';
+import { resolveTaxRateFields } from '../../../utils/taxRate';
+import {
+  FormSection, FormGrid, FormCol, DocumentActionBar, TotalsBlock, FORM_ITEM_STYLE,
+  MODAL_BODY_SCROLL_STYLE, MODAL_WIDTH, PAGE_WRAPPER_STYLE,
+} from '../../shared/FormSection';
 import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
+import { ensureTrailingEmptyLine, removeLineAndEnsureEmpty, collapseToSingleTrailingEmpty } from '../../../utils/lineItems';
+
+import AccountSelect from '../../shared/AccountSelect';
+import { InvoiceStatusBadge } from '../../StatusBadge';
 
 const CreateInvoice = () => {
   const { symbol: cSym } = useCurrency();
@@ -15,6 +25,11 @@ const CreateInvoice = () => {
   const history = useHistory();
   const location = useLocation();
   const isEdit = Boolean(id);
+
+  const handleBack = () => {
+    if (history.length > 1) history.goBack();
+    else history.push('/main/customers/invoices/list');
+  };
 
   const [form] = Form.useForm();
   const [customers, setCustomers] = useState([]);
@@ -30,6 +45,7 @@ const CreateInvoice = () => {
   const [vatModalOpen, setVatModalOpen] = useState(false);
   const [invoiceTemplate, setInvoiceTemplate] = useState({});
   const [incomeAccounts, setIncomeAccounts] = useState([]);
+  const [allAccounts, setAllAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [custForm] = Form.useForm();
   const [prodForm] = Form.useForm();
@@ -37,6 +53,19 @@ const CreateInvoice = () => {
   const [vatForm] = Form.useForm();
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [savedInvoiceId, setSavedInvoiceId] = useState(null);
+  const [paidToDate, setPaidToDate] = useState(0);
+  const [paidDate, setPaidDate] = useState('');
+  // Invoice status is system controlled — never chosen by the user. The stored
+  // value comes from the backend; the live badge below also reacts to edits.
+  const [invoiceStatus, setInvoiceStatus] = useState('Open');
+  const [isDirty, setIsDirty] = useState(false);
+  const [originalFinancials, setOriginalFinancials] = useState(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const armedRef = useRef(false);            // first-edit warning acknowledged this session
+  const formSnapshotRef = useRef(null);      // last acknowledged form values (for revert)
+  const navBypassRef = useRef(false);        // set before a save-triggered navigation
+
+  useUnsavedChanges(isDirty, navBypassRef);
 
   const calcDueDate = (invoiceDate, terms) => {
     if (!invoiceDate || !terms) return;
@@ -50,24 +79,102 @@ const CreateInvoice = () => {
     }
   };
 
-  const handleCustomerChange = (custId) => {
-    const cust = customers.find(c => c.id === custId);
-    if (cust) {
-      const updates = {};
-      if (cust.email && cust.email !== 'null') updates.customer_email = cust.email;
-      const addrParts = [
-        cust.address1, cust.address2,
-        [cust.city, cust.state].filter(Boolean).join(', '),
-        cust.postal_code || cust.zip
-      ].filter(v => v && v !== 'null');
-      if (addrParts.length > 0) updates.billing_address = addrParts.join('\n');
-      if (cust.terms && cust.terms !== 'null') updates.terms = cust.terms;
-      form.setFieldsValue(updates);
-      if (updates.terms) {
-        const startDate = form.getFieldValue('start_date');
-        calcDueDate(startDate, updates.terms);
+  const applyCustomer = (cust, rates = vatRates, companyDefaultRate = null) => {
+    if (!cust) return;
+    const updates = {};
+    if (cust.email && cust.email !== 'null') updates.customer_email = cust.email;
+    const addrParts = [
+      cust.address1, cust.address2,
+      [cust.city, cust.state].filter(Boolean).join(', '),
+      cust.postal_code || cust.zip
+    ].filter(v => v && v !== 'null');
+    if (addrParts.length > 0) updates.billing_address = addrParts.join('\n');
+    if (cust.terms && cust.terms !== 'null') updates.terms = cust.terms;
+    // Auto-populate tax: customer's Default Tax Rate wins when they are
+    // taxable and a rate is set; otherwise fall back to the company default.
+    const compRate = companyDefaultRate != null
+      ? Number(companyDefaultRate)
+      : (company && company.vat_rate != null ? Number(company.vat_rate) : 0);
+    const isTaxExempt = cust.taxable != null && !Number(cust.taxable);
+    if (isTaxExempt) {
+      updates.vat = 0;
+      setVatPercent(0);
+    } else if (cust.default_tax_rate != null) {
+      const rate = Number(cust.default_tax_rate);
+      const matched = rates.find(v => Number(v.vat_percentage) === rate);
+      if (matched) {
+        updates.vat = rate;
+        setVatPercent(rate);
+      } else if (compRate > 0) {
+        updates.vat = compRate;
+        setVatPercent(compRate);
       }
+    } else if (compRate > 0) {
+      updates.vat = compRate;
+      setVatPercent(compRate);
     }
+    form.setFieldsValue(updates);
+    if (updates.terms) {
+      const startDate = form.getFieldValue('start_date');
+      calcDueDate(startDate, updates.terms);
+    }
+  };
+
+  const dateRef = useRef();
+
+  const applyCustomerChange = (custId) => {
+    const cust = customers.find(c => c.id === custId);
+    if (cust) applyCustomer(cust);
+    setTimeout(() => dateRef.current?.focus(), 50);
+  };
+
+  const isFinancialField = (field) => ['vat', 'start_date', 'last_date', 'terms', 'number', 'customer', 'billing_address'].includes(field);
+
+  // First material change on an already-saved invoice → warn once per session.
+  // Cancel → do not perform the attempted change.
+  const runEditGuard = useCallback(async (apply, { financial = true } = {}) => {
+    if (!isEdit || armedRef.current) { apply(); setIsDirty(true); return; }
+    const paid = Number(originalFinancials?.paidToDate) || 0;
+    const ok = (financial && paid > 0)
+      ? await confirmPaymentImpact({ paidToDate: paid, currentTotal: Number(originalFinancials?.total) || 0, currencySymbol: cSym })
+      : await confirmSavedDocumentEdit('Invoice');
+    if (ok) { armedRef.current = true; apply(); setIsDirty(true); }
+  }, [isEdit, originalFinancials, cSym]);
+
+  // Invoice-level (form) changes are applied by antd Form before this fires, so
+  // a cancel must revert the form to the last acknowledged snapshot.
+  const handleFormValuesChange = (changed) => {
+    const isCustomer = Object.prototype.hasOwnProperty.call(changed, 'customer');
+    if (!isEdit) {
+      if (isCustomer) { setSelectedCustomerId(changed.customer != null ? Number(changed.customer) : null); applyCustomerChange(changed.customer); }
+      setIsDirty(true);
+      return;
+    }
+    if (armedRef.current) {
+      if (isCustomer) { setSelectedCustomerId(changed.customer != null ? Number(changed.customer) : null); applyCustomerChange(changed.customer); }
+      setIsDirty(true);
+      return;
+    }
+    const prevVals = formSnapshotRef.current || {};
+    const prevCustomerId = selectedCustomerId;
+    const paid = Number(originalFinancials?.paidToDate) || 0;
+    const financial = Object.keys(changed).some(isFinancialField);
+    const proceed = async () => {
+      const ok = (financial && paid > 0)
+        ? await confirmPaymentImpact({ paidToDate: paid, currentTotal: Number(originalFinancials?.total) || 0, currencySymbol: cSym })
+        : await confirmSavedDocumentEdit('Invoice');
+      if (ok) {
+        armedRef.current = true;
+        if (isCustomer) { setSelectedCustomerId(changed.customer != null ? Number(changed.customer) : null); applyCustomerChange(changed.customer); }
+        formSnapshotRef.current = form.getFieldsValue();
+        setIsDirty(true);
+      } else {
+        form.setFieldsValue(prevVals);
+        if (Object.prototype.hasOwnProperty.call(changed, 'vat')) setVatPercent(Number(prevVals.vat) || 0);
+        setSelectedCustomerId(prevCustomerId);
+      }
+    };
+    proceed();
   };
 
   useEffect(() => {
@@ -80,10 +187,20 @@ const CreateInvoice = () => {
   const handleAddCustomer = async () => {
     try {
       const vals = await custForm.validateFields();
-      const display = `${vals.first_name || ''} ${vals.last_name || ''}`.trim() || vals.email || 'New Customer';
-      await window.electronAPI.insertCustomer?.(
-        '', vals.first_name || '', '', vals.last_name || '', '', vals.email || '', display,
-        vals.company || '', vals.phone || '', '', '', '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '', vals.postal_code || '', vals.country || '', '', '', '', null, 0, '', '', '', ''
+      // One derivation rule (explicit -> personal name -> company), shared with
+      // the backend. The old inline copy also fell back to the email and then to
+      // 'New Customer'; the backend honours an explicit display_name verbatim,
+      // so that placeholder could be persisted as the customer's actual name.
+      const display = deriveDisplayName(vals);
+      const tax = resolveTaxRateFields(vals, vatRates);
+      await window.electronAPI.insertCustomer(
+        '', vals.first_name || '', '', vals.last_name || '', '', vals.email || '',
+        display, vals.company_name || '', vals.phone_number || '', vals.mobile_number || '',
+        '', '', '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '',
+        vals.postal_code || '', vals.country || '', '', '', '', 'system', 0, null, 'Email', 'en', vals.notes || '',
+        vals.taxable != null ? vals.taxable : true,
+        tax.default_tax_rate,
+        tax.default_tax_rate_id
       );
       message.success('Customer added');
       setCustModalOpen(false);
@@ -99,12 +216,14 @@ const CreateInvoice = () => {
   const handleAddProduct = async () => {
     try {
       const vals = await prodForm.validateFields();
-      const incomeAcct = incomeAccounts.find(a => (a.accountName || a.name) === vals.income_account);
+      const incomeAcct = incomeAccounts.find(a => String(a.id) === String(vals.income_account))
+        || incomeAccounts.find(a => (a.accountName || a.name) === vals.income_account);
       const res = await window.electronAPI.insertProduct?.(
         vals.type || 'Product', vals.name || '', vals.sku || '', vals.category || '',
         vals.description || '', Number(vals.price) || 0,
         incomeAcct ? (incomeAcct.accountName || incomeAcct.name) : '', '', '', '', 'system',
-        Number(vals.stock) || 0
+        Number(vals.stock) || 0,
+        incomeAcct ? Number(incomeAcct.id) : null
       );
       message.success('Product added');
       setProdModalOpen(false);
@@ -117,10 +236,13 @@ const CreateInvoice = () => {
       if (newProd && lines.length > 0) {
         const lastKey = lines[lines.length - 1].key;
         const rate = Number(newProd.selling_price || newProd.price || 0);
-        setLines(prev => prev.map(l => {
-          if (l.key !== lastKey) return l;
-          return { ...l, description: newProd.description || newProd.name || '', rate, amount: (l.quantity || 1) * rate, product_id: newProd.id };
-        }));
+        setLines(prev => {
+          const updated = prev.map(l => {
+            if (l.key !== lastKey) return l;
+            return { ...l, description: newProd.description || newProd.name || '', rate, amount: (l.quantity || 1) * rate, product_id: newProd.id };
+          });
+          return ensureTrailingEmptyLine(updated, makeEmptyLine);
+        });
       }
     } catch (e) { if (!e?.errorFields) message.error('Failed to add product'); }
   };
@@ -164,6 +286,7 @@ const CreateInvoice = () => {
       setProducts(prodArr);
       setVatRates(Array.isArray(v) ? v : []);
       const allAccs = Array.isArray(coa) ? coa : (coa?.data || []);
+      setAllAccounts(allAccs);
       setIncomeAccounts(allAccs.filter(a => {
         const t = (a.accountType || a.type || '').toLowerCase();
         return t === 'income' || t === 'other income';
@@ -171,17 +294,36 @@ const CreateInvoice = () => {
       const cat = await window.electronAPI.getProductCategories?.();
       setCategories(Array.isArray(cat) ? cat : []);
 
-      // Pre-select customer from query string
+      // Pre-select customer from query string and auto-populate email/address/terms/tax
       const params = new URLSearchParams(location.search);
       const custId = params.get('customer');
       if (custId && !isEdit) {
         form.setFieldsValue({ customer: Number(custId) });
+        const preselectCust = custArr.find(c => Number(c.id) === Number(custId));
+        applyCustomer(preselectCust, Array.isArray(v) ? v : []);
       }
     } catch (err) { console.error('loadDeps error:', err); }
     // Load company info and invoice template separately so they never block the form
     try {
       const comp = await window.electronAPI.getCompany?.();
       if (comp) setCompany(comp);
+      // Pre-fill terms from company settings for new invoices
+      if (comp && !isEdit) {
+        const defaults = {};
+        if (comp.terms) {
+          defaults.terms = comp.terms;
+        }
+        if (comp.vat_rate != null && Number(comp.vat_rate) > 0) {
+          const compRate = Number(comp.vat_rate);
+          defaults.vat = compRate;
+          setVatPercent(compRate);
+        }
+        form.setFieldsValue(defaults);
+        if (defaults.terms) {
+          const startDate = form.getFieldValue('start_date');
+          calcDueDate(startDate, defaults.terms);
+        }
+      }
     } catch {}
     try {
       const tmpl = await window.electronAPI.getInvoiceTemplate?.();
@@ -194,6 +336,9 @@ const CreateInvoice = () => {
     try {
       const inv = await window.electronAPI.getSingleInvoice?.(id);
       if (inv) {
+        setPaidToDate(Number(inv.totalPaid) || 0);
+        setPaidDate(inv.paidDate || '');
+        setInvoiceStatus(inv.status || 'Open');
         const custVal = inv.customer_id || inv.customer;
         form.setFieldsValue({
           customer: custVal != null ? Number(custVal) : undefined,
@@ -205,53 +350,75 @@ const CreateInvoice = () => {
           number: inv.number,
           message: inv.message,
           statement_message: inv.statement_message,
-          status: inv.status || 'Draft',
           vat: inv.vat != null ? Number(inv.vat) : 0,
         });
         setVatPercent(inv.vat != null ? Number(inv.vat) : 0);
+        const custId = (inv.customer_id || inv.customer) != null ? Number(inv.customer_id || inv.customer) : null;
+        setSelectedCustomerId(custId);
         if (Array.isArray(inv.lines) && inv.lines.length > 0) {
-          setLines(inv.lines.map((l, i) => ({
+          const loaded = inv.lines.map((l, i) => ({
             key: Date.now() + i,
             description: l.description || '',
             quantity: l.quantity || 1,
             rate: l.rate || 0,
             amount: (l.quantity || 1) * (l.rate || 0),
             product_id: l.product_id ? Number(l.product_id) : (l.product ? Number(l.product) : null),
-          })));
+          }));
+          // One blank trailing row for convenient entry; never persisted.
+          setLines(ensureTrailingEmptyLine(loaded, makeEmptyLine));
         }
+        // Snapshot the original financial state for payment warnings / impact confirm.
+        const loadedSubtotal = (inv.lines || []).reduce((s, l) => s + (Number(l.quantity || 1) * Number(l.rate || 0)), 0);
+        const loadedTotal = loadedSubtotal * (1 + (Number(inv.vat) || 0) / 100);
+        setPaidToDate(Number(inv.totalPaid) || 0);
+        setOriginalFinancials({ total: loadedTotal, paidToDate: Number(inv.totalPaid) || 0, status: inv.status });
+        armedRef.current = false;
+        setIsDirty(false);
+        formSnapshotRef.current = form.getFieldsValue();
       }
     } catch { message.error('Failed to load invoice'); }
     setLoading(false);
   };
 
+  const makeEmptyLine = () => ({ key: Date.now(), description: '', quantity: 1, rate: 0, amount: 0 });
+
   const addLine = () => {
-    setLines(prev => [...prev, { key: Date.now(), description: '', quantity: 1, rate: 0, amount: 0 }]);
+    runEditGuard(() => setLines(prev => [...prev, makeEmptyLine()]));
   };
 
   const removeLine = (key) => {
-    setLines(prev => prev.filter(l => l.key !== key));
+    runEditGuard(() => setLines(prev => removeLineAndEnsureEmpty(prev, l => l.key !== key, makeEmptyLine)));
   };
 
   const updateLine = (key, field, value) => {
-    setLines(prev => prev.map(l => {
+    runEditGuard(() => setLines(prev => prev.map(l => {
       if (l.key !== key) return l;
       const updated = { ...l, [field]: value };
       updated.amount = (Number(updated.quantity) || 0) * (Number(updated.rate) || 0);
       return updated;
-    }));
+    })));
   };
 
   const selectProduct = (key, productId) => {
     const prod = products.find(p => p.id === productId);
-    if (prod) {
-      const desc = prod.description || prod.name || '';
-      updateLine(key, 'description', desc);
-      setLines(prev => prev.map(l => {
-        if (l.key !== key) return l;
-        const rate = Number(prod.selling_price || prod.price || 0);
-        return { ...l, description: desc, rate, amount: (l.quantity || 1) * rate, product_id: productId };
-      }));
+    if (!prod) {
+      // Clearing the product resets the line, but never auto-adds a row.
+      runEditGuard(() => setLines(prev => collapseToSingleTrailingEmpty(
+        prev.map(l => (l.key === key ? { ...l, product_id: null, description: '', rate: 0, amount: 0 } : l)),
+        makeEmptyLine
+      )));
+      return;
     }
+    const desc = prod.description || prod.name || '';
+    const rate = Number(prod.selling_price || prod.price || 0);
+    runEditGuard(() => setLines(prev => {
+      const updated = prev.map(l => {
+        if (l.key !== key) return l;
+        return { ...l, description: desc, rate, amount: (Number(l.quantity) || 1) * rate, product_id: productId };
+      });
+      // Product selected → make sure a fresh empty line waits below.
+      return ensureTrailingEmptyLine(updated, makeEmptyLine);
+    }));
   };
 
   const [vatPercent, setVatPercent] = useState(0);
@@ -259,11 +426,25 @@ const CreateInvoice = () => {
   const vatAmount = subtotal * (Number(vatPercent) || 0) / 100;
   const grandTotal = subtotal + vatAmount;
 
-  const handleSave = async (statusOverride) => {
+  // Read-only status shown to the user. Document lifecycle states (Draft / Void /
+  // Cancelled) win; otherwise the badge mirrors exactly the rule the backend uses
+  // (total vs. paid-to-date), so the page and the lists always agree.
+  const INVOICE_DOC_STATES = ['draft', 'void', 'voided', 'cancelled', 'canceled'];
+  const displayStatus = useMemo(() => {
+    if (INVOICE_DOC_STATES.includes(String(invoiceStatus || '').toLowerCase())) return invoiceStatus;
+    const paid = Number(paidToDate) || 0;
+    if (grandTotal > 0 && paid >= grandTotal - 0.005) return 'Paid';
+    if (paid > 0) return 'Partially Paid';
+    return 'Open';
+  }, [invoiceStatus, paidToDate, grandTotal]);
+
+  // Invoice status is never submitted — the backend derives it from the invoice
+  // total and the real payment allocations. `statusOverride` is retained only for
+  // signature compatibility with the (now removed) manual status buttons.
+  const handleSave = async (statusOverride, navigate = true) => {
     try {
       const vals = await form.validateFields();
       setSaving(true);
-      const finalStatus = statusOverride || vals.status || 'Draft';
       const customer = vals.customer;
       const customer_email = vals.customer_email || '';
       const billing_address = vals.billing_address || '';
@@ -285,35 +466,64 @@ const CreateInvoice = () => {
       // Validate that every line has a product selected
       if (invoiceLines.length === 0) {
         message.error('Please add at least one line item');
-        setSaving(false);
-        return;
+        return null;
       }
       const missingProduct = invoiceLines.find(l => !l.product_id);
       if (missingProduct) {
         message.error('Please select a product from the dropdown for each line item. All lines must have a product selected from the system.');
-        setSaving(false);
-        return;
+        return null;
       }
 
-      if (isEdit) {
+      // If this saved invoice already has payments and the total is changing,
+      // show the financial impact and confirm before saving. Existing payment
+      // records are never modified — only the balance/status follow.
+      const existingIdPreview = savedInvoiceId || (id ? Number(id) : null);
+      const paid = Number(paidToDate) || 0;
+      if (existingIdPreview && paid > 0) {
+        const newTotal = invoiceLines.reduce((s, l) => s + (Number(l.amount) || 0), 0) * (1 + (vat || 0) / 100);
+        const prevTotal = Number(originalFinancials?.total) || 0;
+        if (Math.abs(newTotal - prevTotal) > 0.005) {
+          const newBalance = Math.max(0, newTotal - paid);
+          const newStatus = newTotal <= paid + 0.005 ? 'Paid' : 'Partially Paid';
+          const ok = await confirmFinancialImpact({
+            previousTotal: prevTotal, newTotal, paidToDate: paid, newBalance, newStatus, currencySymbol: cSym,
+          });
+          if (!ok) return null;
+        }
+      }
+
+      let savedId = null;
+      const existingId = savedInvoiceId || (id ? Number(id) : null);
+      if (existingId) {
         const res = await window.electronAPI.updateInvoice?.({
-          id: Number(id), customer, customer_email, billing_address, terms,
+          id: existingId, customer, customer_email, billing_address, terms,
           start_date, last_date, message: msg, statement_message, number,
-          vat, status: finalStatus, invoiceLines,
+          vat, invoiceLines,
         });
-        if (res?.error) { message.error(res.error); setSaving(false); return; }
+        if (res?.error) { message.error(res.error); return null; }
         message.success('Invoice updated');
-        setSavedInvoiceId(Number(id));
+        savedId = existingId;
+        setSavedInvoiceId(savedId);
+        if (res.financials) {
+          setPaidToDate(Number(res.financials.paidToDate) || 0);
+          setInvoiceStatus(res.financials.status || 'Open');
+          setOriginalFinancials({
+            total: Number(res.financials.invoiceTotal) || 0,
+            paidToDate: Number(res.financials.paidToDate) || 0,
+            status: res.financials.status,
+          });
+        }
       } else {
         const res = await window.electronAPI.insertInvoice?.(
           customer, customer_email, false, billing_address, terms,
           start_date, last_date, msg, statement_message, number,
-          null, vat, finalStatus, invoiceLines
+          null, vat, null, invoiceLines
         );
         const invId = res?.invoiceId || res?.invoice_id || res?.id;
-        if (invId) setSavedInvoiceId(Number(invId));
-        if (res?.error) { message.error(typeof res.error === 'string' ? res.error : 'Insert failed'); setSaving(false); return; }
-        if (res?.success === false) { message.error('Failed to create invoice'); setSaving(false); return; }
+        if (invId) { savedId = Number(invId); setSavedInvoiceId(savedId); }
+        if (res?.error) { message.error(typeof res.error === 'string' ? res.error : 'Insert failed'); return null; }
+        if (res?.success === false) { message.error('Failed to create invoice'); return null; }
+        if (res?.financials) setInvoiceStatus(res.financials.status || 'Open');
         if (res?.glWarning) {
           Modal.warning({
             title: 'Invoice Saved — Ledger Post Failed',
@@ -329,13 +539,37 @@ const CreateInvoice = () => {
           message.success('Invoice created');
         }
       }
-      history.push('/main/customers/invoices/list');
+      if (navigate) {
+        setIsDirty(false);
+        armedRef.current = false;
+        formSnapshotRef.current = form.getFieldsValue();
+        navBypassRef.current = true;
+        history.push('/main/customers/invoices/list');
+      } else {
+        setIsDirty(false);
+        armedRef.current = false;
+        formSnapshotRef.current = form.getFieldsValue();
+      }
+      return savedId;
     } catch (e) {
-      if (e?.errorFields) return; // form validation
+      if (e?.errorFields) return null; // form validation
       message.error('Save failed');
+      return null;
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
+
+  const handleSaveAndEmail = async () => {
+    const savedId = await handleSave(undefined, false);
+    if (savedId) setEmailModalOpen(true);
+  };
+
+  // Cancel never saves. Leaving the page is already guarded by
+  // useUnsavedChanges(): when the form is dirty the existing "Unsaved changes"
+  // modal asks before discarding, and when it is pristine we simply go back.
+  // No second, competing warning system is introduced here.
+  const handleCancel = handleBack;
 
   const doPDF = (action) => {
     const vals = form.getFieldsValue();
@@ -344,19 +578,21 @@ const CreateInvoice = () => {
       docType: 'Invoice',
       header: {
         number: vals.number || '',
-        status: vals.status || 'Draft',
+        status: displayStatus,
         date: vals.start_date ? vals.start_date.format('MM/DD/YYYY') : '',
         dueDate: vals.last_date ? vals.last_date.format('MM/DD/YYYY') : '',
         terms: vals.terms || '',
         customerName: cust ? (cust.display_name || cust.name || `${cust.first_name || ''} ${cust.last_name || ''}`.trim()) : '',
         email: vals.customer_email || '',
         billingAddress: vals.billing_address || '',
+        paidDate: paidDate || '',
       },
       lines,
       subtotal,
       vatPercent: Number(vatPercent) || 0,
       vatAmount,
       grandTotal,
+      paidToDate: Number(paidToDate) || 0,
       message: vals.message || '',
       statementMemo: vals.statement_message || '',
       company: {
@@ -364,12 +600,20 @@ const CreateInvoice = () => {
         email: company.email || '',
         phone: company.phone || '',
         address: company.address || '',
+        address1: company.address1 || '',
+        address2: company.address2 || '',
+        city: company.city || '',
+        state: company.state || '',
+        postal_code: company.postal_code || company.zip || '',
+        country: company.country || '',
         logo: company.logo || null,
       },
       currencySymbol: cSym,
       templateSettings: invoiceTemplate,
     });
   };
+
+  const customerOpen = !isEdit && !new URLSearchParams(location.search).get('customer');
 
   const lineColumns = [
     { title: 'Product', key: 'product', width: 180,
@@ -394,13 +638,14 @@ const CreateInvoice = () => {
   ];
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
+    <div style={PAGE_WRAPPER_STYLE}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => history.push('/main/customers/invoices/list')}>Back</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={handleBack} style={{ borderRadius: 8, color: '#595959', borderColor: '#d9d9d9', display: 'inline-flex', alignItems: 'center' }}>Back</Button>
           <h2 style={{ margin: 0 }}>{isEdit ? `Edit Invoice #${id}` : 'Create Invoice'}</h2>
         </Space>
         <Space wrap>
+          <Button icon={<UserOutlined />} disabled={!selectedCustomerId} onClick={() => history.push(`/main/customers/details/${selectedCustomerId}`)}>View Customer</Button>
           {isEdit && (<>
             <Button icon={<EyeOutlined />} onClick={() => doPDF('preview')}>Preview</Button>
             <Button icon={<FilePdfOutlined />} onClick={() => doPDF('download')}>Download PDF</Button>
@@ -411,141 +656,143 @@ const CreateInvoice = () => {
       </div>
 
       <Card loading={loading}>
-        <Form form={form} layout="vertical">
-          <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}>
-              <Form.Item name="customer" label="Customer" rules={[{ required: true, message: 'Select customer' }]}>
-                <Select showSearch placeholder="Select customer"
-                  filterOption={(input, opt) => (opt?.children || '').toString().toLowerCase().includes(input.toLowerCase())}
-                  onChange={handleCustomerChange}
-                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCustModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Customer</Button></>)}>
-                  {customers.map(c => <Select.Option key={c.id} value={c.id}>{c.display_name || c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</Select.Option>)}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="number" label="Invoice Number" rules={[{ pattern: /^[A-Za-z0-9\-\/]*$/, message: 'Only letters, numbers, hyphens and slashes allowed' }]}><Input placeholder="Auto-generated if blank" /></Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="terms" label="Payment Terms">
-                <Select placeholder="Select terms" allowClear onChange={(v) => { const startDate = form.getFieldValue('start_date'); calcDueDate(startDate, v); }}>
-                  <Select.Option value="Net 7">Net 7</Select.Option>
-                  <Select.Option value="Net 15">Net 15</Select.Option>
-                  <Select.Option value="Net 30">Net 30</Select.Option>
-                  <Select.Option value="Net 45">Net 45</Select.Option>
-                  <Select.Option value="Net 60">Net 60</Select.Option>
-                  <Select.Option value="Due on Receipt">Due on Receipt</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}>
-              <Form.Item name="start_date" label="Invoice Date" initialValue={moment()}>
-                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" onChange={(d) => { const terms = form.getFieldValue('terms'); calcDueDate(d, terms); }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="last_date" label="Due Date">
-                <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="customer_email" label="Email"><Input /></Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}>
-              <Form.Item name="billing_address" label="Billing Address"><Input.TextArea rows={2} /></Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="vat" label="Tax Rate (%)" initialValue={0}>
-                <Select allowClear placeholder="Select Tax rate"
-                  onChange={(v) => setVatPercent(Number(v) || 0)}
-                  dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setVatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Tax Rate</Button></>)}>
-                  <Select.Option value={0}>No Tax (0%)</Select.Option>
-                  {vatRates.map(v => <Select.Option key={v.id} value={v.vat_percentage}>{v.vat_name} ({v.vat_percentage}%)</Select.Option>)}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="status" label="Status" initialValue="Draft">
-                <Select>
-                  <Select.Option value="Draft">Draft</Select.Option>
-                  <Select.Option value="Sent">Sent</Select.Option>
-                  <Select.Option value="Pending">Pending</Select.Option>
-                  <Select.Option value="Unpaid">Unpaid</Select.Option>
-                  <Select.Option value="Paid">Paid</Select.Option>
-                  <Select.Option value="Partially Paid">Partially Paid</Select.Option>
-                  <Select.Option value="Overdue">Overdue</Select.Option>
-                  <Select.Option value="Cancelled">Cancelled</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form>
+        {/* One <Form> for the whole document. The line-items table is driven by
+            React state (not Form.Item), so it can live inside the form without
+            registering anything. */}
+        <Form form={form} layout="vertical" onValuesChange={handleFormValuesChange}>
+          <FormSection title="Invoice Details" icon={<FileTextOutlined />}>
+            <FormGrid>
+              <FormCol>
+                <Form.Item name="customer" label="Customer" style={FORM_ITEM_STYLE} rules={[{ required: true, message: 'Select customer' }]}>
+                  <Select showSearch placeholder="Select customer"
+                    autoFocus={customerOpen}
+                    defaultOpen={customerOpen}
+                    filterOption={(input, opt) => (opt?.children || '').toString().toLowerCase().includes(input.toLowerCase())}
+                    dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCustModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Customer</Button></>)}>
+                    {customers.map(c => <Select.Option key={c.id} value={c.id}>{c.display_name || c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</Select.Option>)}
+                  </Select>
+                </Form.Item>
+              </FormCol>
+              <FormCol>
+                <Form.Item name="number" label="Invoice Number" style={FORM_ITEM_STYLE} rules={[{ pattern: /^[A-Za-z0-9\-\/]*$/, message: 'Only letters, numbers, hyphens and slashes allowed' }]}><Input placeholder="Auto-generated if blank" /></Form.Item>
+              </FormCol>
+              <FormCol>
+                <Form.Item name="terms" label="Payment Terms" style={FORM_ITEM_STYLE}>
+                  <Select placeholder="Select terms" allowClear onChange={(v) => { const startDate = form.getFieldValue('start_date'); calcDueDate(startDate, v); }}>
+                    <Select.Option value="Net 7">Net 7</Select.Option>
+                    <Select.Option value="Net 15">Net 15</Select.Option>
+                    <Select.Option value="Net 30">Net 30</Select.Option>
+                    <Select.Option value="Net 45">Net 45</Select.Option>
+                    <Select.Option value="Net 60">Net 60</Select.Option>
+                    <Select.Option value="Due on Receipt">Due on Receipt</Select.Option>
+                  </Select>
+                </Form.Item>
+              </FormCol>
 
-        <Divider>Line Items</Divider>
-        <Table dataSource={lines} columns={lineColumns} rowKey="key" size="small" pagination={false}
-          footer={() => (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Button type="dashed" icon={<PlusOutlined />} onClick={addLine}>Add Line</Button>
-              <div style={{ textAlign: 'right' }}>
-                <div>Subtotal: {cSym} {subtotal.toFixed(2)}</div>
-                {vatPercent > 0 && <div>Tax ({vatPercent}%): {cSym} {vatAmount.toFixed(2)}</div>}
-                <div style={{ fontSize: 16, fontWeight: 600 }}>Total: {cSym} {grandTotal.toFixed(2)}</div>
-              </div>
-            </div>
-          )}
-        />
+              <FormCol>
+                <Form.Item name="start_date" label="Invoice Date" style={FORM_ITEM_STYLE} initialValue={moment()}>
+                  <DatePicker ref={dateRef} style={{ width: '100%' }} format="MM/DD/YYYY" onChange={(d) => { const terms = form.getFieldValue('terms'); calcDueDate(d, terms); }} />
+                </Form.Item>
+              </FormCol>
+              <FormCol>
+                <Form.Item name="last_date" label="Due Date" style={FORM_ITEM_STYLE}>
+                  <DatePicker style={{ width: '100%' }} format="MM/DD/YYYY" />
+                </Form.Item>
+              </FormCol>
+              <FormCol>
+                <Form.Item name="customer_email" label="Email" style={FORM_ITEM_STYLE}><Input /></Form.Item>
+              </FormCol>
 
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Row gutter={16} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="message" label="Message on Invoice"><Input.TextArea rows={2} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="statement_message" label="Statement Memo"><Input.TextArea rows={2} /></Form.Item></Col>
-          </Row>
-        </Form>
+              <FormCol span={2}>
+                <Form.Item name="billing_address" label="Billing Address" style={FORM_ITEM_STYLE}><Input.TextArea rows={2} /></Form.Item>
+              </FormCol>
+              <FormCol>
+                <Form.Item name="vat" label="Tax Rate (%)" style={FORM_ITEM_STYLE} initialValue={0}>
+                  <Select allowClear placeholder="Select Tax rate"
+                    onChange={(v) => setVatPercent(Number(v) || 0)}
+                    dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setVatModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Tax Rate</Button></>)}>
+                    <Select.Option value={0}>No Tax (0%)</Select.Option>
+                    {vatRates.map(v => <Select.Option key={v.id} value={v.vat_percentage}>{v.vat_name} ({v.vat_percentage}%)</Select.Option>)}
+                  </Select>
+                </Form.Item>
+              </FormCol>
 
-        <Divider />
-        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <Space wrap>
-            <Button size="large" onClick={() => handleSave('Draft')} loading={saving}>Save as Draft</Button>
-            <Button size="large" type="primary" icon={<SaveOutlined />} onClick={() => handleSave()} loading={saving}>
-              {isEdit ? 'Update Invoice' : 'Save Invoice'}
-            </Button>
-            <Button size="large" onClick={() => handleSave('Sent')} loading={saving}>
-              {isEdit ? 'Update & Send' : 'Save & Send'}
-            </Button>
-            {isEdit && (
-              <Button size="large" icon={<MailOutlined />} onClick={() => setEmailModalOpen(true)}>
-                Email
+              {/* Read-only. Invoice status is derived from payments — there is
+                  deliberately no status dropdown anywhere on this form. */}
+              <FormCol>
+                <Form.Item label="Status" style={FORM_ITEM_STYLE}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 32 }}>
+                    <InvoiceStatusBadge status={displayStatus} />
+                    <span style={{ color: '#8c8c8c', fontSize: 12 }}>Set automatically from payments</span>
+                  </div>
+                </Form.Item>
+              </FormCol>
+            </FormGrid>
+          </FormSection>
+
+          <FormSection title="Line Items" icon={<UnorderedListOutlined />}>
+            <Table dataSource={lines} columns={lineColumns} rowKey="key" size="small" pagination={false}
+              scroll={{ x: 'max-content' }}
+              footer={() => (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+                  <Button type="dashed" icon={<PlusOutlined />} onClick={addLine}>Add Line</Button>
+                  <TotalsBlock
+                    rows={[
+                      { label: 'Subtotal', value: `${cSym} ${subtotal.toFixed(2)}` },
+                      vatPercent > 0 ? { label: `Tax (${vatPercent}%)`, value: `${cSym} ${vatAmount.toFixed(2)}` } : null,
+                      { label: 'Total', value: `${cSym} ${grandTotal.toFixed(2)}`, strong: true },
+                      (Number(paidToDate) || 0) > 0
+                        ? { label: 'Paid to Date', value: `${cSym} ${Number(paidToDate).toFixed(2)}`, color: '#52c41a' }
+                        : null,
+                      (Number(paidToDate) || 0) > 0
+                        ? { label: 'Balance Due', value: `${cSym} ${Math.max(0, grandTotal - (Number(paidToDate) || 0)).toFixed(2)}`, strong: true, color: '#fa541c' }
+                        : null,
+                      ((Number(paidToDate) || 0) - grandTotal) > 0.005
+                        ? { label: 'Overpayment / Customer Credit', value: `${cSym} ${((Number(paidToDate) || 0) - grandTotal).toFixed(2)}`, strong: true, color: '#fa8c16' }
+                        : null,
+                    ]}
+                  />
+                </div>
+              )}
+            />
+          </FormSection>
+
+          <FormGrid columns={2}>
+            <FormCol>
+              <FormSection title="Message on Invoice" icon={<MessageOutlined />}>
+                <Form.Item name="message" style={FORM_ITEM_STYLE}><Input.TextArea rows={2} /></Form.Item>
+              </FormSection>
+            </FormCol>
+            <FormCol>
+              <FormSection title="Statement Memo" icon={<FileTextOutlined />}>
+                <Form.Item name="statement_message" style={FORM_ITEM_STYLE}><Input.TextArea rows={2} /></Form.Item>
+              </FormSection>
+            </FormCol>
+          </FormGrid>
+
+          <FormSection title="Actions" icon={<SaveOutlined />}>
+            <DocumentActionBar
+              left={<Button size="large" onClick={handleCancel}>Cancel</Button>}
+            >
+              <Button size="large" type="primary" icon={<SaveOutlined />} onClick={() => handleSave()} loading={saving}>
+                {isEdit ? 'Update Invoice' : 'Save Invoice'}
               </Button>
-            )}
-          </Space>
-        </div>
+              <Button size="large" icon={<MailOutlined />} onClick={handleSaveAndEmail} loading={saving}>
+                {isEdit ? 'Update & Email' : 'Save & Email'}
+              </Button>
+            </DocumentActionBar>
+          </FormSection>
+        </Form>
       </Card>
 
-      <Modal title="Add New Customer" visible={custModalOpen} onOk={handleAddCustomer} onCancel={() => setCustModalOpen(false)} okText="Add" destroyOnClose width={520}>
+      <Modal title="Add New Customer" visible={custModalOpen} onOk={handleAddCustomer} onCancel={() => setCustModalOpen(false)} okText="Add" destroyOnClose width={MODAL_WIDTH} bodyStyle={MODAL_BODY_SCROLL_STYLE}>
         <Form form={custForm} layout="vertical" preserve={false}>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}><Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="last_name" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="company" label="Company"><Input /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
-            <Col span={8}><Form.Item name="phone" label="Phone"><Input onChange={e => custForm.setFieldsValue({ phone: phoneInputHandler(e.target.value) })} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="address1" label="Street Address"><Input placeholder="123 Main St" /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={8}><Form.Item name="address2" label="Address Line 2"><Input placeholder="Suite 100" /></Form.Item></Col>
-            <Col span={8}><Form.Item name="city" label="City"><Input placeholder="New York" /></Form.Item></Col>
-            <Col span={8}><Form.Item name="state" label="State"><Input placeholder="NY" /></Form.Item></Col>
-          </Row>
-          <Row gutter={12} style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            <Col span={12}><Form.Item name="postal_code" label="ZIP / Postal Code"><Input placeholder="10001" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="country" label="Country"><Select showSearch placeholder="Select country" allowClear optionFilterProp="children">{COUNTRIES.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}</Select></Form.Item></Col>
-          </Row>
+          <CustomerContactFields
+            form={custForm}
+            vatRates={vatRates}
+            address1Placeholder="123 Main St"
+            address2Placeholder="Suite 100"
+          />
         </Form>
       </Modal>
 
@@ -592,11 +839,7 @@ const CreateInvoice = () => {
             </Col>
             <Col span={12}>
               <Form.Item name="income_account" label="Income Acct" rules={[{ required: true, message: 'Req' }]} labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
-                <Select placeholder="Select..." showSearch optionFilterProp="children">
-                  {incomeAccounts.map(a => (
-                    <Select.Option key={a.id} value={a.accountName || a.name}>{a.accountName || a.name}</Select.Option>
-                  ))}
-                </Select>
+                <AccountSelect accounts={incomeAccounts} placeholder="Select..." />
               </Form.Item>
             </Col>
           </Row>
@@ -639,7 +882,7 @@ const CreateInvoice = () => {
         amount={`${cSym} ${lines.reduce((s, l) => s + Number(l.amount || 0), 0).toFixed(2)}`}
         customerName={(() => { const c = customers.find(cu => cu.id === form.getFieldValue('customer')); return c ? (c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : ''; })()}
         companyName={company.name || company.company_name || ''}
-        invoiceId={savedInvoiceId || (id ? Number(id) : null)}
+        documentId={savedInvoiceId || (id ? Number(id) : null)}
       />
     </div>
   );

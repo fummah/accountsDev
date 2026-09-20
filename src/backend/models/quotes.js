@@ -1,5 +1,25 @@
 // src/backend/models/Quotes.js
 const db = require('./dbmgr.js');
+const { recalcInvoiceFinancials } = require('../services/invoiceFinancials');
+const {
+  QUOTE_STATUS,
+  INVOICE_STATUS,
+  normalizeQuoteStatus,
+} = require('../services/documentStatus');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quote status is SYSTEM CONTROLLED.
+//
+// A quote is created Pending (active) and may only move through explicit
+// workflow operations:
+//
+//     acceptQuote(id)            Pending            → Accepted
+//     declineQuote(id)           Pending            → Declined
+//     convertQuoteToInvoice(id)  Pending | Accepted → Converted (+ new Invoice)
+//
+// updateQuote() deliberately ignores any client-supplied status: the normal
+// edit form can never rewrite the lifecycle state.
+// ─────────────────────────────────────────────────────────────────────────────
 
 const Quotes = {
   // Create the Quotes table if it doesn't exist
@@ -28,13 +48,23 @@ const Quotes = {
 
 
     db.prepare(stmt).run();
+    // Best-effort DB-level uniqueness on quote numbers. Silently skipped if
+    // legacy data already contains duplicates (model-level guards still apply).
+    try {
+      db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_quotes_number_unique ON quotes(number) WHERE number IS NOT NULL AND number != \'\'').run();
+    } catch (e) { /* leave enforcement to the model guards */ }
     try {
       const colNames = db.prepare("PRAGMA table_info(quotes)").all().map(c => c.name);
       if (!colNames.includes('sent_date'))   db.prepare("ALTER TABLE quotes ADD COLUMN sent_date TEXT").run();
       if (!colNames.includes('sent_method')) db.prepare("ALTER TABLE quotes ADD COLUMN sent_method TEXT DEFAULT 'Not Sent'").run();
       if (!colNames.includes('sent_status')) db.prepare("ALTER TABLE quotes ADD COLUMN sent_status TEXT DEFAULT 'Not Sent'").run();
+      // Lifecycle audit timestamps (best effort — old DBs get them added here).
+      if (!colNames.includes('linked_invoice')) db.prepare("ALTER TABLE quotes ADD COLUMN linked_invoice INTEGER").run();
+      if (!colNames.includes('accepted_at'))  db.prepare("ALTER TABLE quotes ADD COLUMN accepted_at TEXT").run();
+      if (!colNames.includes('declined_at'))  db.prepare("ALTER TABLE quotes ADD COLUMN declined_at TEXT").run();
+      if (!colNames.includes('converted_at')) db.prepare("ALTER TABLE quotes ADD COLUMN converted_at TEXT").run();
     } catch {}
-  }, 
+  },
   createQuoteItem: () => {
     const stmt = `
      CREATE TABLE IF NOT EXISTS quote_lines (
@@ -49,14 +79,24 @@ const Quotes = {
     FOREIGN KEY (quote_id) REFERENCES quotes(id)
   )`;
     db.prepare(stmt).run();
-  }, 
+  },
   
-  // Insert a new Quotes
+  // Insert a new Quote.
+  //
+  // `status` is accepted for signature compatibility but ignored — a new quote
+  // always starts in the active state (Pending). The user never chooses it.
   insertQuote: (status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,quoteLines) => {
     try {
+    // Quote numbers must be unique; reject duplicates before the insert.
+    if (number && String(number).trim() !== '') {
+      const dup = db.prepare('SELECT id FROM quotes WHERE number = ? AND id != 0 LIMIT 1').get(String(number).trim());
+      if (dup) {
+        return { success: false, error: `Quote number "${number}" already exists (quote #${dup.id}). Quote numbers must be unique.` };
+      }
+    }
     const stmt = db.prepare('INSERT INTO quotes (status,customer,customer_email, islater, billing_address,start_date,last_date,message,statement_message,number,entered_by,vat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const result = stmt.run(
-      String(status || 'Open'),
+      QUOTE_STATUS.PENDING,
       Number(customer) || 0,
       String(customer_email || ''),
       islater ? 1 : 0,
@@ -91,7 +131,7 @@ const Quotes = {
         const formattedNumber = `QUO-${String(Number(quoteId)).padStart(5, '0')}`;
         db.prepare('UPDATE quotes SET number = ? WHERE id = ?').run(formattedNumber, quoteId);
       }
-      return { success: true, quoteId: Number(quoteId) }; 
+      return { success: true, quoteId: Number(quoteId), status: QUOTE_STATUS.PENDING }; 
     } 
       else {
         return { success: false };
@@ -118,7 +158,9 @@ const Quotes = {
           quotes.customer_email, 
           quotes.message, 
           quotes.statement_message, 
-          quotes.billing_address 
+          quotes.billing_address,
+          quotes.linked_invoice,
+          (SELECT number FROM invoices WHERE invoices.id = quotes.linked_invoice) AS linked_invoice_number
       FROM 
           quotes 
       LEFT JOIN 
@@ -138,24 +180,44 @@ const Quotes = {
     return stmt.all();
   },
 
-  getPaginated: (page = 1, pageSize = 25, search = '', status = '') => {
+  getPaginated: (page = 1, pageSize = 25, search = '', status = '', dateFrom = '', dateTo = '', expFrom = '', expTo = '') => {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
-    const baseSql = `SELECT quotes.id, quotes.number, quotes.customer, customers.first_name || ' ' || customers.last_name AS customer_name, quotes.status, quotes.start_date, quotes.last_date, COALESCE(SUM(quote_lines.amount), 0) AS amount, quotes.vat, quotes.customer_email, quotes.message, quotes.statement_message, quotes.billing_address FROM quotes LEFT JOIN quote_lines ON quote_lines.quote_id = quotes.id LEFT JOIN customers ON quotes.customer = customers.id`;
+    const baseSql = `SELECT quotes.id, quotes.number, quotes.customer, customers.first_name || ' ' || customers.last_name AS customer_name, quotes.status, quotes.start_date, quotes.last_date, COALESCE(SUM(quote_lines.amount), 0) AS amount, quotes.vat, quotes.customer_email, quotes.message, quotes.statement_message, quotes.billing_address, quotes.linked_invoice, (SELECT number FROM invoices WHERE invoices.id = quotes.linked_invoice) AS linked_invoice_number FROM quotes LEFT JOIN quote_lines ON quote_lines.quote_id = quotes.id LEFT JOIN customers ON quotes.customer = customers.id`;
     const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
-    const statusParam = status && status.trim() ? status.trim() : null;
     const whereParts = [];
     const params = [];
     if (searchParam) {
       whereParts.push(`(customers.first_name || ' ' || customers.last_name LIKE ? OR quotes.number LIKE ?)`);
       params.push(searchParam, searchParam);
     }
-    if (statusParam) {
-      whereParts.push(`quotes.status = ?`);
-      params.push(statusParam);
+    // Status filter: normalise legacy labels so "Open" still finds Pending quotes.
+    if (status && String(status).trim()) {
+      const requested = String(status).split(',').map(s => s.trim()).filter(Boolean);
+      const wanted = Array.from(new Set(requested.map(normalizeQuoteStatus)));
+      if (wanted.length) {
+        whereParts.push(`quotes.status COLLATE NOCASE IN (${wanted.map(() => '?').join(',')})`);
+        params.push(...wanted);
+      }
+    }
+    if (dateFrom) {
+      whereParts.push(`quotes.start_date >= ?`);
+      params.push(dateFrom);
+    }
+    if (dateTo) {
+      whereParts.push(`quotes.start_date <= ?`);
+      params.push(dateTo);
+    }
+    if (expFrom) {
+      whereParts.push(`quotes.last_date >= ?`);
+      params.push(expFrom);
+    }
+    if (expTo) {
+      whereParts.push(`quotes.last_date <= ?`);
+      params.push(expTo);
     }
     const whereClause = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
-    const groupOrder = ` GROUP BY quotes.id, customers.first_name, customers.last_name, quotes.status, quotes.start_date, quotes.last_date, quotes.vat, quotes.customer_email, quotes.message, quotes.statement_message, quotes.billing_address ORDER BY quotes.id DESC`;
+    const groupOrder = ` GROUP BY quotes.id ORDER BY quotes.id DESC`;
     const total = params.length
       ? db.prepare(`SELECT COUNT(*) AS total FROM (${baseSql}${whereClause}${groupOrder})`).get(...params).total
       : db.prepare('SELECT COUNT(*) AS total FROM quotes').get().total;
@@ -165,12 +227,16 @@ const Quotes = {
       : db.prepare(baseSql + groupOrder + ' LIMIT ? OFFSET ?').all(limit, offset);
     return { data, total };
   },
+
   getSingleQuote: (quote_id) => {
     const stmt = db.prepare(`SELECT quotes.id as quote_id, quotes.customer as customer_id,
         customers.first_name, customers.last_name, customers.phone_number, customers.mobile_number,
         quotes.status, quotes.customer_email, quotes.islater, quotes.billing_address,
         quotes.start_date, quotes.last_date, quotes.message, quotes.statement_message,
         quotes.number, quotes.vat, quotes.entered_by, quotes.date_entered,
+        quotes.linked_invoice,
+        (SELECT number FROM invoices WHERE invoices.id = quotes.linked_invoice) AS linked_invoice_number,
+        quotes.accepted_at, quotes.declined_at, quotes.converted_at,
         quote_lines.id AS line_id, quote_lines.amount, quote_lines.description,
         quote_lines.product, quote_lines.quantity, quote_lines.rate
       FROM quotes
@@ -182,6 +248,10 @@ const Quotes = {
     if (!rows || rows.length === 0) return null;
   
     const first = rows[0];
+    const linkedInvoiceId = first.linked_invoice != null && first.linked_invoice !== '' ? Number(first.linked_invoice) : null;
+    // Canonical lifecycle status (legacy labels normalised, e.g. Invoiced → Converted).
+    let status = normalizeQuoteStatus(first.status);
+    if (linkedInvoiceId) status = QUOTE_STATUS.CONVERTED;
     const result = {
       quote_id: first.quote_id,
       customer_id: first.customer_id,
@@ -190,7 +260,8 @@ const Quotes = {
       last_name: first.last_name,
       phone_number: first.phone_number,
       mobile_number: first.mobile_number,
-      status: first.status,
+      status,
+      statusStored: first.status,
       vat: first.vat,
       customer_email: first.customer_email,
       islater: first.islater,
@@ -202,6 +273,12 @@ const Quotes = {
       number: first.number,
       entered_by: first.entered_by,
       date_entered: first.date_entered,
+      linkedInvoiceId,
+      convertedInvoiceId: linkedInvoiceId,
+      linkedInvoiceNumber: first.linked_invoice_number || null,
+      acceptedAt: first.accepted_at || null,
+      declinedAt: first.declined_at || null,
+      convertedAt: first.converted_at || null,
       lines: [],
     };
     for (const row of rows) {
@@ -212,6 +289,11 @@ const Quotes = {
     return result;
   },
 
+  // Update a quote's editable content.
+  //
+  // The status is intentionally NOT written: quote status changes only through
+  // the explicit lifecycle operations below. Any status in `quoteData` is
+  // discarded, and the stored lifecycle value is preserved untouched.
   updateQuote : async (quoteData) => {
     const { id, lines, quoteLines, ...quoteDetails } = quoteData;
     const lineItems = lines || quoteLines || [];
@@ -221,7 +303,7 @@ const Quotes = {
         `UPDATE quotes
          SET customer = ?, customer_email = ?, islater = ?, billing_address = ?, 
              start_date = ?, last_date = ?, number = ?, vat = ?, 
-             message = ?, statement_message = ?, status = ?
+             message = ?, statement_message = ?
          WHERE id = ?`).run(
           Number(quoteDetails.customer) || 0,
           String(quoteDetails.customer_email || ''),
@@ -233,7 +315,6 @@ const Quotes = {
           Number(quoteDetails.vat) || 0,
           String(quoteDetails.message || ''),
           String(quoteDetails.statement_message || ''),
-          String(quoteDetails.status || 'Open'),
           Number(id)
       );
   
@@ -255,12 +336,14 @@ const Quotes = {
         );
       }
   
-      return { success: true, message: 'Quote updated successfully.' };
+      const stored = db.prepare('SELECT status FROM quotes WHERE id = ?').get(Number(id));
+      return { success: true, message: 'Quote updated successfully.', status: normalizeQuoteStatus(stored?.status) };
     } catch (error) {
       console.error('Error updating quote:', error);
       throw error;
     }
   },
+
   deleteQuote: async (id) => {
     try {
       const transaction = db.transaction((quoteId) => {
@@ -275,91 +358,213 @@ const Quotes = {
       return { success: false, error: error.message };
     }
   },
-  
-  convertToInvoice: (quote_id) => {
+
+  // ── Lifecycle: Accept ────────────────────────────────────────────────────
+  // Valid from: Pending. Already-Accepted is idempotent. Declined/Converted are
+  // rejected so a stale client cannot force an inconsistent state.
+  acceptQuote: (quote_id) => {
+    const id = Number(quote_id);
     try {
-      // Fetch quote data
-      const quote_stmt = db.prepare(`SELECT * FROM quotes WHERE id = ?`);
-      const quote = quote_stmt.get(quote_id);
-  
-      if (!quote) {
-        throw new Error(`Quote with ID ${quote_id} not found.`);
+      const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+      if (!quote) return { success: false, error: `Quote #${quote_id} not found.` };
+
+      const current = quote.linked_invoice ? QUOTE_STATUS.CONVERTED : normalizeQuoteStatus(quote.status);
+      if (current === QUOTE_STATUS.ACCEPTED) {
+        return { success: true, alreadyAccepted: true, status: QUOTE_STATUS.ACCEPTED, quoteNumber: quote.number, previousStatus: current };
       }
-  
-      // Fetch quote lines data
-      const quote_lines_stmt = db.prepare(`SELECT * FROM quote_lines WHERE quote_id = ?`);
-      const quote_lines = quote_lines_stmt.all(quote_id);
-  
-      // Begin transaction
-      const transaction = db.transaction(() => {
-        // Insert into invoices table (include status, last_date, message, statement_message, linked_quote)
+      if (current === QUOTE_STATUS.CONVERTED) {
+        return { success: false, invalidTransition: true, currentStatus: current, error: `Quote ${quote.number || id} has already been converted to an invoice and can no longer be accepted.` };
+      }
+      if (current === QUOTE_STATUS.DECLINED) {
+        return { success: false, invalidTransition: true, currentStatus: current, error: `Quote ${quote.number || id} was declined and cannot be accepted.` };
+      }
+
+      const tx = db.transaction(() => {
+        // Re-read inside the transaction: reject a transition based on stale state.
+        const fresh = db.prepare('SELECT status, linked_invoice FROM quotes WHERE id = ?').get(id);
+        const s = fresh && fresh.linked_invoice ? QUOTE_STATUS.CONVERTED : normalizeQuoteStatus(fresh?.status);
+        if (s !== QUOTE_STATUS.PENDING) throw Object.assign(new Error('INVALID_TRANSITION'), { code: 'INVALID_TRANSITION', currentStatus: s });
+        db.prepare("UPDATE quotes SET status = ?, accepted_at = datetime('now') WHERE id = ?").run(QUOTE_STATUS.ACCEPTED, id);
+      });
+      tx();
+
+      return { success: true, status: QUOTE_STATUS.ACCEPTED, quoteNumber: quote.number, previousStatus: current };
+    } catch (error) {
+      if (error?.code === 'INVALID_TRANSITION') {
+        return { success: false, invalidTransition: true, currentStatus: error.currentStatus, error: `This quote is now ${error.currentStatus} and can no longer be accepted. Please reload the quote.` };
+      }
+      console.error('Error accepting quote:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // ── Lifecycle: Decline ───────────────────────────────────────────────────
+  declineQuote: (quote_id) => {
+    const id = Number(quote_id);
+    try {
+      const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+      if (!quote) return { success: false, error: `Quote #${quote_id} not found.` };
+
+      const current = quote.linked_invoice ? QUOTE_STATUS.CONVERTED : normalizeQuoteStatus(quote.status);
+      if (current === QUOTE_STATUS.DECLINED) {
+        return { success: true, alreadyDeclined: true, status: QUOTE_STATUS.DECLINED, quoteNumber: quote.number, previousStatus: current };
+      }
+      if (current === QUOTE_STATUS.CONVERTED) {
+        return { success: false, invalidTransition: true, currentStatus: current, error: `Quote ${quote.number || id} has already been converted to an invoice and cannot be declined.` };
+      }
+      if (current === QUOTE_STATUS.ACCEPTED) {
+        return { success: false, invalidTransition: true, currentStatus: current, error: `Quote ${quote.number || id} is already accepted and cannot be declined.` };
+      }
+
+      const tx = db.transaction(() => {
+        const fresh = db.prepare('SELECT status, linked_invoice FROM quotes WHERE id = ?').get(id);
+        const s = fresh && fresh.linked_invoice ? QUOTE_STATUS.CONVERTED : normalizeQuoteStatus(fresh?.status);
+        if (s !== QUOTE_STATUS.PENDING) throw Object.assign(new Error('INVALID_TRANSITION'), { code: 'INVALID_TRANSITION', currentStatus: s });
+        db.prepare("UPDATE quotes SET status = ?, declined_at = datetime('now') WHERE id = ?").run(QUOTE_STATUS.DECLINED, id);
+      });
+      tx();
+
+      return { success: true, status: QUOTE_STATUS.DECLINED, quoteNumber: quote.number, previousStatus: current };
+    } catch (error) {
+      if (error?.code === 'INVALID_TRANSITION') {
+        return { success: false, invalidTransition: true, currentStatus: error.currentStatus, error: `This quote is now ${error.currentStatus} and can no longer be declined. Please reload the quote.` };
+      }
+      console.error('Error declining quote:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // ── Lifecycle: Convert to Invoice ────────────────────────────────────────
+  // Valid from: Pending (direct conversion is supported) or Accepted.
+  // Declined and already-Converted quotes are rejected, and the whole thing runs
+  // in a transaction that re-checks the quote so a double-click / stale client
+  // can never create a duplicate invoice.
+  //
+  // The new invoice is NOT given a client-supplied status: it runs through the
+  // normal invoice financial calculation, which yields Open for a positive
+  // outstanding balance.
+  convertQuoteToInvoice: (quote_id) => {
+    const id = Number(quote_id);
+    let quoteNumber = String(quote_id);
+    try {
+      const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+      if (!quote) return { success: false, error: `Quote #${quote_id} not found.` };
+      quoteNumber = quote.number || String(id);
+
+      const current = quote.linked_invoice ? QUOTE_STATUS.CONVERTED : normalizeQuoteStatus(quote.status);
+      if (current === QUOTE_STATUS.CONVERTED || quote.linked_invoice) {
+        return {
+          success: false, alreadyConverted: true, currentStatus: QUOTE_STATUS.CONVERTED,
+          invoiceId: quote.linked_invoice ? Number(quote.linked_invoice) : null,
+          error: `Quote ${quoteNumber} has already been converted to an invoice.`,
+        };
+      }
+      if (current === QUOTE_STATUS.DECLINED) {
+        return { success: false, invalidTransition: true, currentStatus: current, error: `Quote ${quoteNumber} was declined and cannot be converted.` };
+      }
+
+      const quote_lines = db.prepare('SELECT * FROM quote_lines WHERE quote_id = ?').all(id);
+
+      const tx = db.transaction(() => {
+        // Concurrency guard: re-read and re-validate inside the transaction.
+        const fresh = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+        if (!fresh) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' });
+        const s = fresh.linked_invoice ? QUOTE_STATUS.CONVERTED : normalizeQuoteStatus(fresh.status);
+        if (s === QUOTE_STATUS.CONVERTED || fresh.linked_invoice) throw Object.assign(new Error('ALREADY_CONVERTED'), { code: 'ALREADY_CONVERTED', invoiceId: fresh.linked_invoice || null });
+        if (s === QUOTE_STATUS.DECLINED) throw Object.assign(new Error('DECLINED'), { code: 'DECLINED' });
+
         const invoice_stmt = db.prepare(`
           INSERT INTO invoices (customer, customer_email, islater, billing_address, terms, start_date, last_date, message, statement_message, number, entered_by, vat, status, linked_quote)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
-  
+
         const result = invoice_stmt.run(
-          Number(quote.customer) || 0,
-          String(quote.customer_email || ''),
-          quote.islater ? 1 : 0,
-          String(quote.billing_address || ''),
-          String(quote.terms || ''),
+          Number(fresh.customer) || 0,
+          String(fresh.customer_email || ''),
+          fresh.islater ? 1 : 0,
+          String(fresh.billing_address || ''),
+          String(fresh.terms || ''),
           new Date().toISOString().split('T')[0],
-          String(quote.last_date || ''),
-          String(quote.message || ''),
-          String(quote.statement_message || ''),
+          String(fresh.last_date || ''),
+          String(fresh.message || ''),
+          String(fresh.statement_message || ''),
           '',
-          quote.entered_by != null ? String(quote.entered_by) : null,
-          Number(quote.vat) || 0,
-          'Pending',
-          Number(quote.id)
+          fresh.entered_by != null ? String(fresh.entered_by) : null,
+          Number(fresh.vat) || 0,
+          INVOICE_STATUS.OPEN,      // provisional — recalculated from real money below
+          Number(fresh.id)
         );
-  
-        const invoice_id = result.lastInsertRowid;
+
+        const invoice_id = Number(result.lastInsertRowid);
         const formatted_invoice_number = `INV-${String(invoice_id).padStart(5, '0')}`;
-  
-        // Update the invoice number
         db.prepare(`UPDATE invoices SET number = ? WHERE id = ?`).run(formatted_invoice_number, invoice_id);
-  
-        // Update linked_invoice in the quotes table
-        db.prepare(`UPDATE quotes SET linked_invoice = ?, status = ? WHERE id = ?`).run(invoice_id, 'Invoiced', quote_id);
-  
-        // Insert into invoice_lines table
+
         const invoice_lines_stmt = db.prepare(`
           INSERT INTO invoice_lines (invoice_id, product, description, quantity, rate, amount) VALUES (?, ?, ?, ?, ?, ?)`);
-  
-        let totalAmount = 0;
         for (const line of quote_lines) {
           invoice_lines_stmt.run(
             invoice_id,
             line.product,
             line.description,
-            line.quantity,
-            line.rate,
-            line.amount
+            Number(line.quantity) || 1,
+            Number(line.rate) || 0,
+            Number(line.amount) || 0
           );
-          totalAmount += (Number(line.amount) || 0) * (Number(line.quantity) || 1);
         }
 
-        // Set balance on the new invoice (total with VAT)
-        const vatRate = Number(quote.vat) || 0;
-        const balance = totalAmount * (1 + vatRate / 100);
-        db.prepare(`UPDATE invoices SET balance = ? WHERE id = ?`).run(balance, invoice_id);
+        // Automatic invoice status: Open when there is a positive balance.
+        const financials = recalcInvoiceFinancials(invoice_id);
 
-        return invoice_id;
+        db.prepare(`UPDATE quotes SET linked_invoice = ?, status = ?, converted_at = datetime('now') WHERE id = ?`)
+          .run(invoice_id, QUOTE_STATUS.CONVERTED, Number(fresh.id));
+
+        return { invoice_id, formatted_invoice_number, financials };
       });
-  
-      // Execute transaction
-      transaction();
-  
-      console.log(`Quote ${quote_id} successfully converted to Invoice.`);
-      return { success: true, message: 'successfully converted to Invoice.' };
+
+      const out = tx();
+
+      // Best-effort GL posting for the new invoice (DR AR / CR income per line).
+      // postInvoice() carries its own has-posting guard, so this is idempotent.
+      try {
+        const JournalEntries = require('./journalEntries');
+        const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(out.invoice_id);
+        if (inv) {
+          JournalEntries.postInvoice({
+            id: out.invoice_id,
+            date: inv.start_date || new Date().toISOString().slice(0, 10),
+            number: inv.number,
+            customerName: '',
+          });
+        }
+      } catch (glErr) {
+        console.warn('[quotes] GL post on conversion failed (non-fatal):', glErr.message);
+      }
+
+      console.log(`Quote ${id} successfully converted to Invoice ${out.formatted_invoice_number}.`);
+      return {
+        success: true,
+        message: 'Quote converted to invoice.',
+        invoiceId: out.invoice_id,
+        invoiceNumber: out.formatted_invoice_number,
+        invoiceStatus: out.financials ? out.financials.status : INVOICE_STATUS.OPEN,
+        quoteStatus: QUOTE_STATUS.CONVERTED,
+        quoteNumber,
+      };
     } catch (error) {
+      if (error?.code === 'ALREADY_CONVERTED') {
+        return { success: false, alreadyConverted: true, currentStatus: QUOTE_STATUS.CONVERTED, invoiceId: error.invoiceId || null, error: `Quote ${quoteNumber} has already been converted to an invoice.` };
+      }
+      if (error?.code === 'DECLINED') {
+        return { success: false, invalidTransition: true, currentStatus: QUOTE_STATUS.DECLINED, error: `Quote ${quoteNumber} was declined and cannot be converted.` };
+      }
       console.error('Error converting quote to invoice:', error);
-      throw error;
+      return { success: false, error: error.message };
     }
-  
   },
+
+  // Backwards-compatible alias for the original model API / IPC channel.
+  convertToInvoice: (quote_id) => Quotes.convertQuoteToInvoice(quote_id),
+
   markQuoteSent: (id, method, status) => {
     const date = new Date().toISOString().slice(0, 19).replace('T', ' ');
     return db.prepare('UPDATE quotes SET sent_date=?, sent_method=?, sent_status=? WHERE id=?').run(date, method, status, id);

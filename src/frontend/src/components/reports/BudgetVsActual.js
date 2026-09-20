@@ -181,7 +181,7 @@ const BudgetVsActual = () => {
           rowKey="id"
           size="small"
           loading={loading}
-          pagination={{ pageSize: 20 }}
+          pagination={{ defaultPageSize: 20 }}
         />
       </Card>
 

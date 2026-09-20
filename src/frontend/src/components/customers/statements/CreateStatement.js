@@ -74,7 +74,7 @@ const CreateStatement = () => {
             subTitle={`Statement #${result.statementId} for ${result.customer} (${result.period})`}
             extra={[
               <Button type="primary" key="new" icon={<ReloadOutlined />} onClick={resetForm}>Generate Another Statement</Button>,
-              <Button key="list" onClick={() => { history.push('/main/bank-statements/list'); }}>View All Statements</Button>,
+              <Button key="list" onClick={() => { history.push('/inner/sales?tab=2'); }}>View All Statements</Button>,
               <Button key="sales" onClick={() => { history.push('/inner/sales'); }}>Back to Sales</Button>,
             ]}
           >
@@ -103,7 +103,7 @@ const CreateStatement = () => {
             <Form.Item>
               <Space>
                 <Button type="primary" htmlType="submit" loading={loading} icon={<FileTextOutlined />}>Generate Statement</Button>
-                <Button onClick={() => { history.push('/main/bank-statements/list'); }}>View Existing Statements</Button>
+                <Button onClick={() => { history.push('/inner/sales?tab=2'); }}>View Existing Statements</Button>
               </Space>
             </Form.Item>
           </Form>

@@ -209,7 +209,7 @@ const JobCosting = () => {
 
         {activeTab === '1' && (
           <Table columns={columns} dataSource={filteredData} loading={loading} rowKey="key"
-            pagination={{ pageSize: 25, showSizeChanger: true, showTotal: t => `${t} entries` }} size="middle"
+            pagination={{ defaultPageSize: 25, showSizeChanger: true, showTotal: t => `${t} entries` }} size="middle"
             summary={pageData => {
               let tl = 0, tm = 0, tt = 0;
               pageData.forEach(r => { tl += Number(r.laborCost || 0); tm += Number(r.materialCost || 0); tt += Number(r.totalCost || 0); });

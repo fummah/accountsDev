@@ -1,56 +1,14 @@
-import React from "react";
-import ReactDOM from "react-dom";
+import 'react-app-polyfill/ie11';
+import 'react-app-polyfill/stable';
+// Must be evaluated BEFORE the app (NextApp) so the ResizeObserver patch is
+// in place before antd's rc-resize-observer captures the native global.
+import './errorSuppression';
+
+import React from 'react';
+import ReactDOM from 'react-dom';
 
 import NextApp from './NextApp';
 import * as serviceWorker from './registerServiceWorker';
-import 'react-app-polyfill/ie11';
-import 'react-app-polyfill/stable';
-
-// Suppress benign ResizeObserver loop error (triggered by Ant Design / Recharts resize)
-// Patch ResizeObserver at the source so the error never fires
-if (typeof window !== 'undefined') {
-  const OrigRO = window.ResizeObserver;
-  if (OrigRO) {
-    window.ResizeObserver = class PatchedResizeObserver extends OrigRO {
-      constructor(callback) {
-        super((entries, observer) => {
-          // requestAnimationFrame prevents the "loop completed" error
-          window.requestAnimationFrame(() => {
-            try { callback(entries, observer); } catch (_) {}
-          });
-        });
-      }
-    };
-  }
-  // Belt-and-suspenders: also suppress in all event phases
-  const roErr = /ResizeObserver loop/;
-  const origErr = window.onerror;
-  window.onerror = function (msg, ...args) {
-    if (roErr.test(msg)) return true;
-    if (origErr) return origErr.call(this, msg, ...args);
-  };
-  window.addEventListener('error', (e) => {
-    if (roErr.test(e.message)) { e.stopImmediatePropagation(); e.stopPropagation(); e.preventDefault(); }
-  }, true);
-  window.addEventListener('error', (e) => {
-    if (roErr.test(e.message)) { e.stopImmediatePropagation(); e.preventDefault(); }
-  });
-  window.addEventListener('unhandledrejection', (e) => {
-    if (e.reason && roErr.test(String(e.reason))) { e.preventDefault(); }
-  });
-  // Suppress in React dev overlay (CRA iframe-based overlay)
-  const origAddEventListener = EventTarget.prototype.addEventListener;
-  EventTarget.prototype.addEventListener = function(type, fn, opts) {
-    if (type === 'error' && this === window) {
-      const wrapped = function(event) {
-        if (event && event.message && roErr.test(event.message)) { event.stopImmediatePropagation(); event.preventDefault(); return; }
-        return fn.call(this, event);
-      };
-      return origAddEventListener.call(this, type, wrapped, opts);
-    }
-    return origAddEventListener.call(this, type, fn, opts);
-  };
-}
 
 ReactDOM.render(<NextApp />, document.getElementById('root'));
 

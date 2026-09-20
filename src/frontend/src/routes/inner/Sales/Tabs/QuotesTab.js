@@ -73,7 +73,7 @@ const QuotesTab = () => {
             setSelectedQuote(null);
             setDetails(0);      
           } else {
-            setMessage('Failed to convert quote. Please try again.');
+            setMessage(typeof result.error === 'string' ? result.error : 'Failed to convert quote. Please try again.');
             setIsSuccess(false);
             setShowError(true);
           }

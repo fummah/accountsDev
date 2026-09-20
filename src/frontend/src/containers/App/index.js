@@ -102,10 +102,18 @@ const App = () => {
           // accessibility classes
           document.body.classList.toggle('contrast-high', !!cfg.contrastHigh);
           document.body.classList.toggle('font-large', cfg.fontScale === 'large');
+          // custom background / text colors
+          applyCustomColors(cfg.bgColor, cfg.textColor);
         }
       } catch {}
     })();
   }, [dispatch]);
+
+  const applyCustomColors = (bg, text) => {
+    const root = document.documentElement;
+    if (bg) root.style.setProperty('--app-bg', bg);
+    if (text) root.style.setProperty('--app-text', text);
+  };
 
   useEffect(() => {
     if (isDirectionRTL) {

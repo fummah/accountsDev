@@ -4,9 +4,29 @@ const JournalEntries = require('../models/journalEntries');
 const Journal = require('../models/journal');
 const Ledger = require('../models/ledger');
 const AuditLog = require('../models/auditLog');
+const ChartOfAccounts = require('../models/chartOfAccounts');
 const db = require('../models/dbmgr');
 const { authorize } = require('../security/authz');
 const { validateTransaction, validateJournal } = require('../validation/validators');
+
+// A check is always drawn on a real Bank-type account. Reject any Chart of
+// Accounts account that is NOT classified as 'Bank' (Credit Card, Expense,
+// Income, Liability, Equity, ... are never valid check bank accounts).
+const assertBankAccount = (accountId) => {
+  if (accountId == null) return;
+  const acc = ChartOfAccounts.getAccount(Number(accountId));
+  if (!acc) {
+    throw new Error(
+      `Invalid bank account: account #${accountId} does not exist in the Chart of Accounts.`
+    );
+  }
+  const type = String(acc.type || acc.accountType || '').trim().toLowerCase();
+  if (type !== 'bank') {
+    throw new Error(
+      `Invalid bank account. The selected Chart of Accounts account "${acc.name || acc.accountName}" (${acc.type || acc.accountType}) is not a Bank account.`
+    );
+  }
+};
 
 const registerTransactionHandlers = () => {
   // Transactions
@@ -19,10 +39,38 @@ const registerTransactionHandlers = () => {
     }
   });
 
+  ipcMain.handle('get-transactions-paginated', async (_e, { page = 1, pageSize = 25, search = '', type = '' } = {}) => {
+    try {
+      return Transactions.getPaginated(page, pageSize, search, type);
+    } catch (error) {
+      console.error('Error fetching paginated transactions:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('get-check-stats', async () => {
+    try {
+      return Transactions.getCheckStats();
+    } catch (error) {
+      console.error('Error fetching check stats:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('find-transaction-by-reference', async (_e, { type, reference }) => {
+    try {
+      return Transactions.findByReference(type, reference) || null;
+    } catch (error) {
+      console.error('Error finding transaction by reference:', error);
+      return { error: error.message };
+    }
+  });
+
   ipcMain.handle('insert-transaction', async (event, tx) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
       validateTransaction(tx);
+      if ((tx.type || '').toLowerCase() === 'check') assertBankAccount(tx.accountId);
       // Infer proper debit/credit based on transaction type
       // For the bank register: deposits increase the bank (debit for Asset accounts),
       // checks/expenses decrease the bank (credit for Asset accounts).
@@ -87,6 +135,8 @@ const registerTransactionHandlers = () => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
       const existing = Transactions.getById(id);
+      const txnType = String((data.type || existing?.type || '')).toLowerCase();
+      if (txnType === 'check') assertBankAccount(data.accountId != null ? data.accountId : existing?.accountId);
       const res = Transactions.update(id, data);
       if (res?.changes > 0) {
         AuditLog.log({
@@ -166,9 +216,34 @@ const registerTransactionHandlers = () => {
     }
   });
 
+  ipcMain.handle('delete-check', async (event, id) => {
+    try {
+      const ctx = authorize(event, { permissions: 'write:transactions' });
+      const res = Transactions.deleteCheck(id);
+      if (res?.success) {
+        AuditLog.log({
+          userId: ctx.userId,
+          action: 'delete',
+          entityType: 'check',
+          entityId: id,
+          details: { reversedJournal: res.reversedJournal, reversedBill: res.reversedBill }
+        });
+      }
+      return res;
+    } catch (error) {
+      console.error('Error deleting check:', error);
+      return { error: error.message };
+    }
+  });
+
   ipcMain.handle('mark-check-printed', async (event, id, printed = 1) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
+      const tx = db.prepare("SELECT id, type FROM transactions WHERE id = ?").get(id);
+      if (!tx) return { success: false, error: 'Transaction not found' };
+      if (String(tx.type || '').toLowerCase() !== 'check') {
+        return { success: false, error: 'Only checks can be marked as printed' };
+      }
       const val = printed ? 1 : 0;
       const res = db.prepare("UPDATE transactions SET printed = ?, printed_at = CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END WHERE id = ?").run(val, val, id);
       if (res.changes > 0) {
@@ -201,7 +276,9 @@ const registerTransactionHandlers = () => {
     try {
       const ctx = authorize(event, { permissions: 'write:journal' });
       console.log('[insert-journal] received entry:', JSON.stringify({ ...entry, lines: entry.lines?.length }));
-      const id = Journal.insert(entry);
+      // Single posting engine: JournalEntries.post (accepts account names or ids)
+      const result = JournalEntries.post(entry);
+      const id = result?.id;
       console.log('[insert-journal] inserted with id:', id);
       if (id) {
         AuditLog.log({
@@ -212,7 +289,7 @@ const registerTransactionHandlers = () => {
           details: { entry }
         });
       }
-      return id;
+      return result;
     } catch (error) {
       console.error('Error inserting journal entry:', error);
       return { error: error.message };

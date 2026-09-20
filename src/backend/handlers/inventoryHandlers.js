@@ -50,6 +50,17 @@ function registerInventoryHandlers() {
     }
   });
 
+  // Inventory History for one item (the brief's Part 24). Each row is resolved
+  // back to the vendor bill or invoice that caused it.
+  ipcMain.handle('get-item-movements', async (event, itemId, limit) => {
+    try {
+      return Inventory.getMovementsForItem(itemId, limit);
+    } catch (e) {
+      console.error('Error getting item movements:', e);
+      return { error: e.message };
+    }
+  });
+
   ipcMain.handle('set-reorder-point', async (event, itemId, warehouseId, reorderPoint) => {
     try {
       return Inventory.setReorderPoint(itemId, warehouseId, reorderPoint);

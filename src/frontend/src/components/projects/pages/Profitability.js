@@ -133,7 +133,7 @@ const Profitability = () => {
                 </Button>
               }>
               <Table columns={tsColumns} dataSource={timesheets} rowKey={(r, i) => r.id || i} size="small"
-                pagination={{ pageSize: 10, showSizeChanger: true }} />
+                pagination={{ defaultPageSize: 10, showSizeChanger: true }} />
             </Card>
           </>
         )}

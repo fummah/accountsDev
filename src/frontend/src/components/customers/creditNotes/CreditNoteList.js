@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Tag, Modal, Form, Input, InputNumber, Select, DatePicker, message, Popconfirm, Space } from 'antd';
-import { PlusOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, EditOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
 
@@ -11,6 +11,7 @@ const CreditNoteList = () => {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [applyModal, setApplyModal] = useState({ visible: false, cnId: null });
   const [form] = Form.useForm();
   const [lines, setLines] = useState([{ description: '', quantity: 1, unit_price: 0, amount: 0, tax_rate: 0 }]);
@@ -50,7 +51,43 @@ const CreditNoteList = () => {
   const addLine = () => setLines(prev => [...prev, { description: '', quantity: 1, unit_price: 0, amount: 0, tax_rate: 0 }]);
   const removeLine = (idx) => setLines(prev => prev.filter((_, i) => i !== idx));
 
-  const handleCreate = async () => {
+  const openCreate = () => {
+    setEditingId(null);
+    form.resetFields();
+    setLines([{ description: '', quantity: 1, unit_price: 0, amount: 0, tax_rate: 0 }]);
+    setModalVisible(true);
+  };
+
+  const openEdit = async (record) => {
+    try {
+      setLoading(true);
+      const cn = await window.electronAPI.creditNoteGet?.(record.id);
+      if (!cn || cn.error) { message.error('Failed to load credit note'); return; }
+      setEditingId(cn.id);
+      form.setFieldsValue({
+        customer_id: cn.customer_id,
+        date: cn.date ? moment(cn.date) : moment(),
+        reason: cn.reason || '',
+        notes: cn.notes || '',
+      });
+      if (cn.lines && cn.lines.length > 0) {
+        setLines(cn.lines.map(l => ({
+          id: l.id || Date.now(),
+          description: l.description || '',
+          quantity: Number(l.quantity || 1),
+          unit_price: Number(l.unit_price || 0),
+          amount: Number(l.amount || 0),
+          tax_rate: Number(l.tax_rate || 0),
+        })));
+      } else {
+        setLines([{ description: '', quantity: 1, unit_price: 0, amount: 0, tax_rate: 0 }]);
+      }
+      setModalVisible(true);
+    } catch { message.error('Failed to load credit note'); }
+    finally { setLoading(false); }
+  };
+
+  const handleSave = async () => {
     try {
       const values = await form.validateFields();
       const data = {
@@ -59,17 +96,22 @@ const CreditNoteList = () => {
         date: values.date ? values.date.format('YYYY-MM-DD') : moment().format('YYYY-MM-DD'),
         reason: values.reason,
         notes: values.notes,
-        status: 'Draft'
       };
-      const result = await window.electronAPI.creditNoteCreate?.(data, lines);
+      let result;
+      if (editingId) {
+        result = await window.electronAPI.creditNoteUpdate?.(editingId, data, lines);
+      } else {
+        result = await window.electronAPI.creditNoteCreate?.(data, lines);
+      }
       if (result?.success) {
-        message.success(`Credit Note ${result.credit_note_number} created`);
+        message.success(editingId ? 'Credit Note updated' : `Credit Note ${result.credit_note_number} created`);
         setModalVisible(false);
+        setEditingId(null);
         form.resetFields();
         setLines([{ description: '', quantity: 1, unit_price: 0, amount: 0, tax_rate: 0 }]);
         load();
       } else {
-        message.error(result?.error || 'Failed to create');
+        message.error(result?.error || 'Failed to save');
       }
     } catch (e) {
       if (e?.errorFields) return;
@@ -108,73 +150,65 @@ const CreditNoteList = () => {
     { title: 'Reason', dataIndex: 'reason', key: 'reason', ellipsis: true },
     { title: 'Total', dataIndex: 'total', key: 'total', width: 100, render: v => `${cSym} ${(Number(v) || 0).toFixed(2)}` },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 90, render: s => <Tag color={statusColor[s] || 'default'}>{s}</Tag> },
-    { title: 'Actions', key: 'actions', width: 180, render: (_, r) => (
+    { title: 'Actions', key: 'actions', width: 220, render: (_, r) => (
       <Space>
+        {(r.status === 'Draft' || r.status === 'Issued') && (
+          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>Edit</Button>
+        )}
         {r.status === 'Draft' && (
           <Button size="small" icon={<CheckCircleOutlined />} onClick={() => { setApplyModal({ visible: true, cnId: r.id, invoiceId: null }); loadInvoices(); }}>Apply</Button>
         )}
-        <Popconfirm title="Delete this credit note?" onConfirm={() => handleDelete(r.id)} okText="Yes">
-          <Button size="small" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
+        {(r.status === 'Draft' || r.status === 'Issued') && (
+          <Popconfirm title="Delete this credit note?" onConfirm={() => handleDelete(r.id)} okText="Yes">
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        )}
       </Space>
     )},
   ];
 
   return (
     <div className="gx-p-4">
-      <Card title="Credit Notes / Refunds" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>New Credit Note</Button>}>
+      <Card title="Credit Notes / Refunds" extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>New Credit Note</Button>}>
         <Table dataSource={creditNotes} columns={columns} rowKey="id" loading={loading} size="small"
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} records` }} />
+          pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} records` }} />
       </Card>
 
-      <Modal title="Create Credit Note" open={modalVisible} onOk={handleCreate} onCancel={() => setModalVisible(false)} width={700} okText="Create">
-        <Form form={form} layout="vertical" size="small">
-          <Form.Item name="customer_id" label="Customer" rules={[{ required: true, message: 'Select customer' }]}>
-            <Select showSearch optionFilterProp="children" placeholder="Select customer">
-              {customers.map(c => <Select.Option key={c.id} value={c.id}>{c.display_name || c.customer_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</Select.Option>)}
+      <Modal title={editingId ? 'Edit Credit Note' : 'Create Credit Note'} open={modalVisible} onOk={handleSave} onCancel={() => { setModalVisible(false); setEditingId(null); }} width={700} okText={editingId ? 'Update' : 'Create'}>
+        <Form form={form} layout="vertical">
+          <Form.Item name="customer_id" label="Customer" rules={[{ required: true }]}>
+            <Select showSearch placeholder="Select customer" optionFilterProp="children">
+              {customers.map(c => <Select.Option key={c.id} value={c.id}>{c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="date" label="Date" initialValue={moment()}>
+          <Form.Item name="date" label="Date" rules={[{ required: true }]}>
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="reason" label="Reason">
-            <Select placeholder="Select reason">
-              <Select.Option value="Return">Product Return</Select.Option>
-              <Select.Option value="Overcharge">Overcharge Correction</Select.Option>
-              <Select.Option value="Discount">Post-Sale Discount</Select.Option>
-              <Select.Option value="Defective">Defective Goods</Select.Option>
-              <Select.Option value="Other">Other</Select.Option>
-            </Select>
+            <Input placeholder="Reason for credit" />
           </Form.Item>
           <Form.Item name="notes" label="Notes">
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
 
-        <div style={{ marginTop: 8 }}>
-          <strong>Line Items</strong>
-          {lines.map((line, idx) => (
-            <div key={idx} style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
-              <Input placeholder="Description" value={line.description} onChange={e => { const v = e.target.value; setLines(p => { const u = [...p]; u[idx].description = v; return u; }); }} style={{ flex: 2 }} />
-              <InputNumber min={0} value={line.quantity} onChange={v => { setLines(p => { const u = [...p]; u[idx].quantity = v; return u; }); updateLineAmount(idx); }} style={{ width: 70 }} placeholder="Qty" />
-              <InputNumber min={0} value={line.unit_price} onChange={v => { setLines(p => { const u = [...p]; u[idx].unit_price = v; return u; }); updateLineAmount(idx); }} style={{ width: 100 }} placeholder="Price" />
-              <span style={{ width: 80, textAlign: 'right' }}>${(line.amount || 0).toFixed(2)}</span>
-              {lines.length > 1 && <Button size="small" danger onClick={() => removeLine(idx)}>X</Button>}
-            </div>
-          ))}
-          <Button type="dashed" size="small" onClick={addLine} style={{ marginTop: 8 }}>+ Add Line</Button>
-          <div style={{ marginTop: 8, textAlign: 'right', fontWeight: 'bold' }}>
-            Total: ${lines.reduce((s, l) => s + (Number(l.amount) || 0), 0).toFixed(2)}
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Line Items</div>
+        {lines.map((line, idx) => (
+          <div key={line.id || idx} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+            <Input placeholder="Description" value={line.description} onChange={e => { const u = [...lines]; u[idx].description = e.target.value; setLines(u); }} style={{ flex: 2 }} />
+            <InputNumber placeholder="Qty" value={line.quantity} min={0} onChange={v => { const u = [...lines]; u[idx].quantity = v || 0; updateLineAmount(idx); }} style={{ width: 70 }} />
+            <InputNumber placeholder="Price" value={line.unit_price} min={0} step={0.01} onChange={v => { const u = [...lines]; u[idx].unit_price = v || 0; updateLineAmount(idx); }} style={{ width: 100 }} prefix={cSym} />
+            <InputNumber placeholder="Amount" value={line.amount} readOnly style={{ width: 100 }} prefix={cSym} />
+            <InputNumber placeholder="Tax %" value={line.tax_rate} min={0} max={100} onChange={v => { const u = [...lines]; u[idx].tax_rate = v || 0; setLines(u); }} style={{ width: 80 }} suffix="%" />
+            {lines.length > 1 && <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeLine(idx)} />}
           </div>
-        </div>
+        ))}
+        <Button type="dashed" block onClick={addLine} icon={<PlusOutlined />}>Add Line</Button>
       </Modal>
 
-      <Modal title="Apply Credit Note to Invoice" open={applyModal.visible} onOk={handleApply} onCancel={() => setApplyModal({ visible: false, cnId: null, invoiceId: null })} okText="Apply">
-        <Select placeholder="Select invoice to apply credit" style={{ width: '100%' }}
-          value={applyModal.invoiceId} onChange={v => setApplyModal(p => ({ ...p, invoiceId: v }))}>
-          {invoices.map(inv => (
-            <Select.Option key={inv.id} value={inv.id}>INV-{inv.number || inv.id} — {inv.customer} — ${Number(inv.total || 0).toFixed(2)}</Select.Option>
-          ))}
+      <Modal title="Apply Credit Note" open={applyModal.visible} onOk={handleApply} onCancel={() => setApplyModal({ visible: false, cnId: null, invoiceId: null })} okText="Apply">
+        <Select placeholder="Select invoice" showSearch optionFilterProp="children" value={applyModal.invoiceId} onChange={v => setApplyModal(p => ({ ...p, invoiceId: v }))} style={{ width: '100%' }}>
+          {invoices.map(inv => <Select.Option key={inv.id} value={inv.id}>#{inv.invoice_number} - {inv.customer_name || ''} - ${(Number(inv.total) || 0).toFixed(2)}</Select.Option>)}
         </Select>
       </Modal>
     </div>

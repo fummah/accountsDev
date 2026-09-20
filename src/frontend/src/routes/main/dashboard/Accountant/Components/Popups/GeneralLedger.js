@@ -89,13 +89,13 @@ const columns = [
       {error && <div style={{ color: 'red', margin: 8 }}>{error}</div>}
       <Tabs activeKey={activeKey} onChange={setActiveKey}>
         <TabPane tab="All Accounts" key="all">
-          <Table columns={columns} dataSource={data} pagination={{ pageSize: 5 }} loading={loading} />
+          <Table columns={columns} dataSource={data} pagination={{ defaultPageSize: 5 }} loading={loading} />
         </TabPane>
         <TabPane tab="Cash" key="cash">
-          <Table columns={columns} dataSource={data.filter((item) => item.account === "Cash")} pagination={{ pageSize: 5 }} loading={loading} />
+          <Table columns={columns} dataSource={data.filter((item) => item.account === "Cash")} pagination={{ defaultPageSize: 5 }} loading={loading} />
         </TabPane>
         <TabPane tab="Accounts Receivable" key="ar">
-          <Table columns={columns} dataSource={data.filter((item) => item.account === "Accounts Receivable")} pagination={{ pageSize: 5 }} loading={loading} />
+          <Table columns={columns} dataSource={data.filter((item) => item.account === "Accounts Receivable")} pagination={{ defaultPageSize: 5 }} loading={loading} />
         </TabPane>
       </Tabs>
     </Card>

@@ -138,7 +138,7 @@ const BackupExport = () => {
 
       <Card title="Available Backups (Point-in-Time Recovery)" size="small" style={{ marginBottom: 16 }}
         extra={<Button size="small" onClick={loadBackups}>Refresh</Button>}>
-        <Table dataSource={backups} columns={backupColumns} rowKey="name" size="small" pagination={{ pageSize: 10 }} />
+        <Table dataSource={backups} columns={backupColumns} rowKey="name" size="small" pagination={{ defaultPageSize: 10 }} />
       </Card>
 
       <Card title="Export Table (CSV)" size="small">

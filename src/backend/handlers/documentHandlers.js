@@ -2,10 +2,18 @@ const { ipcMain, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { Documents } = require('../models');
+const FileStorage = require('../services/fileStorage');
 
 function registerDocumentHandlers() {
-  const baseDir = path.join(__dirname, '..', 'db', 'attachments');
-  try { fs.mkdirSync(baseDir, { recursive: true }); } catch {}
+  // Resolve + create the persistent attachments directory, and pull any files
+  // that were saved into the old source-relative folder into the new store.
+  try {
+    const dir = FileStorage.ensureAttachmentsDir();
+    const { migrated } = FileStorage.migrateLegacyAttachments();
+    console.log(`[documents] Attachment storage directory: ${dir}${migrated ? ` (migrated ${migrated} legacy file(s))` : ''}`);
+  } catch (e) {
+    console.error('[documents] Could not prepare attachment storage:', e.message);
+  }
 
   ipcMain.handle('documents-list', async (_e, category, linkedId) => {
     try {
@@ -16,10 +24,10 @@ function registerDocumentHandlers() {
       if (linkedId != null && linkedId !== '') {
         rows = rows.filter(r => String(r.linked_id) === String(linkedId));
       }
-      // Attach absolute file path for convenience
+      // Attach the runtime absolute path (resolved from the persistent store).
       return rows.map(r => ({
         ...r,
-        absolute_path: r.file_path ? path.join(baseDir, r.file_path) : null,
+        absolute_path: FileStorage.resolveAttachmentPath(r.file_path),
       }));
     } catch (e) {
       return { error: e.message };
@@ -27,39 +35,37 @@ function registerDocumentHandlers() {
   });
 
   ipcMain.handle('document-upload', async (_e, payload) => {
+    let stored = null;
     try {
       const { name, mime, data, category, linkedId, enteredBy } = payload || {};
       if (!name || !data || !category || typeof linkedId === 'undefined') {
         throw new Error('Missing required fields');
       }
-      const safeName = path.basename(name);
-      const stamp = Date.now();
-      const fileName = `${stamp}_${safeName}`;
-      const filePath = path.join(baseDir, fileName);
+      // The human-readable original name (basename only) is kept in the DB;
+      // the file on disk gets a sanitized, collision-safe stored name.
+      const originalName = path.basename(String(name));
 
-      const base64 = typeof data === 'string' ? data.split(',').pop() : data;
-      const buffer = Buffer.from(base64, 'base64');
-      fs.writeFileSync(filePath, buffer);
+      stored = FileStorage.storeAttachment({ name, data });
 
       const res = await Documents.insertDocuments(
-        safeName,
-        String(buffer.length),
+        originalName,
+        String(stored.size),
         mime || '',
-        fileName,
+        stored.storedName,
         category,
         Number(linkedId) || 0,
         enteredBy || 'system'
       );
-      if (res && res.success) {
-        try {
-          const db = require('../models/dbmgr');
-          db.prepare('UPDATE documents SET file_path = ? WHERE random_number = ? AND file_path IS NULL').run(fileName, fileName);
-        } catch (e) {
-          console.warn('Could not set file_path after upload:', e.message);
-        }
+      if (!res || !res.success) {
+        // No DB record → do not leave the copied file behind.
+        try { fs.unlinkSync(stored.path); } catch (_) { /* ignore */ }
+        return { success: false, error: 'Document record could not be saved' };
       }
-      return { success: true, path: filePath };
+      return { success: true, storedName: stored.storedName };
     } catch (e) {
+      // Clean up a partially written file if the DB step never completed.
+      if (stored && stored.path) { try { fs.unlinkSync(stored.path); } catch (_) { /* ignore */ } }
+      console.error('[documents] upload failed:', e.message);
       return { success: false, error: e.message };
     }
   });
@@ -68,13 +74,12 @@ function registerDocumentHandlers() {
     try {
       const row = Documents.getDocumentById(id);
       if (!row) return { success: false, error: 'Not found' };
-      const basePath = path.join(__dirname, '..', 'db', 'attachments');
-      const filePath = row.file_path ? path.join(basePath, row.file_path) : null;
+      const filePath = FileStorage.resolveAttachmentPath(row.file_path);
       if (!filePath || !fs.existsSync(filePath)) {
         return { success: false, error: 'File not found on disk' };
       }
       const result = await shell.openPath(filePath);
-      return { success: result === '' };
+      return result === '' ? { success: true } : { success: false, error: result };
     } catch (e) {
       return { success: false, error: e.message };
     }
@@ -84,10 +89,9 @@ function registerDocumentHandlers() {
     try {
       const row = Documents.getDocumentById(id);
       if (!row) return { success: false, error: 'Not found' };
-      const basePath = path.join(__dirname, '..', 'db', 'attachments');
-      const filePath = row.file_path ? path.join(basePath, row.file_path) : null;
+      const filePath = FileStorage.resolveAttachmentPath(row.file_path);
       if (filePath && fs.existsSync(filePath)) {
-        try { fs.unlinkSync(filePath); } catch {}
+        try { fs.unlinkSync(filePath); } catch (_) { /* ignore */ }
       }
       const res = await Documents.deleteDocument(id);
       return { success: true, changes: res.changes || 0 };
@@ -98,5 +102,3 @@ function registerDocumentHandlers() {
 }
 
 module.exports = registerDocumentHandlers;
-
-

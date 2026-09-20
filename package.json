@@ -4,16 +4,16 @@
     "electron-builder": "^25.1.8",
     "electron-rebuild": "^3.2.9"
   },
-  "name": "Accounting_App_Demo",
+  "name": "AccuLedger-Desktop-App",
   "version": "1.0.0",
-  "description": "Accounts Desktop App",
+  "description": "AccuLedger Desktop App",
   "main": "src/backend/main.js",
   "scripts": {
     "start": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
     "rebuild": "electron-rebuild -f -w sqlite3",
     "test": "",
     "build": "npm run build-react && npm run build-electron",
-    "build-react": "cd src/frontend && yarn build",
+    "build-react": "cd src/frontend && npm run build",
     "build-electron": "electron-builder",
     "electron-start": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
     "postinstall": "electron-builder install-app-deps",
@@ -25,12 +25,13 @@
   "smoke": "node scripts/smoke-tests.js",
   "build": {
     "electronVersion": "32.2.0",
-    "productName": "Accounting App Demo",
+    "productName": "AccuLedger Desktop App",
     "appId": "com.tendai.myapp",
     "files": [
       "src/backend/**/*",
       "src/backend/db/**/*",
       "src/frontend/build/**/*",
+      "assets/**/*",
       "node_modules/**/*",
       "package.json"
     ],
@@ -42,12 +43,15 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "favicon.ico",
-      "executableName": "Accounting_App_Demo"
+      "icon": "assets/icon.ico",
+      "executableName": "AccuLedger_Desktop_App"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico"
     }
   },
   "repository": {
@@ -55,7 +59,7 @@
     "url": "git+https://github.com/fummah/accountsDev.git"
   },
   "keywords": [
-    "Accounting_App_Demo"
+    "AccuLedger_Desktop_App"
   ],
   "author": "Tendai Fuma",
   "license": "ISC",

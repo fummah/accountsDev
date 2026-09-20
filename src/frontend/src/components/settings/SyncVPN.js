@@ -151,7 +151,7 @@ const SyncVPN = () => {
 
         <Divider orientation="left">Pending Conflicts ({conflicts.length})</Divider>
         {conflicts.length > 0 ? (
-          <Table dataSource={conflicts} columns={conflictColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} scroll={{ x: 800 }} />
+          <Table dataSource={conflicts} columns={conflictColumns} rowKey="id" size="small" pagination={{ defaultPageSize: 10 }} scroll={{ x: 800 }} />
         ) : (
           <p style={{ color: '#52c41a' }}>No pending conflicts.</p>
         )}

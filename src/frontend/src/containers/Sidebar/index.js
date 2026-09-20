@@ -10,14 +10,13 @@ import {
   NAV_STYLE_MINI_SIDEBAR,
   NAV_STYLE_NO_HEADER_EXPANDED_SIDEBAR,
   NAV_STYLE_NO_HEADER_MINI_SIDEBAR,
-  TAB_SIZE,
-  THEME_TYPE_LITE
+  TAB_SIZE
 } from "../../constants/ThemeSetting";
 
 const {Sider} = Layout;
 
 const Sidebar = () => {
-  const {themeType, navStyle} = useSelector(({settings}) => settings);
+  const navStyle = useSelector(({settings}) => settings.navStyle);
   const navCollapsed = useSelector(({common}) => common.navCollapsed);
   const width = useSelector(({common}) => common.width);
   const dispatch = useDispatch();
@@ -35,16 +34,16 @@ const Sidebar = () => {
   if (isMobile || navStyle === NAV_STYLE_DRAWER) {
     return (
       <Sider
-        className={`gx-app-sidebar gx-collapsed-sidebar ${themeType !== THEME_TYPE_LITE ? 'gx-layout-sider-dark' : null}`}
+        className="gx-app-sidebar gx-collapsed-sidebar gx-layout-sider-dark"
         trigger={null}
         collapsed={false}
-        theme={themeType === THEME_TYPE_LITE ? "lite" : "dark"}
+        theme="dark"
         collapsible
         collapsedWidth={0}
         width={0}
       >
         <Drawer
-          className={`gx-drawer-sidebar ${themeType !== THEME_TYPE_LITE ? 'gx-drawer-sidebar-dark' : null}`}
+          className="gx-drawer-sidebar gx-drawer-sidebar-dark"
           placement="left"
           closable={true}
           maskClosable={true}
@@ -74,10 +73,10 @@ const Sidebar = () => {
 
   return (
     <Sider
-      className={`gx-app-sidebar ${extraClass} ${themeType !== THEME_TYPE_LITE ? 'gx-layout-sider-dark' : null}`}
+      className={`gx-app-sidebar ${extraClass} gx-layout-sider-dark`}
       trigger={null}
       collapsed={navCollapsed}
-      theme={themeType === THEME_TYPE_LITE ? "lite" : "dark"}
+      theme="dark"
       collapsible
       collapsedWidth={80}
     >

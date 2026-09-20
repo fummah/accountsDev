@@ -114,7 +114,7 @@ class SchedulerService {
 		this.registerTask('recurring:post', 'Post due recurring items', 10 * 60, async () => {
 			try {
 				const db = require('../models/dbmgr');
-				const Journal = require('../models/journal');
+				const JournalEntries = require('../models/journalEntries');
 				const Invoices = require('../models/invoices');
 				const Expenses = require('../models/expenses');
 				const Payroll = require('../models/payroll');
@@ -126,7 +126,18 @@ class SchedulerService {
 				`).all();
 
 				const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-				const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; };
+				// Month-based advance with last-day-of-month clamping so a monthly
+				// item due Jan 31 advances to Feb 28 (never rolls to Mar 2/3),
+				// and Mar 31 monthly lands on Apr 30 instead of May 1.
+				const addMonthsClamped = (d, n) => {
+					const x = new Date(d);
+					const targetDay = x.getDate();
+					x.setDate(1);
+					x.setMonth(x.getMonth() + n);
+					const lastDay = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate();
+					x.setDate(Math.min(targetDay, lastDay));
+					return x;
+				};
 				const fmt = (d) => d.toISOString().slice(0,10);
 
 				for (const r of rows) {
@@ -141,9 +152,9 @@ class SchedulerService {
 							case 'bill':
 								await Expenses.insertExpense(payload.payee, payload.payment_account, payload.payment_date || today, payload.payment_method, payload.ref_no, payload.category, payload.entered_by, payload.approval_status || 'Pending', payload.expenseLines || payload.lines || []);
 								break;
-							case 'journal':
-								await Journal.insert(payload);
-								break;
+						case 'journal':
+							await JournalEntries.post({ ...payload, created_by: payload.entered_by || payload.created_by || 'recurring' });
+							break;
 							case 'payroll':
 								await Payroll.processPayroll(payload);
 								break;
@@ -156,9 +167,9 @@ class SchedulerService {
 						const f = (r.frequency || '').toLowerCase();
 						if (f === 'daily') next = addDays(next, 1);
 						else if (f === 'weekly') next = addDays(next, 7);
-						else if (f === 'monthly') next = addMonths(next, 1);
-						else if (f === 'quarterly') next = addMonths(next, 3);
-						else if (f === 'yearly') next = addMonths(next, 12);
+						else if (f === 'monthly') next = addMonthsClamped(next, 1);
+						else if (f === 'quarterly') next = addMonthsClamped(next, 3);
+						else if (f === 'yearly') next = addMonthsClamped(next, 12);
 						else next = addDays(next, 1);
 
 						db.prepare(`UPDATE recurring_transactions SET nextDate=?, updatedAt=datetime('now') WHERE id=?`).run(fmt(next), r.id);

@@ -1,8 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, DatePicker, Form, Input, InputNumber, Select, Button, Table, Space, message, Modal, Row, Col, Statistic, Typography, Tag, Tooltip, Alert, Tabs, Checkbox, Divider } from 'antd';
-import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutlined, HistoryOutlined, DollarOutlined, SearchOutlined, SwapOutlined, MoneyCollectOutlined } from '@ant-design/icons';
+import { Card, DatePicker, Form, Input, InputNumber, Select, Button, Table, Space, message, Modal, Row, Col, Statistic, Typography, Tag, Tooltip, Alert, Tabs, Checkbox, Divider, Spin } from 'antd';
+import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutlined, HistoryOutlined, DollarOutlined, SearchOutlined, SwapOutlined, MoneyCollectOutlined, BookOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useLocation } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
+import { getBankAccounts } from '../../utils/accounts';
+import AccountSelect from '../shared/AccountSelect';
+import JournalEntryDetailModal from '../accountant/JournalEntryDetailModal';
+
 
 const { Option } = Select;
 const { Title, Text } = Typography;
@@ -10,7 +15,9 @@ const { TabPane } = Tabs;
 const fmt = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const MakeDeposits = () => {
+  const location = useLocation();
   const { symbol: cSym } = useCurrency();
+  const fmtC = (v) => `${cSym} ${fmt(v)}`;
   const [form] = Form.useForm();
   const [accounts, setAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -25,10 +32,36 @@ const MakeDeposits = () => {
   const [selectedPayments, setSelectedPayments] = useState([]);
   const [allAccounts, setAllAccounts] = useState([]);
   const [payors, setPayors] = useState([]);
+  const [journalDetailId, setJournalDetailId] = useState(null);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountForm] = Form.useForm();
+  const [depositDetail, setDepositDetail] = useState(null);
+  const [depositDetailLoading, setDepositDetailLoading] = useState(false);
 
   useEffect(() => { loadData(); }, []);
+
+  // Deep-link support: ?deposit=<id> opens that SPECIFIC deposit's detail
+  // modal instead of dumping the user on the full deposits list.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const depositId = params.get('deposit');
+    if (depositId) openDepositDetail(Number(depositId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
+  const openDepositDetail = async (id) => {
+    if (!id) return;
+    setDepositDetail(null);
+    setDepositDetailLoading(true);
+    try {
+      const dep = await window.electronAPI.getDeposit?.(id);
+      if (dep && !dep.error) setDepositDetail(dep);
+      else message.error(dep?.error || 'Deposit not found');
+    } catch {
+      message.error('Failed to load deposit details');
+    }
+    setDepositDetailLoading(false);
+  };
 
   const loadData = async () => {
     try {
@@ -42,12 +75,8 @@ const MakeDeposits = () => {
       const accs = Array.isArray(accRes) ? accRes : [];
       setAccounts(accs);
       setAllAccounts(accs);
-      const banks = accs.filter(a => {
-        const t = (a.accountType || a.type || '').toLowerCase();
-        const n = (a.accountName || a.name || '').toLowerCase();
-        return t.includes('bank') || t.includes('cash') || n.includes('bank') || n.includes('checking') || n.includes('savings');
-      });
-      setBankAccounts(banks.length > 0 ? banks : accs);
+      // "Deposit To" must show ONLY accounts whose real account type is BANK.
+      setBankAccounts(getBankAccounts(accs));
 
       const txns = Array.isArray(txnRes) ? txnRes : [];
       const deps = txns.filter(t => (t.type || '').toLowerCase() === 'deposit')
@@ -132,11 +161,20 @@ const MakeDeposits = () => {
         }
       } else {
         // Manual deposit — each line credits its chosen income/asset/equity account
-        const allocations = (values.items || []).map(it => ({
-          accountId: it.account || null,
-          amount: Number(it.amount) || 0,
-          description: [it.receivedFrom, it.description].filter(Boolean).join(' — ') || it.description || 'Manual deposit',
-        })).filter(a => a.amount > 0);
+        const allocations = (values.items || []).map(it => {
+          // The selector value is the payor KEY (`c-123` / `v-456`), which
+          // encodes the type with the unique id — never the display name.
+          const key = String(it.receivedFrom || '');
+          const m = key.match(/^([cv])-(\d+)$/);
+          const payor = payors.find(p => p.id === key);
+          return {
+            accountId: it.account || null,
+            amount: Number(it.amount) || 0,
+            description: [payor?.name, it.description].filter(Boolean).join(' — ') || it.description || 'Manual deposit',
+            partyType: m ? (m[1] === 'c' ? 'customer' : 'vendor') : null,
+            partyId: m ? Number(m[2]) : null,
+          };
+        }).filter(a => a.amount > 0);
 
         if (!allocations.length) {
           message.warning('Add at least one deposit item with an amount');
@@ -220,6 +258,33 @@ const MakeDeposits = () => {
     return acc?.accountName || acc?.name || `#${id}`;
   };
 
+  const resolveDepositId = async (record) => {
+    const m = String(record.reference || '').match(/^DEP-(\d+)$/);
+    if (m) return Number(m[1]);
+    const deps = await window.electronAPI.getDeposits?.().catch(() => []);
+    const arr = Array.isArray(deps) ? deps : (deps?.data || deps?.all || []);
+    const dep = arr.find(d => d.reference && d.reference === record.reference);
+    return dep ? dep.id : null;
+  };
+
+  const openDepositJournal = async (record) => {
+    try {
+      let depositId = await resolveDepositId(record);
+      if (depositId == null) { message.info('Source deposit not found for this transaction'); return; }
+      const res = await window.electronAPI.journalGetBySource?.('deposit', depositId);
+      if (res && !res.error && res.id) setJournalDetailId(res.id);
+      else message.info('No journal entry posted for this deposit');
+    } catch { message.error('Failed to load journal entry'); }
+  };
+
+  const viewDepositDetails = async (record) => {
+    try {
+      let depositId = await resolveDepositId(record);
+      if (depositId == null) { message.info('Source deposit not found for this transaction'); return; }
+      openDepositDetail(depositId);
+    } catch { message.error('Failed to load deposit details'); }
+  };
+
   const historyColumns = [
     { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-', sorter: (a, b) => new Date(a.date || 0) - new Date(b.date || 0) },
     { title: 'Bank Account', dataIndex: 'accountId', key: 'accountId', width: 150, render: v => getAccName(v) },
@@ -230,6 +295,12 @@ const MakeDeposits = () => {
       const s = (r.status || 'active').toLowerCase();
       return s === 'voided' ? <Tag color="red">Void</Tag> : <Tag color="green">Active</Tag>;
     }},
+    { title: 'Actions', key: 'actions', width: 120, render: (_, r) => (
+      <Space size="small">
+        <Tooltip title="View deposit details"><Button type="text" size="small" icon={<DollarOutlined />} onClick={() => viewDepositDetails(r)} /></Tooltip>
+        <Tooltip title="View journal entry"><Button type="text" size="small" icon={<BookOutlined />} onClick={() => openDepositJournal(r)} /></Tooltip>
+      </Space>
+    )},
   ];
 
   return (
@@ -274,7 +345,7 @@ const MakeDeposits = () => {
               <Row gutter={16}>
                 <Col xs={24} sm={12}>
                   <Form.Item name="accountId" label="Deposit To (Bank Account)" rules={[{ required: true, message: 'Select bank account' }]}>
-                    <Select showSearch optionFilterProp="children" placeholder="Select bank account"
+                    <AccountSelect accounts={bankAccounts} placeholder="Select bank account"
                       onChange={(val) => setSelectedAccountId(val)}
                       dropdownRender={menu => (
                         <>
@@ -286,11 +357,7 @@ const MakeDeposits = () => {
                             Add New Bank Account
                           </Button>
                         </>
-                      )}>
-                      {bankAccounts.map(a => (
-                        <Option key={String(a.id)} value={String(a.id)}>{a.accountName || a.name}{a.accountNumber ? ` (${a.accountNumber})` : ''}</Option>
-                      ))}
-                    </Select>
+                      )} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={6}>
@@ -339,19 +406,13 @@ const MakeDeposits = () => {
                         <Col xs={24} sm={4}>
                           <Form.Item {...field} name={[field.name, 'receivedFrom']} noStyle rules={[{ required: true, message: 'Customer/Vendor required' }]}>
                             <Select showSearch optionFilterProp="children" placeholder="Customer/Vendor" style={{ width: '100%' }}>
-                              {payors.map(p => <Option key={p.id} value={p.name}>{p.name} ({p.type})</Option>)}
+                              {payors.map(p => <Option key={p.id} value={p.id}>{p.name} ({p.type})</Option>)}
                             </Select>
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={6}>
                           <Form.Item {...field} name={[field.name, 'account']} noStyle rules={[{ required: true, message: 'Account required' }]}>
-                            <Select style={{ width: '100%' }} placeholder="Account / Category" showSearch optionFilterProp="children">
-                              {categoryAccounts.map(a => (
-                                <Option key={a.id} value={a.accountName || a.name}>
-                                  {(a.accountName || a.name)}{a.accountType ? ` (${a.accountType})` : ''}
-                                </Option>
-                              ))}
-                            </Select>
+                            <AccountSelect accounts={categoryAccounts} placeholder="Account / Category" style={{ width: '100%' }} />
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={3}>
@@ -383,7 +444,7 @@ const MakeDeposits = () => {
                     ))}
                     {fields.length > 0 && (
                       <div style={{ textAlign: 'right', paddingTop: 8, borderTop: '1px solid #f0f0f0', fontWeight: 700, fontSize: 16 }}>
-                        Total: <span style={{ color: '#52c41a' }}>${fmt(total)}</span>
+                        Total: <span style={{ color: '#52c41a' }}>{cSym} {fmt(total)}</span>
                       </div>
                     )}
                   </Card>
@@ -402,7 +463,7 @@ const MakeDeposits = () => {
               <Row gutter={16}>
                 <Col xs={24} sm={12}>
                   <Form.Item name="accountId" label="Deposit To (Bank Account)" rules={[{ required: true, message: 'Select bank account' }]}>
-                    <Select showSearch optionFilterProp="children" placeholder="Select bank account" style={{ width: '100%' }}
+                    <AccountSelect accounts={bankAccounts} placeholder="Select bank account" style={{ width: '100%' }}
                       dropdownRender={menu => (
                         <>
                           {menu}
@@ -413,11 +474,7 @@ const MakeDeposits = () => {
                             Add New Bank Account
                           </Button>
                         </>
-                      )}>
-                      {bankAccounts.map(a => (
-                        <Option key={String(a.id)} value={String(a.id)}>{a.accountName || a.name}</Option>
-                      ))}
-                    </Select>
+                      )} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={6}>
@@ -497,13 +554,13 @@ const MakeDeposits = () => {
           dataSource={filteredHistory}
           rowKey={(r, i) => r.id || i}
           size="small"
-          pagination={{ pageSize: 10, showSizeChanger: true, showTotal: t => `${t} deposits` }}
+          pagination={{ defaultPageSize: 10, showSizeChanger: true, showTotal: t => `${t} deposits` }}
           scroll={{ x: 600 }}
           locale={{ emptyText: 'No deposits recorded yet' }}
           summary={() => filteredHistory.length > 0 ? (
             <Table.Summary.Row>
               <Table.Summary.Cell index={0} colSpan={4}><Text strong>Total</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: '#52c41a' }}>${fmt(filteredHistory.reduce((s, d) => s + Number(d.debit || d.amount || 0), 0))}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: '#52c41a' }}>{cSym} {fmt(filteredHistory.reduce((s, d) => s + Number(d.debit || d.amount || 0), 0))}</Text></Table.Summary.Cell>
               <Table.Summary.Cell index={5} />
             </Table.Summary.Row>
           ) : null}
@@ -537,6 +594,94 @@ const MakeDeposits = () => {
             <Input.TextArea rows={2} placeholder="Optional description" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <JournalEntryDetailModal
+        journalEntryId={journalDetailId}
+        visible={!!journalDetailId}
+        onClose={() => setJournalDetailId(null)}
+      />
+
+      {/* ═══ DEPOSIT DETAILS MODAL (deep-linked from the General Ledger) ═══ */}
+      <Modal
+        title="Deposit Details"
+        visible={!!depositDetail || depositDetailLoading}
+        onCancel={() => setDepositDetail(null)}
+        footer={[
+          <Button key="close" onClick={() => setDepositDetail(null)} style={{ borderRadius: 6 }}>Close</Button>,
+        ]}
+        width={700}
+        bodyStyle={{ maxHeight: '70vh', overflowY: 'auto' }}
+        destroyOnClose
+      >
+        {depositDetailLoading ? (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin tip="Loading deposit..." /></div>
+        ) : depositDetail ? (
+          <div>
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 11 }}>Date</Text>
+                <div style={{ fontWeight: 600 }}>{depositDetail.date ? moment(depositDetail.date).format('MM/DD/YYYY') : '—'}</div>
+              </div>
+              <div>
+                <Text type="secondary" style={{ fontSize: 11 }}>Bank Account</Text>
+                <div style={{ fontWeight: 600 }}>{depositDetail.bank_account_name || '—'}</div>
+              </div>
+              {depositDetail.reference ? (
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Reference</Text>
+                  <div style={{ fontWeight: 600 }}>{depositDetail.reference}</div>
+                </div>
+              ) : null}
+              <div>
+                <Text type="secondary" style={{ fontSize: 11 }}>Total</Text>
+                <div style={{ fontWeight: 700, color: '#3f8600', fontSize: 16 }}>{fmtC(depositDetail.total_amount || 0)}</div>
+              </div>
+              <div>
+                <Text type="secondary" style={{ fontSize: 11 }}>Status</Text>
+                <div>
+                  {(depositDetail.status || '').toLowerCase() === 'void' ? <Tag color="red">Void</Tag> :
+                   (depositDetail.status || '').toLowerCase() === 'reconciled' ? <Tag color="blue">Reconciled</Tag> :
+                   <Tag color="green">Active</Tag>}
+                </div>
+              </div>
+            </div>
+            {depositDetail.memo ? (
+              <Alert type="info" showIcon style={{ marginBottom: 12, borderRadius: 8 }}
+                message={<span><Text strong>Memo / Notes: </Text>{depositDetail.memo}</span>} />
+            ) : null}
+            {depositDetail.allocations && depositDetail.allocations.length > 0 && (
+              <>
+                <Divider orientation="left">Allocations</Divider>
+                <Table
+                  dataSource={depositDetail.allocations.map((a, i) => ({ ...a, key: i }))}
+                  rowKey="key" size="small" pagination={false} bordered
+                  columns={[
+                    { title: 'Customer/Vendor', key: 'party', width: 170, render: (_, a) => a.party_name || <Text type="secondary">—</Text> },
+                    { title: 'Account', dataIndex: 'account_name', key: 'account_name', render: v => v || '-' },
+                    { title: 'Amount', dataIndex: 'amount', key: 'amount', align: 'right', render: v => fmtC(v) },
+                    { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                  ]}
+                />
+              </>
+            )}
+            {depositDetail.payments && depositDetail.payments.length > 0 && (
+              <>
+                <Divider orientation="left">Linked Payments</Divider>
+                <Table
+                  dataSource={depositDetail.payments.map((p, i) => ({ ...p, key: i }))}
+                  rowKey="key" size="small" pagination={false} bordered
+                  columns={[
+                    { title: 'Customer', dataIndex: 'customer_name', key: 'customer_name' },
+                    { title: 'Invoice', dataIndex: 'invoice_number', key: 'invoice_number' },
+                    { title: 'Amount', dataIndex: 'amount', key: 'amount', align: 'right', render: v => fmtC(v) },
+                    { title: 'Date', dataIndex: 'date', key: 'date', render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
+                  ]}
+                />
+              </>
+            )}
+          </div>
+        ) : null}
       </Modal>
     </div>
   );

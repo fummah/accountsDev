@@ -52,7 +52,7 @@ const Departments = () => {
         }
       >
         <Table columns={columns} dataSource={departments} rowKey="id" loading={loading} size="middle"
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} departments` }} />
+          pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `${t} departments` }} />
       </Card>
 
       <Modal title="Add Department" visible={modalVisible} onCancel={() => setModalVisible(false)} onOk={handleAdd} okText="Save" destroyOnClose>

@@ -21,9 +21,8 @@ const COMMANDS = [
   { label: 'Journal Entries', path: '/main/accountant/journal-entries', icon: <FileTextOutlined />, tags: ['journal', 'entry', 'debit', 'credit'], category: 'Accounting' },
   { label: 'General Ledger', path: '/main/accountant/general-ledger', icon: <AuditOutlined />, tags: ['ledger', 'gl'], category: 'Accounting' },
   { label: 'Trial Balance', path: '/main/accountant/trial-balance', icon: <BarChartOutlined />, tags: ['trial', 'balance'], category: 'Accounting' },
-  { label: 'Bank Reconciliation', path: '/main/accountant/bank-reconciliation', icon: <BankOutlined />, tags: ['reconcile', 'bank'], category: 'Accounting' },
+  { label: 'Bank Reconciliation', path: '/main/banking/reconcile', icon: <BankOutlined />, tags: ['reconcile', 'bank'], category: 'Accounting' },
   { label: 'Fixed Assets', path: '/main/accountant/fixed-assets', icon: <BankOutlined />, tags: ['asset', 'depreciation'], category: 'Accounting' },
-  { label: 'Transactions', path: '/main/accountant/transactions', icon: <DollarOutlined />, tags: ['transaction'], category: 'Accounting' },
 
   // Sales
   { label: 'Customers', path: '/main/customers/center', icon: <TeamOutlined />, tags: ['customer', 'client', 'buyer'], category: 'Sales' },
@@ -32,24 +31,24 @@ const COMMANDS = [
   { label: 'Payments Received', path: '/main/customers/payments', icon: <DollarOutlined />, tags: ['payment', 'receive', 'income'], category: 'Sales' },
 
   // Expenses
-  { label: 'Expenses', path: '/main/expenses', icon: <DollarOutlined />, tags: ['expense', 'cost', 'spend', 'bill'], category: 'Expenses' },
-  { label: 'Vendors / Suppliers', path: '/main/vendors', icon: <ShopOutlined />, tags: ['vendor', 'supplier'], category: 'Expenses' },
+  { label: 'Expenses', path: '/main/expenses/credit-cards', icon: <DollarOutlined />, tags: ['expense', 'cost', 'spend', 'bill'], category: 'Expenses' },
+  { label: 'Vendors / Suppliers', path: '/main/vendors/center', icon: <ShopOutlined />, tags: ['vendor', 'supplier'], category: 'Expenses' },
 
   // Banking
-  { label: 'Banking', path: '/main/banking', icon: <BankOutlined />, tags: ['bank', 'deposit', 'transfer'], category: 'Banking' },
-  { label: 'Bank Statements', path: '/main/bank-statements', icon: <BankOutlined />, tags: ['statement', 'import', 'csv'], category: 'Banking' },
+  { label: 'Banking', path: '/main/banking/accounts', icon: <BankOutlined />, tags: ['bank', 'deposit', 'transfer'], category: 'Banking' },
+  { label: 'Bank Statements', path: '/main/bank-statements/list', icon: <BankOutlined />, tags: ['statement', 'import', 'csv'], category: 'Banking' },
 
   // Employees
-  { label: 'Employees', path: '/main/employees', icon: <TeamOutlined />, tags: ['employee', 'staff', 'hr'], category: 'HR' },
+  { label: 'Employees', path: '/main/employees/center', icon: <TeamOutlined />, tags: ['employee', 'staff', 'hr'], category: 'HR' },
   { label: 'Payroll', path: '/main/employees/payroll', icon: <DollarOutlined />, tags: ['payroll', 'salary', 'wage'], category: 'HR' },
 
   // Inventory & POS
-  { label: 'Inventory', path: '/main/inventory', icon: <ShoppingCartOutlined />, tags: ['inventory', 'stock', 'warehouse', 'product'], category: 'Inventory' },
-  { label: 'Point of Sale', path: '/main/pos', icon: <ShoppingCartOutlined />, tags: ['pos', 'sale', 'register', 'cashier'], category: 'POS' },
+  { label: 'Inventory', path: '/main/inventory/items', icon: <ShoppingCartOutlined />, tags: ['inventory', 'stock', 'warehouse', 'product'], category: 'Inventory' },
+  { label: 'Point of Sale', path: '/main/pos/sale', icon: <ShoppingCartOutlined />, tags: ['pos', 'sale', 'register', 'cashier'], category: 'POS' },
 
   // Projects & CRM
-  { label: 'Projects', path: '/main/projects', icon: <ProjectOutlined />, tags: ['project', 'task', 'timesheet'], category: 'Projects' },
-  { label: 'CRM', path: '/main/crm', icon: <TeamOutlined />, tags: ['crm', 'lead', 'pipeline', 'deal'], category: 'CRM' },
+  { label: 'Projects', path: '/main/projects/center', icon: <ProjectOutlined />, tags: ['project', 'task', 'timesheet'], category: 'Projects' },
+  { label: 'CRM', path: '/main/crm/leads', icon: <TeamOutlined />, tags: ['crm', 'lead', 'pipeline', 'deal'], category: 'CRM' },
 
   // Reports
   { label: 'Profit & Loss', path: '/main/reports/profit-loss', icon: <BarChartOutlined />, tags: ['profit', 'loss', 'income', 'p&l'], category: 'Reports' },
@@ -94,7 +93,7 @@ const CommandPalette = () => {
   const history = useHistory();
 
   const handleKeyDown = useCallback((e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'K') {
       e.preventDefault();
       setVisible(v => !v);
       setSearch('');
@@ -202,7 +201,7 @@ const CommandPalette = () => {
         <span><kbd style={{ padding: '1px 5px', background: '#f5f5f5', borderRadius: 3, border: '1px solid #d9d9d9' }}>↑↓</kbd> navigate</span>
         <span><kbd style={{ padding: '1px 5px', background: '#f5f5f5', borderRadius: 3, border: '1px solid #d9d9d9' }}>Enter</kbd> open</span>
         <span><kbd style={{ padding: '1px 5px', background: '#f5f5f5', borderRadius: 3, border: '1px solid #d9d9d9' }}>Esc</kbd> close</span>
-        <span style={{ marginLeft: 'auto' }}><kbd style={{ padding: '1px 5px', background: '#f5f5f5', borderRadius: 3, border: '1px solid #d9d9d9' }}>Ctrl+K</kbd> to toggle</span>
+        <span style={{ marginLeft: 'auto' }}><kbd style={{ padding: '1px 5px', background: '#f5f5f5', borderRadius: 3, border: '1px solid #d9d9d9' }}>Ctrl+Shift+K</kbd> to toggle</span>
       </div>
     </Modal>
   );

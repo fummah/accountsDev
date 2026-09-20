@@ -55,6 +55,15 @@ function registerDepositHandlers() {
       return { error: error.message };
     }
   });
+
+  ipcMain.handle('delete-deposit', async (event, id) => {
+    try {
+      return Deposits.deleteDeposit(id);
+    } catch (error) {
+      console.error('Error deleting deposit:', error);
+      return { error: error.message };
+    }
+  });
 }
 
 module.exports = { register: registerDepositHandlers };

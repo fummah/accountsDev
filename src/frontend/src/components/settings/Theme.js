@@ -13,6 +13,8 @@ const Theme = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [contrastHigh, setContrastHigh] = useState(false);
   const [fontScale, setFontScale] = useState('normal'); // normal | large
+  const [bgColor, setBgColor] = useState('#f5f5f5');
+  const [textColor, setTextColor] = useState('#262626');
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
@@ -24,6 +26,8 @@ const Theme = () => {
         setIsDarkMode(cfg.theme === 'dark');
         setContrastHigh(!!cfg.contrastHigh);
         setFontScale(cfg.fontScale || 'normal');
+        setBgColor(cfg.bgColor || '#f5f5f5');
+        setTextColor(cfg.textColor || '#262626');
       }
     } catch {}
   };
@@ -40,13 +44,17 @@ const Theme = () => {
       // Apply color theme via Redux
       const col = COLOR_MAP[cfg.theme] || COLOR_MAP[cfg.accentColor] || 'blue';
       dispatch(setThemeColor(col));
+      // Apply the custom background / text colors as CSS variables (live + persisted)
+      const root = document.documentElement;
+      root.style.setProperty('--app-bg', cfg.bgColor || '#f5f5f5');
+      root.style.setProperty('--app-text', cfg.textColor || '#262626');
     } catch {}
   };
 
   const handleSave = async () => {
     setLoading(true);
     try {
-      const cfg = { theme, accentColor, contrastHigh, fontScale };
+      const cfg = { theme, accentColor, contrastHigh, fontScale, bgColor, textColor };
       await window.electronAPI.settingsSet?.('ui.theme', cfg);
       applyToDom(cfg);
       message.success('Theme settings saved');
@@ -90,6 +98,30 @@ const Theme = () => {
             checkedChildren="On"
             unCheckedChildren="Off"
           />
+        </Col>
+
+        <Col span={24}>
+          <h3>Background & Text Color</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span>Background</span>
+              <input
+                type="color"
+                value={bgColor}
+                onChange={(e) => setBgColor(e.target.value)}
+                style={{ width: 44, height: 32, border: '1px solid #d9d9d9', borderRadius: 6, padding: 2, cursor: 'pointer', background: '#fff' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span>Text</span>
+              <input
+                type="color"
+                value={textColor}
+                onChange={(e) => setTextColor(e.target.value)}
+                style={{ width: 44, height: 32, border: '1px solid #d9d9d9', borderRadius: 6, padding: 2, cursor: 'pointer', background: '#fff' }}
+              />
+            </div>
+          </div>
         </Col>
 
         <Col span={24}>

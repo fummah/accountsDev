@@ -1,7 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useEffect } from 'react';
-import { Button, Col, Drawer, Form, Input, Row, Space,Dropdown, DatePicker } from 'antd';
-import { DownOutlined,IdcardOutlined } from '@ant-design/icons';
-import Widget from "components/Widget/index";
+import { Col, Form, Input, Modal, Row, Dropdown } from 'antd';
+import { DownOutlined } from '@ant-design/icons';
 
 const AddVat = forwardRef(({ onSaveUser, onUserClose, showDrawer, open, setShowError,setMessage, vat }, ref) => {
   
@@ -61,60 +60,32 @@ useEffect(() => {
       </Dropdown.Button>
        </p>
      
-      <Drawer
+<Modal
         title={`${vat ? 'Edit' : 'Add'} Tax Rate`}
-        size='medium'
-        placement="top"
-        height={400}
-        onClose={onUserClose}
-        onCancel={onUserClose}
         open={open}
-        styles={{
-          body: {
-            paddingBottom: 80,
-          },
-        }}
-        footer={
-          <div
-            style={{
-              textAlign: 'right',
-            }}
-          >
-                  <Row>
-        <Col span={12}>
-        <Space>
-        <Button onClick={handleSave} type="primary">
-              Save Details
-            </Button>
-            <Button onClick={onUserClose}>Cancel</Button>
-          
-          </Space>
-        </Col>
-      </Row>
-          </div>
-        }
+        width={720}
+        centered
+        onOk={handleSave}
+        onCancel={onUserClose}
+        okText="Save Details"
+        cancelText="Cancel"
+        destroyOnClose
       >
-      
-  <Form form={form} layout="" {...layout}>
-  <Widget>
-          <Row gutter={2}> 
-              <Col span={8}>
-              <Form.Item name="vat_name" label="Tax Name" rules={[{ required: true, message: 'Enter Tax Name', },]}>
-                   <Input/> 
+        <Form form={form} {...layout}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="vat_name" label="Tax Name" rules={[{ required: true, message: 'Enter Tax Name' }]}>
+                <Input />
               </Form.Item>
-              </Col>             
-              <Col span={8}>
-              <Form.Item name="vat_percentage" label="Tax Percentage" rules={[{ required: true, message: 'Enter Tax Percentage', },]}>
-                   <Input/> 
+            </Col>
+            <Col span={12}>
+              <Form.Item name="vat_percentage" label="Tax Percentage" rules={[{ required: true, message: 'Enter Tax Percentage' }]}>
+                <Input />
               </Form.Item>
-              </Col>            
-             
-              </Row>            
-              
-              </Widget>
-
-              </Form>        
-      </Drawer>
+            </Col>
+          </Row>
+        </Form>
+      </Modal>
     </>
   );
 });

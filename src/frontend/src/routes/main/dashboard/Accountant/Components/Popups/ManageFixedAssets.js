@@ -106,7 +106,7 @@ const ManageFixedAssets = () => {
         </Button>
       </Space>
       {error && <div style={{ color: 'red', margin: 8 }}>{error}</div>}
-      <Table columns={columns} dataSource={assets} pagination={{ pageSize: 5 }} loading={loading} />
+      <Table columns={columns} dataSource={assets} pagination={{ defaultPageSize: 5 }} loading={loading} />
       <Modal
         title="Add New Asset"
         open={isModalVisible}

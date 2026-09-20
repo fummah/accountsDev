@@ -3,6 +3,8 @@ import { Form, Input, Select, DatePicker, Button, Table, message } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import { dedupeAccounts } from '../../utils/accounts';
+import AccountSelect from '../shared/AccountSelect';
 
 const { Option } = Select;
 
@@ -27,7 +29,7 @@ const Transaction = () => {
   const loadAccounts = async () => {
     try {
       const accountsList = await window.electronAPI.getChartOfAccounts();
-      setAccounts(accountsList);
+      setAccounts(dedupeAccounts(accountsList));
     } catch (error) {
       message.error('Failed to load accounts');
     }
@@ -186,13 +188,7 @@ const Transaction = () => {
           label="Account"
           rules={[{ required: true, message: 'Please select account!' }]}
         >
-          <Select>
-            {accounts.map(account => (
-              <Option key={account.id} value={account.id}>
-                {account.accountName}
-              </Option>
-            ))}
-          </Select>
+          <AccountSelect accounts={accounts} />
         </Form.Item>
 
         <Form.Item

@@ -3,6 +3,7 @@ const db = require('../models/dbmgr');
 const { Customers } = require('../models');
 const Payments = require('../models/payments');
 const JournalEntries = require('../models/journalEntries');
+const { recalcInvoiceFinancials } = require('../services/invoiceFinancials');
 
 function registerCustomerHandlers() {
     // Statements
@@ -29,9 +30,9 @@ function registerCustomerHandlers() {
             return { error: error.message };
         }
     });
-    ipcMain.handle('get-customers-paginated', async (event, page, pageSize, search) => {
+    ipcMain.handle('get-customers-paginated', async (event, page, pageSize, search, status) => {
         try {
-            return await Customers.getPaginated(page, pageSize, search || '');
+            return await Customers.getPaginated(page, pageSize, search || '', status || '');
         } catch (error) {
             console.error('Error fetching customers (paginated):', error);
             return { error: error.message };
@@ -43,6 +44,15 @@ function registerCustomerHandlers() {
         } catch (error) {
             console.error('Error fetching customer report:', error);
             return { error: error.message };
+        }
+    });
+
+    ipcMain.handle('customer-toggle-status', async (event, id, status) => {
+        try {
+            return await Customers.toggleStatus(id, status);
+        } catch (error) {
+            console.error('Error toggling customer status:', error);
+            return { success: false, error: error.message };
         }
     });
 
@@ -68,8 +78,12 @@ function registerCustomerHandlers() {
                 FROM invoices i
                 JOIN customers c ON i.customer = c.id
                 LEFT JOIN (SELECT invoice_id, SUM(amount) AS lineTotal FROM invoice_lines GROUP BY invoice_id) lt ON lt.invoice_id = i.id
-                LEFT JOIN (SELECT invoiceId, SUM(amount) AS totalPaid FROM payments GROUP BY invoiceId) pt ON pt.invoiceId = i.id
-                WHERE LOWER(IFNULL(i.status, '')) NOT IN ('paid', 'cancelled', 'void')`;
+                LEFT JOIN (SELECT i.id AS invoiceId,
+                           COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a.invoiceId = i.id), 0)
+                         + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId = i.id AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)), 0) AS totalPaid
+                    FROM invoices i) pt ON pt.invoiceId = i.id
+                WHERE LOWER(IFNULL(i.status, '')) NOT IN ('paid', 'cancelled', 'void')
+                  AND COALESCE(lt.lineTotal, 0) * (1 + COALESCE(i.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0) > 0.005`;
 
             if (customerId) {
                 return db.all(baseSql + ` AND i.customer = ? ORDER BY i.id DESC`, [customerId]);
@@ -87,45 +101,26 @@ function registerCustomerHandlers() {
             const payAmount = Number(paymentData.amount) || 0;
 
             // Insert payment record with Pending Deposit status
-            await db.run(
-                `INSERT INTO payments (invoiceId, amount, paymentMethod, date, createdAt, status) 
-                 VALUES (?, ?, ?, ?, datetime('now'), 'Pending Deposit')`,
-                [invoiceId, payAmount, paymentData.paymentMethod, paymentData.date || paymentData.paymentDate]
+            const invForCust = await db.get('SELECT customer FROM invoices WHERE id = ?', [invoiceId]);
+            const payRes = await db.run(
+                `INSERT INTO payments (invoiceId, customerId, amount, paymentMethod, date, createdAt, status) 
+                 VALUES (?, ?, ?, ?, ?, datetime('now'), 'Pending Deposit')`,
+                [invoiceId, invForCust?.customer || null, payAmount, paymentData.paymentMethod, paymentData.date || paymentData.paymentDate]
             );
+            const paymentId = payRes?.lastInsertRowid || payRes?.lastID;
+            // Track the allocation so applied/unapplied math stays consistent
+            try {
+                await db.run(
+                    `INSERT INTO payment_allocations (paymentId, invoiceId, amount) VALUES (?, ?, ?)`,
+                    [paymentId, invoiceId, payAmount]
+                );
+            } catch (aErr) { console.warn('payment allocation insert failed:', aErr.message); }
 
-            // Compute total from invoice_lines (with VAT)
-            const lineTotal = await db.get(
-                `SELECT COALESCE(SUM(l.amount), 0) AS total, COALESCE(i.vat, 0) AS vat
-                 FROM invoice_lines l
-                 JOIN invoices i ON i.id = l.invoice_id
-                 WHERE l.invoice_id = ?`,
-                [invoiceId]
-            );
-            const invoiceTotal = (Number(lineTotal?.total) || 0) * (1 + (Number(lineTotal?.vat) || 0) / 100);
-
-            // Compute total payments made
-            const paidRow = await db.get(
-                `SELECT COALESCE(SUM(amount), 0) AS totalPaid FROM payments WHERE invoiceId = ?`,
-                [invoiceId]
-            );
-            const totalPaid = Number(paidRow?.totalPaid) || 0;
-
-            // Calculate remaining balance and determine status
-            const remaining = invoiceTotal - totalPaid;
-            let newStatus;
-            if (remaining <= 0.01) {
-                newStatus = 'Paid';
-            } else if (totalPaid > 0) {
-                newStatus = 'Partially Paid';
-            } else {
-                newStatus = 'Pending';
-            }
-
-            // Update invoice balance and status
-            await db.run(
-                `UPDATE invoices SET balance = ?, status = ? WHERE id = ?`,
-                [Math.max(0, remaining), newStatus, invoiceId]
-            );
+            // Derive balance + payment status from persisted payment history
+            // (single source of truth shared with invoice edit/list).
+            const financials = recalcInvoiceFinancials(invoiceId);
+            const newStatus = financials ? financials.status : undefined;
+            const remaining = financials ? financials.balance : 0;
 
             // ── Auto-post to COA via journal entry ───────────────────────
             try {
@@ -142,6 +137,7 @@ function registerCustomerHandlers() {
                         date: paymentData.date || paymentData.paymentDate || new Date().toISOString().slice(0, 10),
                         reference: paymentData.reference || (inv?.number ? `Pmt-${inv.number}` : null),
                         customerName: cust?.display_name || '',
+                        bankAccountName: paymentData.depositTo || null,
                     });
                 }
             } catch (jErr) { console.warn('Journal auto-post (payment) failed:', jErr.message); }
@@ -173,17 +169,27 @@ function registerCustomerHandlers() {
     });
 
     // Payments history - paginated
-    ipcMain.handle('get-payments-paginated', async (event, { page = 1, pageSize = 20, search = '' }) => {
+    ipcMain.handle('get-payments-paginated', async (event, { page = 1, pageSize = 20, search = '', dateFrom = '', dateTo = '' }) => {
         try {
             const offset = (Math.max(1, Number(page)) - 1) * Number(pageSize);
             const size = Number(pageSize) || 20;
             let where = '';
             let params = [];
+            const conds = [];
             if (search) {
-                where = `WHERE (i.number LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.display_name LIKE ?)`;
+                conds.push(`(i.number LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.display_name LIKE ?)`);
                 const s = `%${search}%`;
-                params = [s, s, s, s];
+                params.push(s, s, s, s);
             }
+            if (dateFrom || dateTo) {
+                // Inclusive date-range filter on the payment date (falls back to
+                // createdAt when date is missing). date(?) normalizes a
+                // 'YYYY-MM-DD HH:MM' value to its date part for the comparison.
+                const bound = `date(COALESCE(p.date, p.createdAt))`;
+                if (dateFrom) { conds.push(`${bound} >= date(?)`); params.push(dateFrom); }
+                if (dateTo) { conds.push(`${bound} <= date(?)`); params.push(dateTo); }
+            }
+            if (conds.length) where = `WHERE ${conds.join(' AND ')}`;
             const countSql = `SELECT COUNT(*) AS total FROM payments p JOIN invoices i ON p.invoiceId = i.id JOIN customers c ON i.customer = c.id ${where}`;
             const dataSql = `SELECT p.*, i.number AS invoiceNumber,
                                     COALESCE(NULLIF(c.display_name, ''), c.first_name || ' ' || c.last_name) AS customerName
@@ -369,7 +375,7 @@ function registerCustomerHandlers() {
             switch (kind) {
                 case 'invoice': {
                     const Invoices = require('../models/invoices');
-                    await Invoices.insertInvoice(payload.customer, payload.customer_email, payload.islater, payload.billing_address, payload.terms, payload.start_date || today, payload.last_date || today, payload.message, payload.statement_message, payload.number, payload.entered_by, payload.vat, payload.status || 'Pending', payload.invoiceLines || payload.lines);
+                    await Invoices.insertInvoice(payload.customer, payload.customer_email, payload.islater, payload.billing_address, payload.terms, payload.start_date || today, payload.last_date || today, payload.message, payload.statement_message, payload.number, payload.entered_by, payload.vat, undefined, payload.invoiceLines || payload.lines);
                     break;
                 }
                 case 'bill': {
@@ -389,6 +395,29 @@ function registerCustomerHandlers() {
                 }
                 default:
                     break;
+            }
+            // Advance nextDate using the same clamping rules as the scheduler so
+            // manual "run now" stays consistent with auto-posting.
+            const addMonthsClamped = (d, n) => {
+                const x = new Date(d);
+                const targetDay = x.getDate();
+                x.setDate(1);
+                x.setMonth(x.getMonth() + n);
+                const lastDay = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate();
+                x.setDate(Math.min(targetDay, lastDay));
+                return x;
+            };
+            const fmt = (d) => d.toISOString().slice(0,10);
+            if (row.nextDate) {
+                let next = new Date(row.nextDate);
+                const f = (row.frequency || '').toLowerCase();
+                if (f === 'daily') next.setDate(next.getDate() + 1);
+                else if (f === 'weekly') next.setDate(next.getDate() + 7);
+                else if (f === 'monthly') next = addMonthsClamped(next, 1);
+                else if (f === 'quarterly') next = addMonthsClamped(next, 3);
+                else if (f === 'yearly') next = addMonthsClamped(next, 12);
+                else next.setDate(next.getDate() + 1);
+                db.prepare(`UPDATE recurring_transactions SET nextDate=? WHERE id=?`).run(fmt(next), id);
             }
             return { success: true };
         } catch (e) { throw e; }
@@ -488,7 +517,7 @@ function registerCustomerHandlers() {
     ipcMain.handle('customer-payment-update', async (_e, id, data) => {
         try {
             const res = Payments.update(Number(id), data);
-            return { success: res.changes > 0 };
+            return { success: res && res.success !== false, error: (res && res.error) || null };
         } catch (e) {
             console.error('customer-payment-update:', e);
             return { success: false, error: e.message };
@@ -498,7 +527,7 @@ function registerCustomerHandlers() {
     ipcMain.handle('customer-payment-delete', async (_e, id) => {
         try {
             const res = Payments.delete(Number(id));
-            return { success: res.changes > 0 };
+            return { success: res && res.success !== false, error: (res && res.error) || null };
         } catch (e) {
             console.error('customer-payment-delete:', e);
             return { success: false, error: e.message };
@@ -510,6 +539,73 @@ function registerCustomerHandlers() {
             return Payments.getByInvoice(Number(invoiceId));
         } catch (e) {
             console.error('invoice-payments-list:', e);
+            return [];
+        }
+    });
+
+    // ── Customer payment management (applied / unapplied) ───────────────────
+    ipcMain.handle('customer-payment-create', async (_e, data) => {
+        try {
+            const customerId = Number(data.customerId);
+            const date = data.date || new Date().toISOString().slice(0, 10);
+            const res = Payments.createWithAllocations({
+                customerId,
+                amount: Number(data.amount) || 0,
+                paymentMethod: data.paymentMethod || null,
+                date,
+                reference: data.reference || null,
+                memo: data.memo || null,
+                depositTo: data.depositTo || null,
+            }, Array.isArray(data.allocations) ? data.allocations : []);
+            if (!res.success) return res;
+
+            // ── Auto-post to COA via journal entry (DR Undeposited Funds / CR AR)
+            // A GL failure must be surfaced — a payment with no journal entry
+            // would make the books inconsistent with the register.
+            try {
+                const cust = customerId
+                    ? db.prepare('SELECT display_name FROM customers WHERE id = ?').get(customerId)
+                    : null;
+                const glRes = JournalEntries.postPayment({
+                    id: res.id,
+                    amount: Number(data.amount) || 0,
+                    date,
+                    reference: data.reference || null,
+                    customerName: cust?.display_name || '',
+                    bankAccountName: data.depositTo || null,
+                });
+                if (glRes && glRes.error) {
+                    throw new Error(glRes.error);
+                }
+                if (glRes && glRes.skipped) {
+                    console.warn('customer-payment-create GL already posted (skipped)', res.id);
+                }
+            } catch (jErr) {
+                console.warn('customer-payment-create GL:', jErr.message);
+                return { success: false, error: `Payment saved, but the journal entry failed to post: ${jErr.message}` };
+            }
+
+            return res;
+        } catch (e) {
+            console.error('customer-payment-create:', e);
+            return { success: false, error: e.message, appliedExceeds: !!e.appliedExceeds };
+        }
+    });
+
+    ipcMain.handle('customer-payment-apply', async (_e, paymentId, invoiceId, amount) => {
+        try {
+            return Payments.applyCredit(Number(paymentId), Number(invoiceId), Number(amount));
+        } catch (e) {
+            console.error('customer-payment-apply:', e);
+            return { success: false, error: e.message };
+        }
+    });
+
+    ipcMain.handle('customer-payment-allocations', async (_e, paymentId) => {
+        try {
+            return Payments.getAllocations(Number(paymentId));
+        } catch (e) {
+            console.error('customer-payment-allocations:', e);
             return [];
         }
     });

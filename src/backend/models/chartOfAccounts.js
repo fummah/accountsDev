@@ -1,20 +1,10 @@
 const db = require('./dbmgr.js');
-
-// ── Account type → normal balance mapping ────────────────────────────────────
-const NORMAL_BALANCE = {
-  Asset:                'Debit',
-  Bank:                 'Debit',
-  Cash:                 'Debit',
-  'Cost of Goods Sold': 'Debit',
-  Expense:              'Debit',
-  'Other Expense':      'Debit',
-  Liability:            'Credit',
-  'Credit Card':        'Credit',
-  Loan:                 'Credit',
-  Equity:               'Credit',
-  Income:               'Credit',
-  'Other Income':       'Credit',
-};
+const {
+  NORMAL_BALANCE,
+  getExpectedNormalBalance,
+  normalizeNormalBalance,
+  repairNormalBalances,
+} = require('../services/normalBalance');
 
 // ── Standard sub-types per account type ─────────────────────────────────────
 const ACCOUNT_SUBTYPES = {
@@ -35,6 +25,7 @@ const ACCOUNT_SUBTYPES = {
 // ── Mandatory system accounts (seeded once on first run) ─────────────────────
 const SYSTEM_ACCOUNTS = [
   { name: 'Accounts Receivable',   type: 'Asset',     subType: 'Accounts Receivable',  number: '1100', isSystem: 1 },
+  { name: 'Inventory Asset',        type: 'Asset',     subType: 'Inventory',             number: '1200', isSystem: 1 },
   { name: 'Undeposited Funds',      type: 'Asset',     subType: 'Undeposited Funds',     number: '1050', isSystem: 1 },
   { name: 'Accounts Payable',       type: 'Liability', subType: 'Accounts Payable',      number: '2000', isSystem: 1 },
   { name: 'Retained Earnings',      type: 'Equity',    subType: 'Retained Earnings',     number: '3900', isSystem: 1 },
@@ -46,15 +37,67 @@ const SYSTEM_ACCOUNTS = [
   { name: 'Payroll Liabilities',    type: 'Liability', subType: 'Payroll Liability',     number: '2200', isSystem: 0 },
 ];
 
+// ── Account-type families — a child and its parent must belong to the same
+//    family (mirrors ACCOUNT_TYPE_FAMILY in ChartOfAccounts.js). ──────────────
+const TYPE_FAMILY = {
+  'Asset': 'Asset', 'Bank': 'Asset', 'Cash': 'Asset',
+  'Liability': 'Liability', 'Credit Card': 'Liability', 'Loan': 'Liability',
+  'Equity': 'Equity',
+  'Income': 'Income', 'Other Income': 'Income',
+  'Cost of Goods Sold': 'Expense', 'Expense': 'Expense', 'Other Expense': 'Expense',
+};
+
+const isCompatibleParentType = (childType, parentType) => {
+  if (!childType || !parentType) return true;
+  return (TYPE_FAMILY[childType] || childType) === (TYPE_FAMILY[parentType] || parentType);
+};
+
+// Validate a parentId for insert/update: must exist, be type-compatible, and
+// never create a self or circular reference in the hierarchy.
+function assertValidParent(db, parentId, ownId, childType) {
+  if (parentId == null || parentId === '' || Number(parentId) <= 0) return;
+  const parentIdNum = Number(parentId);
+  const own = ownId != null ? Number(ownId) : null;
+  if (own != null && parentIdNum === own) {
+    throw new Error('An account cannot be its own parent.');
+  }
+  const parent = db.prepare('SELECT id, type, parentId FROM chart_of_accounts WHERE id = ?').get(parentIdNum);
+  if (!parent) {
+    throw new Error(`Parent account #${parentIdNum} does not exist in the Chart of Accounts.`);
+  }
+  if (!isCompatibleParentType(childType, parent.type)) {
+    throw new Error(`Parent account type "${parent.type || ''}" is not compatible with child type "${childType || ''}".`);
+  }
+  if (own != null) {
+    // Walk up the parent chain to detect circular references.
+    let cur = parent.parentId;
+    const seen = new Set();
+    while (cur != null) {
+      const pid = Number(cur);
+      if (seen.has(pid)) break;
+      seen.add(pid);
+      if (pid === own) {
+        throw new Error('Setting this parent would create a circular reference in the account hierarchy.');
+      }
+      const up = db.prepare('SELECT parentId FROM chart_of_accounts WHERE id = ?').get(pid);
+      cur = up && up.parentId != null ? up.parentId : null;
+    }
+  }
+}
+
 // ── Helper: compute balance from journal_lines for an account ────────────────
-function computedBalance(id, normalBal, openingBalance) {
+function computedBalance(id, normalBal, openingBalance, dateFrom, dateTo) {
   try {
-    const row = db.prepare(`
+    let sql = `
       SELECT COALESCE(SUM(jl.debit),0) AS d, COALESCE(SUM(jl.credit),0) AS c
       FROM journal_lines jl
       JOIN journal_entries je ON jl.journal_id = je.id
       WHERE jl.account_id = ? AND je.status = 'Posted'
-    `).get(id);
+    `;
+    const params = [id];
+    if (dateFrom) { sql += ' AND je.date >= ?'; params.push(dateFrom); }
+    if (dateTo) { sql += ' AND je.date <= ?'; params.push(dateTo); }
+    const row = db.prepare(sql).get(...params);
     const base = Number(openingBalance || 0);
     return normalBal === 'Debit'
       ? base + row.d - row.c
@@ -63,6 +106,9 @@ function computedBalance(id, normalBal, openingBalance) {
     return Number(openingBalance || 0);
   }
 }
+
+const BALANCE_SHEET_TYPES = new Set(['Asset','Bank','Cash','Liability','Credit Card','Loan','Equity']);
+const PNL_TYPES = new Set(['Income','Other Income','Expense','Other Expense','Cost of Goods Sold']);
 
 const ChartOfAccounts = {
   createTable: () => {
@@ -104,14 +150,18 @@ const ChartOfAccounts = {
       console.error('chart_of_accounts migration failed:', e);
     }
 
-    // Back-fill normalBalance for existing rows that have it NULL
+    // Repair normalBalance on existing rows.
+    // NOTE: the test is NOT "is it blank". A row holding 'Credit' on a Bank
+    // account is just as wrong as a blank one. The expected side is derived
+    // purely from the account's type, so every mismatched row is corrected here
+    // and already-correct rows are left alone. (Superseded the old blank-only
+    // back-fill, which silently skipped every pre-existing wrong value.)
+    // The versioned migration 003 owns the same repair for upgrade runs.
     try {
-      const empties = db.prepare("SELECT id, type FROM chart_of_accounts WHERE normalBalance IS NULL OR normalBalance = ''").all();
-      for (const r of empties) {
-        const nb = NORMAL_BALANCE[r.type] || 'Debit';
-        db.prepare("UPDATE chart_of_accounts SET normalBalance = ? WHERE id = ?").run(nb, r.id);
-      }
-    } catch {}
+      repairNormalBalances(db);
+    } catch (e) {
+      console.error('chart_of_accounts normalBalance repair failed:', e);
+    }
 
     ChartOfAccounts.seedSystemAccounts();
   },
@@ -133,17 +183,29 @@ const ChartOfAccounts = {
   },
 
   // ── Fetch all accounts with computed balance ─────────────────────────────
-  getAllAccounts: () => {
-    const rows = db.prepare(`
+  getAllAccounts: ({ dateFrom, dateTo, type } = {}) => {
+    let sql = `
       SELECT id, name, type, subType, number, parentId, description, taxLine,
              normalBalance, openingBalance, openingBalanceDate, balance, status, isSystem
       FROM chart_of_accounts
-      ORDER BY CAST(number AS INTEGER) ASC, name ASC
-    `).all();
+    `;
+    const params = [];
+    if (type) {
+      sql += ' WHERE LOWER(type) = LOWER(?)';
+      params.push(String(type).trim());
+    }
+    sql += ' ORDER BY CAST(number AS INTEGER) ASC, name ASC';
+    const rows = db.prepare(sql).all(...params);
 
     const accounts = rows.map(r => {
-      const nb = r.normalBalance || NORMAL_BALANCE[r.type] || 'Debit';
-      const computed = computedBalance(r.id, nb, r.openingBalance);
+      // The account's type is authoritative for its normal side; the stored
+      // value is only honoured when the classification is unknown.
+      const nb = getExpectedNormalBalance(r.type) || normalizeNormalBalance(r.normalBalance) || 'Debit';
+      // Balance Sheet accounts always use unfiltered balance; P&L accounts use date filter
+      const isBS = BALANCE_SHEET_TYPES.has(r.type);
+      const computed = isBS
+        ? computedBalance(r.id, nb, r.openingBalance)
+        : computedBalance(r.id, nb, r.openingBalance, dateFrom, dateTo);
       // If there are NO journal entries yet, fall back to the stored static balance
       const hasJournalActivity = (() => {
         try {
@@ -205,7 +267,7 @@ const ChartOfAccounts = {
   getAccount: (id) => {
     const r = db.prepare('SELECT * FROM chart_of_accounts WHERE id = ?').get(id);
     if (!r) return null;
-    const nb = r.normalBalance || NORMAL_BALANCE[r.type] || 'Debit';
+    const nb = getExpectedNormalBalance(r.type) || normalizeNormalBalance(r.normalBalance) || 'Debit';
     const balance = computedBalance(id, nb, r.openingBalance);
     return { ...r, accountName: r.name, accountType: r.type, accountCode: r.number, normalBalance: nb, balance };
   },
@@ -231,7 +293,14 @@ const ChartOfAccounts = {
     const type = (p.type || p.accountType || 'Expense').toString().trim();
     if (!name) return { success: false, error: 'Account name is required' };
 
-    const nb = p.normalBalance || NORMAL_BALANCE[type] || 'Debit';
+    const parentIdVal = (p.parentId == null || p.parentId === '') ? null : Number(p.parentId);
+    try {
+      assertValidParent(db, parentIdVal, null, type);
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+
+    const nb = getExpectedNormalBalance(type) || NORMAL_BALANCE[type] || 'Debit';
     const res = db.prepare(`
       INSERT INTO chart_of_accounts
         (name, type, subType, number, parentId, description, taxLine,
@@ -241,7 +310,7 @@ const ChartOfAccounts = {
       name, type,
       p.subType || p.accountSubType || null,
       p.number || p.accountNumber || p.accountCode || null,
-      p.parentId || null,
+      parentIdVal,
       p.description || null,
       p.taxLine || null,
       nb,
@@ -260,7 +329,17 @@ const ChartOfAccounts = {
     if (row?.isSystem && accountData.isSystem === false) {
       return { success: false, message: 'System accounts cannot be un-flagged.' };
     }
-    const nb = accountData.normalBalance || NORMAL_BALANCE[accountData.accountType] || 'Debit';
+    const type = accountData.accountType || accountData.type;
+    const parentIdVal = (accountData.parentId == null || accountData.parentId === '') ? null : Number(accountData.parentId);
+    try {
+      assertValidParent(db, parentIdVal, accountData.id, type);
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+    // The normal side follows the account's classification, not whatever side
+    // the client happened to send (and never lands on the wrong side of a type
+    // change: reclassifying a Bank account to Liability re-stamps it Credit).
+    const nb = getExpectedNormalBalance(type) || NORMAL_BALANCE[type] || 'Debit';
     const res = db.prepare(`
       UPDATE chart_of_accounts SET
         name               = ?,
@@ -278,10 +357,10 @@ const ChartOfAccounts = {
       WHERE id = ?
     `).run(
       accountData.accountName || accountData.name,
-      accountData.accountType || accountData.type,
+      type,
       accountData.subType || accountData.accountSubType || null,
       accountData.accountNumber || accountData.accountCode || accountData.number || null,
-      accountData.parentId || null,
+      parentIdVal,
       accountData.description || null,
       accountData.taxLine || null,
       nb,

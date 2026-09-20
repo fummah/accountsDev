@@ -115,6 +115,18 @@ const VendorCredits = {
 
       if (expenseId) {
         db.prepare('UPDATE expenses SET paid_amount = COALESCE(paid_amount,0) + ? WHERE id = ?').run(amt, Number(expenseId));
+
+        const totalLines = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM expense_lines WHERE expense_id = ?').get(Number(expenseId));
+        const totalAmount = Number(totalLines?.total || 0);
+        const expense = db.prepare('SELECT paid_amount, approval_status FROM expenses WHERE id = ?').get(Number(expenseId));
+        const currentPaid = Number(expense?.paid_amount || 0);
+        let newStatus = expense?.approval_status || 'Pending';
+        if (currentPaid >= totalAmount - 0.005) {
+          newStatus = 'Paid';
+        } else if (currentPaid > 0) {
+          newStatus = 'Partially Paid';
+        }
+        db.prepare('UPDATE expenses SET approval_status = ? WHERE id = ?').run(newStatus, Number(expenseId));
       }
 
       db.prepare('COMMIT').run();
@@ -123,6 +135,59 @@ const VendorCredits = {
       db.prepare('ROLLBACK').run();
       return { error: e.message };
     }
+  },
+
+  updateCredit(id, { supplier_id, date, amount, reference, memo }) {
+    const credit = db.prepare('SELECT * FROM vendor_credits WHERE id = ?').get(id);
+    if (!credit) return { error: 'Credit not found' };
+    if (credit.status !== 'Active') return { error: 'Cannot edit - credit is not Active' };
+    if (credit.remaining_amount < credit.amount - 0.005) return { error: 'Cannot edit - credit has been partially applied' };
+
+    const newAmt = Number(amount) || 0;
+    if (newAmt <= 0) return { error: 'Amount must be positive' };
+
+    const oldAmt = Number(credit.amount);
+
+    db.prepare(
+      `UPDATE vendor_credits SET supplier_id=?, date=?, amount=?, remaining_amount=?, reference=?, memo=? WHERE id=?`
+    ).run(supplier_id, date, newAmt, newAmt, reference || null, memo || '', id);
+
+    // Adjust vendor balance by the difference
+    const diff = newAmt - oldAmt;
+    if (diff !== 0) {
+      try {
+        db.prepare('UPDATE suppliers SET balance = COALESCE(balance,0) - ? WHERE id = ?').run(diff, Number(supplier_id));
+      } catch (e) { console.error('[vendorCredits] vendor balance update failed:', e); }
+    }
+
+    // Reverse old journal entry and repost
+    try {
+      const JournalEntries = require('./journalEntries');
+      const oldEntry = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'vendor_credit' AND source_id = ? AND status = 'Posted' LIMIT 1").get(String(id));
+      if (oldEntry) {
+        JournalEntries.reverse(oldEntry.id, date, 'system');
+      }
+      const COA = require('./chartOfAccounts');
+      const ap = COA.getSystemAccount('Accounts Payable');
+      if (ap) {
+        const fallbackExp = db.prepare("SELECT id FROM chart_of_accounts WHERE type = 'Expense' AND status = 'Active' LIMIT 1").get();
+        if (fallbackExp) {
+          JournalEntries.post({
+            date: date || new Date().toISOString().slice(0, 10),
+            reference: reference || String(id),
+            description: `Vendor Credit (edited): ${memo || reference || ''}`,
+            source_type: 'vendor_credit',
+            source_id: id,
+            lines: [
+              { account_id: ap.id, debit: newAmt, credit: 0, description: 'Vendor Credit - AP reduction' },
+              { account_id: fallbackExp.id, debit: 0, credit: newAmt, description: 'Vendor Credit - Expense reduction' },
+            ],
+          });
+        }
+      }
+    } catch (e) { console.error('[vendorCredits] journal repost failed:', e); }
+
+    return { success: true };
   },
 
   voidCredit(id) {

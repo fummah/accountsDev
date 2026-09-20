@@ -23,13 +23,33 @@ const BalanceSheet = () => {
 
   const extractBS = (report) => {
     const data = report?.balanceSheet || {};
-    const mapRows = (arr) =>
-      Array.isArray(arr)
-        ? arr.map((r, i) => ({ key: r.name || r.category || String(i), category: r.name || r.category || '', amount: Number(r.amount || 0), type: r.type || '', isSubcategory: false }))
-        : [];
-    const assets = mapRows(data.assets);
-    const liabilities = mapRows(data.liabilities);
-    const equity = mapRows(data.equity);
+
+    // Build a nested tree from parentId and flatten for display (parents show
+    // a rolled-up total of themselves + children, matching the P&L report).
+    const buildRows = (arr) => {
+      if (!Array.isArray(arr) || arr.length === 0) return [];
+      const nodes = {};
+      arr.forEach((r, i) => {
+        const id = r.id != null ? r.id : `row-${i}`;
+        nodes[id] = { key: `acct-${id}`, accountId: id, category: r.name || r.category || '', amount: Number(r.amount || 0), type: r.type || '', parentId: r.parentId || null, children: [] };
+      });
+      const roots = [];
+      Object.keys(nodes).forEach(id => {
+        const n = nodes[id];
+        const p = n.parentId != null && nodes[n.parentId];
+        if (p && p !== n) p.children.push(n); else roots.push(n);
+      });
+      const compute = (n) => { let amt = n.amount; n.children.forEach(c => { amt += compute(c); }); n.displayAmount = amt; n.hasChildren = n.children.length > 0; return amt; };
+      roots.forEach(compute);
+      const out = [];
+      const flatten = (list, indent) => list.forEach(n => { out.push({ ...n, indent }); if (n.children.length) flatten(n.children, indent + 1); });
+      flatten(roots, 0);
+      return out;
+    };
+
+    const assets = buildRows(data.assets);
+    const liabilities = buildRows(data.liabilities);
+    const equity = buildRows(data.equity);
     const totalAssets = data.summary?.totalAssets != null
       ? Number(data.summary.totalAssets)
       : assets.reduce((s, r) => s + r.amount, 0);
@@ -107,24 +127,29 @@ const BalanceSheet = () => {
 
   const sectionColumns = (sectionTitle) => {
     const cols = [
-      { title: sectionTitle, dataIndex: 'category', key: 'category', render: (text, record) => record.isSubcategory ? <Text style={{ paddingLeft: 20 }}>{text}</Text> : <Text strong>{text}</Text> },
-      { title: 'Amount', dataIndex: 'amount', key: 'amount', align: 'right', width: 150, render: v => <Text>{fmt(v)}</Text> },
+      {
+        title: sectionTitle, dataIndex: 'category', key: 'category',
+        render: (text, record) => (
+          <span style={{ paddingLeft: record.indent ? record.indent * 18 : 0, fontWeight: record.hasChildren ? 600 : 'normal' }}>{text}</span>
+        ),
+      },
+      { title: 'Amount', dataIndex: 'displayAmount', key: 'amount', align: 'right', width: 150, render: v => <Text>{fmt(v)}</Text> },
     ];
     if (priorBS) {
       cols.push({
         title: 'Prior', key: 'prior', align: 'right', width: 150,
         render: (_, r) => {
           const sections = sectionTitle.toLowerCase().includes('asset') ? priorBS.assets : sectionTitle.toLowerCase().includes('liabilit') ? priorBS.liabilities : priorBS.equity;
-          const pr = sections.find(p => p.category === r.category);
-          return pr ? <Text type="secondary">{fmt(pr.amount)}</Text> : '-';
+          const pr = sections.find(p => p.accountId === r.accountId);
+          return pr ? <Text type="secondary">{fmt(pr.displayAmount)}</Text> : '-';
         },
       });
       cols.push({
         title: 'Change', key: 'change', align: 'right', width: 100,
         render: (_, r) => {
           const sections = sectionTitle.toLowerCase().includes('asset') ? priorBS.assets : sectionTitle.toLowerCase().includes('liabilit') ? priorBS.liabilities : priorBS.equity;
-          const pr = sections.find(p => p.category === r.category);
-          return pr ? renderVariance(Number(r.amount || 0), Number(pr.amount || 0)) : null;
+          const pr = sections.find(p => p.accountId === r.accountId);
+          return pr ? renderVariance(Number(r.displayAmount || 0), Number(pr.displayAmount || 0)) : null;
         },
       });
     }
@@ -252,7 +277,7 @@ const BalanceSheet = () => {
               columns={sectionColumns('Asset Category')}
               dataSource={balanceSheet.assets}
               pagination={false}
-              rowKey="category"
+              rowKey="key"
               loading={loading}
               size="small"
               summary={() => (
@@ -273,7 +298,7 @@ const BalanceSheet = () => {
               columns={sectionColumns('Liability Category')}
               dataSource={balanceSheet.liabilities}
               pagination={false}
-              rowKey="category"
+              rowKey="key"
               loading={loading}
               size="small"
               summary={() => (
@@ -292,7 +317,7 @@ const BalanceSheet = () => {
               columns={sectionColumns('Equity Category')}
               dataSource={balanceSheet.equity}
               pagination={false}
-              rowKey="category"
+              rowKey="key"
               loading={loading}
               size="small"
               summary={() => (

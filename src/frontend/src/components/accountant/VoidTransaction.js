@@ -40,6 +40,9 @@ const VoidTransaction = () => {
       if (!searchResult || !searchResult.id) return;
       setLoading(true);
       const res = await window.electronAPI.voidTransaction(searchResult.id);
+      if (res?.error) {
+        throw new Error(res.error);
+      }
       if (res && (res.changes > 0 || res.success !== false)) {
         setVoided(true);
         setSearchResult({ ...searchResult, status: 'Voided' });

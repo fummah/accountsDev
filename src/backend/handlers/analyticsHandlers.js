@@ -25,7 +25,7 @@ function registerAnalyticsHandlers() {
 
       const outstandingInvoices = db.prepare(`
         SELECT COUNT(*) as count, COALESCE(SUM(balance),0) as amount
-        FROM invoices WHERE LOWER(IFNULL(status,'')) != 'paid'
+        FROM invoices WHERE LOWER(IFNULL(status,'')) NOT IN ('paid','void','voided','cancelled','canceled','draft')
       `).get();
 
       return {

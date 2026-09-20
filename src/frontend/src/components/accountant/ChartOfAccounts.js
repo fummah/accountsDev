@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import moment from 'moment';
 import {
   Table, Button, Form, Input, Modal, message, Select, Space, Card, Row, Col,
   Tag, Tooltip, Drawer, Divider, Popconfirm, InputNumber, Tabs, Switch,
@@ -14,6 +15,7 @@ import {
 } from '@ant-design/icons';
 import { useCurrency } from '../../utils/currency';
 import { history } from '../../appRedux/store';
+import AccountSelect from '../shared/AccountSelect';
 
 const { Option } = Select;
 const { Search } = Input;
@@ -35,6 +37,27 @@ const ACCOUNT_TYPES = {
   Expense:              { color: '#faad14', icon: <DollarOutlined />,      order: 10, range: '6000', normalBalance: 'Debit'  },
   'Other Income':       { color: '#52c41a', icon: <ArrowUpOutlined />,     order: 11, range: '7000', normalBalance: 'Credit' },
   'Other Expense':      { color: '#faad14', icon: <DollarOutlined />,      order: 12, range: '8000', normalBalance: 'Debit'  },
+};
+
+/* ─── Account type families (parent-child compatibility groups) ─── */
+const ACCOUNT_TYPE_FAMILY = {
+  Asset: 'Asset',
+  Bank: 'Asset',
+  Cash: 'Asset',
+  Liability: 'Liability',
+  'Credit Card': 'Liability',
+  Loan: 'Liability',
+  Equity: 'Equity',
+  Income: 'Income',
+  'Other Income': 'Income',
+  'Cost of Goods Sold': 'Expense',
+  Expense: 'Expense',
+  'Other Expense': 'Expense',
+};
+
+const isCompatibleParent = (childType, parentType) => {
+  if (!childType || !parentType) return true;
+  return (ACCOUNT_TYPE_FAMILY[childType] || childType) === (ACCOUNT_TYPE_FAMILY[parentType] || parentType);
 };
 
 /* ─── Sub-types per account type ─── */
@@ -59,49 +82,6 @@ const fmtNum = (v) => Number(v || 0).toLocaleString(undefined, { minimumFraction
 const csvEscape = (v) => {
   const s = String(v ?? '');
   return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
-};
-
-/* ─── Source type → route / label / colour ─── */
-const SOURCE_ROUTES = {
-  expense:            id => `/main/vendors/bills/edit/${id}`,
-  bill_payment:       id => `/main/vendors/bills/edit/${id}`,
-  invoice:            id => `/main/customers/invoices/edit/${id}`,
-  payment:            () => '/main/customers/payments',
-  deposit:            () => '/main/banking/deposits',
-  transaction:        () => '/main/accountant/journal-entries',
-  check:              () => '/main/accountant/check-printing',
-  transfer:           () => '/main/banking/transfers',
-  credit_note:        () => '/main/customers/credit-notes',
-  vendor_credit:      () => '/main/vendors/credits',
-  reversal:           () => '/main/accountant/journal-entries',
-};
-
-const SOURCE_LABELS = {
-  expense:            'Bill',
-  bill_payment:       'Bill Payment',
-  invoice:            'Invoice',
-  payment:            'Payment',
-  deposit:            'Deposit',
-  transaction:        'Journal Entry',
-  check:              'Check',
-  transfer:           'Transfer',
-  credit_note:        'Credit Note',
-  vendor_credit:      'Vendor Credit',
-  reversal:           'Reversal',
-};
-
-const SOURCE_COLORS = {
-  expense:       'orange',
-  bill_payment:  'magenta',
-  invoice:       'blue',
-  payment:       'green',
-  deposit:       'cyan',
-  transaction:   'geekblue',
-  check:         'purple',
-  transfer:      'lime',
-  credit_note:   'gold',
-  vendor_credit: 'volcano',
-  reversal:      'default',
 };
 
 const buildTree = (flat) => {
@@ -160,20 +140,56 @@ const ChartOfAccounts = () => {
   /* Detail drawer */
   const [drawerAccount, setDrawerAccount] = useState(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [drawerTxns, setDrawerTxns] = useState([]);
-  const [drawerTxnLoading, setDrawerTxnLoading] = useState(false);
-  const [drawerTab, setDrawerTab] = useState('info');
 
   /* Template seed modal */
   const [seedLoading, setSeedLoading] = useState(false);
 
+  /* P&L date filter */
+  const DATE_PRESETS = [
+    { label: 'All Dates', value: 'all' },
+    { label: 'Today', value: 'today' },
+    { label: 'This Month', value: 'thisMonth' },
+    { label: 'This Quarter', value: 'thisQuarter' },
+    { label: 'This Year', value: 'thisYear' },
+    { label: 'Last Year', value: 'lastYear' },
+  ];
+  const [datePreset, setDatePreset] = useState('all');
+  const [customDateRange, setCustomDateRange] = useState(null);
+
+  const getDateRange = (preset) => {
+    if (preset === 'all' || !preset) return { dateFrom: null, dateTo: null };
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const fmt = (d) => d.toISOString().slice(0,10);
+    switch (preset) {
+      case 'today':
+        return { dateFrom: fmt(now), dateTo: fmt(now) };
+      case 'thisMonth':
+        return { dateFrom: fmt(new Date(y, m, 1)), dateTo: fmt(new Date(y, m + 1, 0)) };
+      case 'thisQuarter': {
+        const qStart = Math.floor(m / 3) * 3;
+        return { dateFrom: fmt(new Date(y, qStart, 1)), dateTo: fmt(new Date(y, qStart + 3, 0)) };
+      }
+      case 'thisYear':
+        return { dateFrom: `${y}-01-01`, dateTo: `${y}-12-31` };
+      case 'lastYear':
+        return { dateFrom: `${y-1}-01-01`, dateTo: `${y-1}-12-31` };
+      default:
+        return { dateFrom: null, dateTo: null };
+    }
+  };
+
   /* ─── Load ─── */
-  useEffect(() => { loadAccounts(); }, []);
+  useEffect(() => { loadAccounts(); }, [datePreset, customDateRange]);
 
   const loadAccounts = async () => {
     setLoading(true);
     try {
-      const response = await window.electronAPI.getChartOfAccounts();
+      const params = datePreset === 'custom' && customDateRange
+        ? { dateFrom: customDateRange[0], dateTo: customDateRange[1] }
+        : getDateRange(datePreset);
+      const response = await window.electronAPI.getChartOfAccounts(params);
       if (!response || response.error) {
         message.error(response?.error || 'Failed to load chart of accounts');
         setLoading(false);
@@ -201,12 +217,30 @@ const ChartOfAccounts = () => {
     let filtered = [...accounts];
     if (searchText) {
       const q = searchText.toLowerCase();
-      filtered = filtered.filter(a =>
+      const match = (a) =>
         (a.accountName || '').toLowerCase().includes(q) ||
         (a.accountCode || '').toLowerCase().includes(q) ||
         (a.description || '').toLowerCase().includes(q) ||
-        (a.accountType || '').toLowerCase().includes(q)
-      );
+        (a.accountType || '').toLowerCase().includes(q);
+
+      // Keep the matched accounts plus the surrounding hierarchy so a parent
+      // account shown in a search result still carries its sub-accounts, and a
+      // matched sub-account still appears nested under its parent(s).
+      const matched = accounts.filter(match);
+      const byId = new Map(accounts.map(a => [a.id, a]));
+      const include = new Set(matched.map(a => a.id));
+      const walkUp = (id) => {
+        let cur = byId.get(id);
+        while (cur && cur.parentId != null && byId.has(cur.parentId)) {
+          cur = byId.get(cur.parentId);
+          include.add(cur.id);
+        }
+      };
+      const walkDown = (id) => {
+        accounts.filter(a => a.parentId === id).forEach(c => { include.add(c.id); walkDown(c.id); });
+      };
+      matched.forEach(m => { walkUp(m.id); walkDown(m.id); });
+      filtered = filtered.filter(a => include.has(a.id));
     }
     if (filterType !== 'all') filtered = filtered.filter(a => a.accountType === filterType);
     if (filterStatus !== 'all') filtered = filtered.filter(a => a.status === filterStatus);
@@ -266,9 +300,45 @@ const ChartOfAccounts = () => {
     return String(next);
   }, [accounts]);
 
+  /* ─── Parent account type compatibility guard ─── */
+  const warnIncompatibleParent = (childType, parentId) => {
+    if (!childType || parentId == null) return false;
+    const parent = accounts.find(a => String(a.id) === String(parentId));
+    if (!parent) return false;
+    const parentType = parent.accountType || parent.type;
+    if (isCompatibleParent(childType, parentType)) return false;
+    Modal.warning({
+      title: 'Incompatible Parent Account',
+      content: `The account type you selected is ${childType}, but "${parent.accountName || parent.name}" is a ${parentType} account. A ${childType} account must be under a ${childType} parent account. Please pick the proper account type.`,
+    });
+    return true;
+  };
+
   /* ─── CRUD handlers ─── */
   const handleAddEdit = async (values) => {
     try {
+      const parentId = values.parentId || null;
+      if (parentId != null) {
+        if (String(parentId) === String(editingId)) {
+          message.error('An account cannot be its own parent.');
+          return;
+        }
+        // Reject choosing a descendant as parent (would create a cycle).
+        if (editingId) {
+          const descendants = new Set();
+          const stack = accounts.filter(a => a.parentId === editingId);
+          while (stack.length) {
+            const n = stack.pop();
+            if (n == null || descendants.has(n.id)) continue;
+            descendants.add(n.id);
+            accounts.filter(a => a.parentId === n.id).forEach(c => stack.push(c));
+          }
+          if (descendants.has(Number(parentId))) {
+            message.error('Cannot set this account as parent: it is a sub-account of this account.');
+            return;
+          }
+        }
+      }
       let response;
       const payload = {
         accountName:        values.accountName,
@@ -437,26 +507,9 @@ const ChartOfAccounts = () => {
   };
 
   /* ─── Detail drawer ─── */
-  const openDrawer = async (record) => {
+  const openDrawer = (record) => {
     setDrawerAccount(record);
     setDrawerVisible(true);
-    setDrawerTab('info');
-    setDrawerTxnLoading(true);
-    try {
-      const txns = await window.electronAPI?.getAccountActivity?.(record.id) ||
-                   await window.electronAPI?.getAccountTransactions?.(record.id);
-      setDrawerTxns(Array.isArray(txns) ? txns : []);
-    } catch { setDrawerTxns([]); }
-    setDrawerTxnLoading(false);
-  };
-
-  /* ─── Navigate to source transaction ─── */
-  const navigateToSource = (r) => {
-    const routeFn = SOURCE_ROUTES[r.source_type];
-    if (routeFn) {
-      const path = routeFn(r.source_id);
-      history.push(path);
-    }
   };
 
   const subAccounts = useMemo(() => {
@@ -488,7 +541,7 @@ const ChartOfAccounts = () => {
           <div>
             <Space size={4}>
               {record.isSystem && <Tooltip title="System account – protected"><LockOutlined style={{ color: '#faad14', fontSize: 11 }} /></Tooltip>}
-              <a onClick={() => openDrawer(record)} style={{ fontWeight: 500 }}>{text || '-'}</a>
+              <a onClick={() => history.push(`/main/accountant/general-ledger?account=${record.id}`)} style={{ fontWeight: 500 }}>{text || '-'}</a>
             </Space>
             {parent && <div style={{ fontSize: 11, color: '#8c8c8c' }}><ApartmentOutlined style={{ marginRight: 4 }} />{parent.accountName}</div>}
             {record.description && <div style={{ fontSize: 11, color: '#bfbfbf' }}>{record.description}</div>}
@@ -598,7 +651,7 @@ const ChartOfAccounts = () => {
       loading={loading}
       size="middle"
       rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
-      pagination={{ pageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} accounts` }}
+      pagination={{ defaultPageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: (t) => `${t} accounts` }}
       scroll={{ x: 1100 }}
       expandable={treeView ? { childrenColumnName: 'children', defaultExpandAllRows: true } : undefined}
     />
@@ -732,20 +785,29 @@ const ChartOfAccounts = () => {
       {/* Search, Filter, View Toggle */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row gutter={[12, 12]} align="middle">
-          <Col xs={24} sm={7}>
+          <Col xs={24} sm={5}>
             <Search placeholder="Search by name, code, or type..." allowClear value={searchText} onChange={e => setSearchText(e.target.value)} />
           </Col>
-          <Col xs={12} sm={4}>
+          <Col xs={12} sm={3}>
             <Select style={{ width: '100%' }} value={filterType} onChange={v => { setFilterType(v); if (v !== 'all') setActiveTab(v); else setActiveTab('all'); }}>
               <Option value="all">All Types</Option>
               {Object.keys(ACCOUNT_TYPES).map(t => <Option key={t} value={t}>{t}</Option>)}
             </Select>
           </Col>
-          <Col xs={12} sm={4}>
+          <Col xs={12} sm={3}>
             <Select style={{ width: '100%' }} value={filterStatus} onChange={setFilterStatus}>
               <Option value="all">All Status</Option>
               <Option value="Active">Active</Option>
               <Option value="Inactive">Inactive</Option>
+            </Select>
+          </Col>
+          <Col xs={12} sm={3}>
+            <Select style={{ width: '100%' }} value={datePreset} onChange={v => {
+              setDatePreset(v);
+              if (v !== 'custom') setCustomDateRange(null);
+            }}>
+              {DATE_PRESETS.map(p => <Option key={p.value} value={p.value}>{p.label}</Option>)}
+              <Option value="custom">Custom Range</Option>
             </Select>
           </Col>
           <Col xs={24} sm={4}>
@@ -761,6 +823,22 @@ const ChartOfAccounts = () => {
             )}
           </Col>
         </Row>
+        {datePreset === 'custom' && (
+          <Row style={{ marginTop: 12 }}>
+            <Col>
+              <DatePicker.RangePicker
+                value={customDateRange ? [moment(customDateRange[0]), moment(customDateRange[1])] : null}
+                onChange={(dates) => {
+                  if (dates && dates[0] && dates[1]) {
+                    setCustomDateRange([dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD')]);
+                  } else {
+                    setCustomDateRange(null);
+                  }
+                }}
+              />
+            </Col>
+          </Row>
+        )}
       </Card>
 
       {/* Account List with Tabs */}
@@ -780,6 +858,12 @@ const ChartOfAccounts = () => {
           </TabPane>
           <TabPane tab="Liability" key="Liability">
             {activeTab === 'Liability' && renderTable(getTabData('Liability'))}
+          </TabPane>
+          <TabPane tab="Credit Card" key="Credit Card">
+            {activeTab === 'Credit Card' && renderTable(getTabData('Credit Card'))}
+          </TabPane>
+          <TabPane tab="Loan" key="Loan">
+            {activeTab === 'Loan' && renderTable(getTabData('Loan'))}
           </TabPane>
           <TabPane tab="Equity" key="Equity">
             {activeTab === 'Equity' && renderTable(getTabData('Equity'))}
@@ -871,6 +955,10 @@ const ChartOfAccounts = () => {
                 setCustomSubTypes([]);
                 if (!editingId) form.setFieldsValue({ accountCode: suggestAccountCode(v) });
                 form.setFieldsValue({ normalBalance: ACCOUNT_TYPES[v]?.normalBalance || 'Debit', subType: undefined });
+                const pid = form.getFieldValue('parentId');
+                if (pid != null && warnIncompatibleParent(v, pid)) {
+                  form.setFieldsValue({ parentId: null });
+                }
               }}>
                 {allAccountTypes.map(t => (
                   <Option key={t} value={t}>{ACCOUNT_TYPES[t]?.icon} {t}</Option>
@@ -945,11 +1033,13 @@ const ChartOfAccounts = () => {
               }
               style={{ flex: 1 }}
             >
-              <Select placeholder="(none — top level)" allowClear showSearch optionFilterProp="children">
-                {accounts.filter(a => a.id !== editingId && a.status === 'Active').map(a => (
-                  <Option key={a.id} value={a.id}>{a.accountCode ? a.accountCode + ' — ' : ''}{a.accountName}</Option>
-                ))}
-              </Select>
+              <AccountSelect accounts={accounts.filter(a => a.id !== editingId && a.status === 'Active')} placeholder="(none — top level)" allowClear onChange={(value) => {
+                  if (warnIncompatibleParent(form.getFieldValue('accountType'), value)) {
+                    form.setFieldsValue({ parentId: null });
+                    return;
+                  }
+                  form.setFieldsValue({ parentId: value ?? null });
+                }} />
             </Form.Item>
             <Form.Item name="description" label="Description" style={{ flex: 1 }}>
               <Input placeholder="Brief description (optional)" />
@@ -1151,12 +1241,16 @@ const ChartOfAccounts = () => {
         key={drawerAccount?.id || 'drawer'}
         title={drawerAccount ? `${drawerAccount.accountCode || ''} ${drawerAccount.accountName}` : 'Account Details'}
         visible={drawerVisible}
-        onClose={() => { setDrawerVisible(false); setDrawerAccount(null); setDrawerTxns([]); }}
-        afterVisibleChange={(vis) => { if (!vis) { setDrawerAccount(null); setDrawerTxns([]); } }}
+        onClose={() => { setDrawerVisible(false); setDrawerAccount(null); }}
+        afterVisibleChange={(vis) => { if (!vis) { setDrawerAccount(null); } }}
         destroyOnClose
         width={560}
         footer={drawerAccount ? (
-          <Space>
+          <Space wrap>
+            <Button type="primary" icon={<BookOutlined />} onClick={() => {
+              setDrawerVisible(false);
+              history.push(`/main/accountant/general-ledger?account=${drawerAccount.id}`);
+            }}>View in General Ledger</Button>
             <Button type="primary" icon={<EditOutlined />} onClick={() => {
               setDrawerVisible(false);
               setEditingId(drawerAccount.id);
@@ -1252,62 +1346,6 @@ const ChartOfAccounts = () => {
                   ]}
                 />
               </>
-            )}
-
-            {/* Account Activity */}
-            <Divider orientation="left">Account Activity (Journal Entries)</Divider>
-            {drawerTxnLoading ? <Spin /> : (
-              drawerTxns.length > 0 ? (
-                <>
-                  <Table
-                    size="small"
-                    dataSource={drawerTxns.slice(0, 50)}
-                    rowKey={(r, i) => r.id || i}
-                    pagination={false}
-                    summary={(rows) => {
-                      const totD = rows.reduce((s, r) => s + (Number(r.debit)  || 0), 0);
-                      const totC = rows.reduce((s, r) => s + (Number(r.credit) || 0), 0);
-                      return (
-                        <Table.Summary.Row>
-                          <Table.Summary.Cell index={0} colSpan={3}><strong>Totals</strong></Table.Summary.Cell>
-                          <Table.Summary.Cell index={3} align="right"><strong>{cSym} {fmtNum(totD)}</strong></Table.Summary.Cell>
-                          <Table.Summary.Cell index={4} align="right"><strong>{cSym} {fmtNum(totC)}</strong></Table.Summary.Cell>
-                        </Table.Summary.Row>
-                      );
-                    }}
-                    columns={[
-                      { title: 'Date', dataIndex: 'date', width: 100, render: d => d || '-' },
-                      { title: 'Type', dataIndex: 'source_type', width: 110,
-                        render: (t) => {
-                          const label = SOURCE_LABELS[t] || t || '-';
-                          return <Tag color={SOURCE_COLORS[t] || 'default'} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{label}</Tag>;
-                        },
-                      },
-                      { title: 'Description / Ref', dataIndex: 'description', ellipsis: true,
-                        render: (d, r) => {
-                          const routeFn = SOURCE_ROUTES[r.source_type];
-                          return (
-                            <span>
-                              {r.reference ? <Text code style={{fontSize:10}}>{r.reference}</Text> : null}
-                              {' '}
-                              {routeFn ? (
-                                <a onClick={() => navigateToSource(r)} style={{ cursor: 'pointer' }}>
-                                  {d || r.lineDesc || '-'}
-                                </a>
-                              ) : (d || r.lineDesc || '-')}
-                            </span>
-                          );
-                        },
-                      },
-                      { title: 'Debit',  dataIndex: 'debit',  width: 110, align: 'right', render: v => Number(v) ? <Text style={{color:'#1890ff'}}>{cSym} {fmtNum(v)}</Text> : <Text type="secondary">—</Text> },
-                      { title: 'Credit', dataIndex: 'credit', width: 110, align: 'right', render: v => Number(v) ? <Text style={{color:'#52c41a'}}>{cSym} {fmtNum(v)}</Text> : <Text type="secondary">—</Text> },
-                    ]}
-                  />
-                  <div style={{marginTop:8,textAlign:'right'}}>
-                    <Text type="secondary" style={{fontSize:11}}>Showing last {Math.min(50, drawerTxns.length)} of {drawerTxns.length} entries</Text>
-                  </div>
-                </>
-              ) : <Empty description="No journal activity recorded for this account" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             )}
           </>
         )}

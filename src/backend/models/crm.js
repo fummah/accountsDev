@@ -1,6 +1,32 @@
 const db = require('./dbmgr');
+const { QUOTE_STATUS } = require('../services/documentStatus');
+// Converting a lead WRITES INTO `customers`, so it must obey the same
+// "First Name OR Company Name" rule and the same display-name derivation as
+// every other customer-writing path. Without this the conversion had its own
+// private rule and could fabricate a name.
+const ContactIdentity = require('../services/contactIdentity');
 
 const STAGES = ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
+
+// Two DISTINCT customer relationships on a lead:
+//   • customer_id            — the lead is LINKED to an existing customer
+//   • converted_customer_id  — the lead has been CONVERTED into that customer
+// They are joined separately so a linked-but-not-converted lead still shows
+// its customer without looking like it was converted.
+const LEAD_SELECT = `
+  SELECT l.*,
+         c.first_name||' '||COALESCE(c.last_name,'') AS customer_name,
+         COALESCE(
+           NULLIF(TRIM(COALESCE(lc.display_name, '')), ''),
+           NULLIF(TRIM(lc.first_name||' '||COALESCE(lc.last_name, '')), ''),
+           lc.company_name
+         ) AS linked_customer_name,
+         lc.email        AS linked_customer_email,
+         lc.company_name AS linked_customer_company
+  FROM crm_leads l
+  LEFT JOIN customers c  ON l.converted_customer_id = c.id
+  LEFT JOIN customers lc ON l.customer_id = lc.id
+`;
 
 const CRM = {
   createTables: () => {
@@ -27,11 +53,22 @@ const CRM = {
         expected_close_date TEXT,
         converted_customer_id INTEGER,
         converted_at DATETIME,
+        customer_id INTEGER,
+        first_name TEXT,
+        last_name TEXT,
+        display_name TEXT,
+        phone_number TEXT,
+        mobile_number TEXT,
+        address1 TEXT,
+        address2 TEXT,
+        city TEXT,
+        state TEXT,
+        postal_code TEXT,
+        country TEXT,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME
       )
     `).run();
-
     db.prepare(`
       CREATE TABLE IF NOT EXISTS crm_activities (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,65 +107,102 @@ const CRM = {
     addActCol('outcome',               'TEXT');
     addActCol('completedAt',           'DATETIME');
     addLeadCol('quote_ids',            'TEXT');
+
+    // ── Link to an EXISTING customer + full customer/contact fields ──────────
+    // `customer_id` is the "this lead is linked to an existing customer" link.
+    // It is deliberately SEPARATE from `converted_customer_id`, which means
+    // "this lead has been converted into that customer" and drives the
+    // pipeline (won) + quote creation. Overloading one column for both would
+    // make a linked lead look already-converted.
+    //
+    // The contact columns mirror the `customers` table names exactly so the
+    // shared CustomerContactFields component can drive both forms and so a
+    // later conversion can copy them across without a mapping table.
+    addLeadCol('customer_id',          'INTEGER');
+    addLeadCol('first_name',           'TEXT');
+    addLeadCol('last_name',            'TEXT');
+    addLeadCol('display_name',         'TEXT');
+    addLeadCol('phone_number',         'TEXT');
+    addLeadCol('mobile_number',        'TEXT');
+    addLeadCol('address1',             'TEXT');
+    addLeadCol('address2',             'TEXT');
+    addLeadCol('city',                 'TEXT');
+    addLeadCol('state',                'TEXT');
+    addLeadCol('postal_code',          'TEXT');
+    addLeadCol('country',              'TEXT');
   },
 
   // ── Leads ──────────────────────────────────────────────────────────────────
   listLeads: (filters = {}) => {
-    let sql = `SELECT l.*, c.first_name||' '||c.last_name AS customer_name
-               FROM crm_leads l
-               LEFT JOIN customers c ON l.converted_customer_id = c.id
-               WHERE 1=1`;
+    let sql = `${LEAD_SELECT} WHERE 1=1`;
     const params = [];
     if (filters.stage)    { sql += ` AND l.pipeline_stage = ?`; params.push(filters.stage); }
     if (filters.source)   { sql += ` AND l.source = ?`;         params.push(filters.source); }
     if (filters.priority) { sql += ` AND l.priority = ?`;       params.push(filters.priority); }
     if (filters.assigned_to) { sql += ` AND l.assigned_to = ?`; params.push(filters.assigned_to); }
-    if (filters.search)   { sql += ` AND (l.name LIKE ? OR l.company LIKE ? OR l.email LIKE ?)`; const s = `%${filters.search}%`; params.push(s, s, s); }
+    if (filters.customer_id) { sql += ` AND l.customer_id = ?`; params.push(Number(filters.customer_id)); }
+    if (filters.search)   {
+      sql += ` AND (l.name LIKE ? OR l.company LIKE ? OR l.email LIKE ?
+                    OR l.display_name LIKE ? OR l.mobile_number LIKE ? OR l.phone LIKE ?)`;
+      const s = `%${filters.search}%`;
+      params.push(s, s, s, s, s, s);
+    }
     sql += ` ORDER BY l.createdAt DESC`;
     return db.prepare(sql).all(...params);
   },
 
-  getLead: (id) => {
-    return db.prepare(`SELECT l.*, c.first_name||' '||c.last_name AS customer_name
-                       FROM crm_leads l LEFT JOIN customers c ON l.converted_customer_id = c.id
-                       WHERE l.id = ?`).get(id);
+  /** Every lead linked to a given customer (for the Customer → Leads view). */
+  listLeadsByCustomer: (customerId) => {
+    if (customerId == null || customerId === '') return [];
+    return db.prepare(`${LEAD_SELECT} WHERE l.customer_id = ? ORDER BY l.createdAt DESC`).all(Number(customerId));
   },
 
+  getLead: (id) => db.prepare(`${LEAD_SELECT} WHERE l.id = ?`).get(id),
+
   createLead: (lead) => {
-    const score = CRM._calcScore(lead);
+    const n = CRM._normalizeLeadFields(lead);
+    const score = CRM._calcScore(n);
     const stmt = db.prepare(`
       INSERT INTO crm_leads
-        (name,company,email,phone,website,address,pipeline_stage,source,owner,assigned_to,value,priority,score,tags,notes,expected_close_date,createdAt)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+        (name,company,email,phone,phone_number,website,address,pipeline_stage,source,owner,assigned_to,value,priority,score,tags,notes,expected_close_date,
+         customer_id,first_name,last_name,display_name,mobile_number,address1,address2,city,state,postal_code,country,createdAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
     `);
     const r = stmt.run(
-      lead.name, lead.company||null, lead.email||null, lead.phone||null,
-      lead.website||null, lead.address||null,
-      lead.pipeline_stage||'new', lead.source||null, lead.owner||null,
-      lead.assigned_to||null, Number(lead.value||0), lead.priority||'medium',
-      score, lead.tags ? JSON.stringify(lead.tags) : null,
-      lead.notes||null, lead.expected_close_date||null
+      n.name, n.company, n.email, n.phone, n.phone_number, n.website, n.address,
+      n.pipeline_stage, n.source, n.owner, n.assigned_to, n.value, n.priority,
+      score, n.tags, n.notes, n.expected_close_date,
+      n.customer_id, n.first_name, n.last_name, n.display_name, n.mobile_number,
+      n.address1, n.address2, n.city, n.state, n.postal_code, n.country
     );
     return { success: true, id: r.lastInsertRowid };
   },
 
   updateLead: (lead) => {
-    const score = CRM._calcScore(lead);
+    const n = CRM._normalizeLeadFields(lead);
+    // A partial update that omits customer_id must not silently unlink the
+    // lead — only an explicit value (including an explicit null) changes it.
+    if (!Object.prototype.hasOwnProperty.call(lead, 'customer_id')) {
+      const cur = db.prepare('SELECT customer_id FROM crm_leads WHERE id = ?').get(lead.id);
+      n.customer_id = cur ? cur.customer_id : null;
+    }
+    const score = CRM._calcScore(n);
     const stmt = db.prepare(`
       UPDATE crm_leads SET
         name=?,company=?,email=?,phone=?,website=?,address=?,
         pipeline_stage=?,source=?,owner=?,assigned_to=?,value=?,
         priority=?,score=?,tags=?,notes=?,lost_reason=?,expected_close_date=?,
+        customer_id=?,first_name=?,last_name=?,display_name=?,phone_number=?,mobile_number=?,
+        address1=?,address2=?,city=?,state=?,postal_code=?,country=?,
         updatedAt=datetime('now')
       WHERE id=?
     `);
     stmt.run(
-      lead.name, lead.company||null, lead.email||null, lead.phone||null,
-      lead.website||null, lead.address||null,
-      lead.pipeline_stage||'new', lead.source||null, lead.owner||null,
-      lead.assigned_to||null, Number(lead.value||0), lead.priority||'medium',
-      score, lead.tags ? JSON.stringify(lead.tags) : null,
-      lead.notes||null, lead.lost_reason||null, lead.expected_close_date||null,
+      n.name, n.company, n.email, n.phone, n.website, n.address,
+      n.pipeline_stage, n.source, n.owner, n.assigned_to, n.value, n.priority,
+      score, n.tags, n.notes, n.lost_reason, n.expected_close_date,
+      n.customer_id, n.first_name, n.last_name, n.display_name, n.phone_number, n.mobile_number,
+      n.address1, n.address2, n.city, n.state, n.postal_code, n.country,
       lead.id
     );
     return { success: true };
@@ -161,29 +235,61 @@ const CRM = {
     if (!lead) return { success: false, error: 'Lead not found' };
     if (lead.converted_customer_id) return { success: false, error: 'Already converted' };
 
-    const nameParts = (lead.name || '').trim().split(' ');
-    const firstName = nameParts[0] || lead.name;
-    const lastName  = nameParts.slice(1).join(' ') || '';
+    const n = CRM._normalizeLeadFields(lead);
+    // A lead that was created against an EXISTING customer already HAS a
+    // customer — converting it must link to that record, never create a
+    // second, duplicate customer.
+    const existingLink = lead.customer_id
+      ? db.prepare('SELECT id FROM customers WHERE id = ?').get(Number(lead.customer_id))
+      : null;
 
-    const custStmt = db.prepare(`
-      INSERT INTO customers (title,first_name,last_name,display_name,email,phone_number,mobile_number,company_name,address1)
-      VALUES (?,?,?,?,?,?,?,?,?)
-    `);
     const run = db.transaction(() => {
-      const r = custStmt.run(
-        '',
-        firstName, lastName,
-        extraData.display_name || lead.name || firstName,
-        lead.email||'', lead.phone||'', lead.phone||'',
-        lead.company||'', lead.address||''
-      );
-      const custId = r.lastInsertRowid;
+      let custId;
+      if (existingLink) {
+        custId = existingLink.id;
+      } else {
+        const companyName = n.company || '';
+        let firstName = n.first_name || '';
+        let lastName  = n.last_name != null ? n.last_name : '';
+        // A legacy lead may carry only the single `name` field. Split it into a
+        // person ONLY when the lead has no company: for a company-only lead the
+        // `name` IS the company (see _normalizeLeadFields), so splitting it
+        // would invent a person called "Amazon" and store a blank company.
+        if (!firstName && !companyName) {
+          const parts = String(n.name || '').trim().split(/\s+/).filter(Boolean);
+          firstName = parts[0] || '';
+          lastName  = lastName || parts.slice(1).join(' ');
+        }
+        // Same rule as the customer form and the customers model — the API must
+        // not create a customer that is neither a person nor a business.
+        ContactIdentity.assertIdentified({ first_name: firstName, company_name: companyName });
+        // Same display-name priority: explicit -> personal name -> company.
+        const displayName = ContactIdentity.deriveDisplayName({
+          display_name: extraData.display_name || n.display_name,
+          first_name: firstName,
+          last_name: lastName,
+          company_name: companyName,
+        });
+        const r = db.prepare(`
+          INSERT INTO customers
+            (title,first_name,last_name,display_name,email,phone_number,mobile_number,company_name,
+             address1,address2,city,state,postal_code,country,notes)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).run(
+          '', firstName, lastName, displayName,
+          n.email || '', n.phone_number || n.phone || '', n.mobile_number || n.phone || '',
+          companyName, n.address1 || n.address || '',
+          n.address2 || '', n.city || '', n.state || '', n.postal_code || '', n.country || '',
+          n.notes || ''
+        );
+        custId = r.lastInsertRowid;
+      }
       db.prepare(`UPDATE crm_leads SET converted_customer_id=?, converted_at=datetime('now'), pipeline_stage='won', status='won', updatedAt=datetime('now') WHERE id=?`).run(custId, id);
       return custId;
     });
     try {
       const customerId = run();
-      return { success: true, customerId };
+      return { success: true, customerId, reusedExistingCustomer: !!existingLink };
     } catch (e) {
       return { success: false, error: e.message };
     }
@@ -315,25 +421,45 @@ const CRM = {
     const run = db.transaction(() => {
       let customerId = lead.converted_customer_id;
 
-      // Auto-convert to customer if not yet done
+      // Auto-convert to customer if not yet done. This is a SECOND path that
+      // writes into `customers`, so it obeys the same rule as convertToCustomer
+      // — see the note there. It used to split the lead's single `name` into
+      // first/last and fall back to 'Unknown', which turned a company-only lead
+      // into a person called "Amazon".
       if (!customerId) {
-        const nameParts = (lead.name || '').trim().split(' ');
-        const firstName = nameParts[0] || lead.name || 'Unknown';
-        const lastName  = nameParts.slice(1).join(' ') || '';
+        const companyName = lead.company || '';
+        let firstName = lead.first_name || '';
+        let lastName  = lead.last_name != null ? lead.last_name : '';
+        if (!firstName && !companyName) {
+          const nameParts = String(lead.name || '').trim().split(/\s+/).filter(Boolean);
+          firstName = nameParts[0] || '';
+          lastName  = lastName || nameParts.slice(1).join(' ');
+        }
+        ContactIdentity.assertIdentified({ first_name: firstName, company_name: companyName });
+        const displayName = ContactIdentity.deriveDisplayName({
+          display_name: lead.display_name,
+          first_name: firstName,
+          last_name: lastName,
+          company_name: companyName,
+        });
         const r = db.prepare(`
           INSERT INTO customers (title,first_name,last_name,display_name,email,phone_number,mobile_number,company_name,address1)
           VALUES (?,?,?,?,?,?,?,?,?)
-        `).run('', firstName, lastName, lead.name || firstName, lead.email||'', lead.phone||'', lead.phone||'', lead.company||'', lead.address||'');
+        `).run('', firstName, lastName, displayName, lead.email||'', lead.phone||'', lead.phone||'', companyName, lead.address||'');
         customerId = r.lastInsertRowid;
         db.prepare(`UPDATE crm_leads SET converted_customer_id=?, converted_at=datetime('now'), pipeline_stage='proposal', updatedAt=datetime('now') WHERE id=?`).run(customerId, leadId);
       }
 
-      // Create the quote
+      // Create the quote.
+      // Status is intentionally NOT taken from the caller: a quote created from
+      // a lead starts in the active workflow state (Pending), exactly like one
+      // created from the standard Create Quote screen. It only moves on through
+      // acceptQuote / declineQuote / convertQuoteToInvoice.
       const qResult = db.prepare(`
         INSERT INTO quotes (status,customer,customer_email,islater,billing_address,start_date,last_date,message,statement_message,number,entered_by,vat)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
-        quoteData.status || 'Draft',
+        QUOTE_STATUS.PENDING,
         customerId,
         quoteData.customer_email || lead.email || '',
         0,
@@ -348,11 +474,12 @@ const CRM = {
       );
       const quoteId = qResult.lastInsertRowid;
 
-      // Insert line items
+      // Insert line items. The renderer sends `product_id`; `product` is only
+      // the legacy alias, so accept either (mirrors quotes.insertQuote).
       const lines = Array.isArray(quoteLines) ? quoteLines : [];
       const lineStmt = db.prepare(`INSERT INTO quote_lines (quote_id,product,description,quantity,rate,amount) VALUES (?,?,?,?,?,?)`);
       for (const l of lines) {
-        lineStmt.run(quoteId, l.product||0, l.description||'', Number(l.quantity)||1, Number(l.rate)||0, Number(l.amount)||0);
+        lineStmt.run(quoteId, l.product_id || l.product || 0, l.description||'', Number(l.quantity)||1, Number(l.rate)||0, Number(l.amount)||0);
       }
 
       // Auto-generate quote number
@@ -369,7 +496,7 @@ const CRM = {
       db.prepare(`INSERT INTO crm_activities (leadId,type,subject,details,status,createdAt) VALUES (?,?,?,?,?,datetime('now'))`)
         .run(leadId, 'note', `Quote ${formattedNumber} created`, `Quote created for customer #${customerId} — Amount: R${lines.reduce((s,l)=>s+(l.amount||0),0).toFixed(2)}`, 'done');
 
-      return { success: true, quoteId: Number(quoteId), quoteNumber: formattedNumber, customerId };
+      return { success: true, quoteId: Number(quoteId), quoteNumber: formattedNumber, customerId, status: QUOTE_STATUS.PENDING };
     });
 
     try { return run(); }
@@ -377,17 +504,89 @@ const CRM = {
   },
 
   getLeadWithRelated: (leadId) => {
-    const lead = db.prepare(`
-      SELECT l.*, c.first_name||' '||c.last_name AS customer_name, c.email AS customer_email_linked
-      FROM crm_leads l LEFT JOIN customers c ON l.converted_customer_id = c.id
-      WHERE l.id = ?`).get(leadId);
+    const lead = db.prepare(`${LEAD_SELECT} WHERE l.id = ?`).get(leadId);
     if (!lead) return null;
+    // Backwards-compatible alias that older callers still read.
+    try {
+      lead.customer_email_linked = lead.converted_customer_id
+        ? ((db.prepare('SELECT email FROM customers WHERE id = ?').get(Number(lead.converted_customer_id)) || {}).email || null)
+        : null;
+    } catch { lead.customer_email_linked = null; }
     lead.quotes     = CRM.getLeadQuotes(leadId);
     lead.activities = db.prepare(`SELECT * FROM crm_activities WHERE leadId=? ORDER BY COALESCE(dueDate,createdAt) ASC`).all(leadId);
     return lead;
   },
 
   // ── Internal helpers ───────────────────────────────────────────────────────
+  /**
+   * Normalise an incoming lead payload into the exact column set the table
+   * stores, deriving the legacy single-value columns so that every existing
+   * query (list search, lead score, drawer, conversion) keeps working.
+   */
+  _normalizeLeadFields: (lead = {}) => {
+    const s = (v) => (v == null ? '' : String(v).trim());
+
+    const first_name   = s(lead.first_name);
+    const last_name    = s(lead.last_name);
+    const display_name = s(lead.display_name);
+    const company_name = s(lead.company_name);
+    const company      = company_name || s(lead.company);
+
+    // `name` is NOT NULL and is what search / the drawer / conversion use.
+    // Derive it the same way the Customer form derives a display name:
+    // display name → "First Last" → company → previous name → placeholder.
+    const name = display_name
+      || `${first_name} ${last_name}`.trim()
+      || company
+      || s(lead.name)
+      || 'Unnamed Lead';
+
+    // Keep the legacy single-line `address` meaningful. If any structured
+    // part is present, recompose it so editing address1/… updates `address`;
+    // otherwise preserve whatever single-line address was stored before.
+    const parts = [lead.address1, lead.address2, lead.city, lead.state, lead.postal_code, lead.country].map(s);
+    const address = parts.some(Boolean) ? parts.filter(Boolean).join(', ') : s(lead.address);
+
+    const phone_number = s(lead.phone_number);
+    const phone = phone_number || s(lead.phone);
+
+    const tags = Array.isArray(lead.tags)
+      ? (lead.tags.length ? JSON.stringify(lead.tags) : null)
+      : (s(lead.tags) || null);
+
+    return {
+      name,
+      first_name:   first_name || null,
+      last_name:    last_name || null,
+      display_name: display_name || null,
+      company_name,
+      company:      company || null,
+      email:        s(lead.email) || null,
+      phone_number: phone_number || null,
+      mobile_number: s(lead.mobile_number) || null,
+      phone:        phone || null,
+      website:      s(lead.website) || null,
+      address:      address || null,
+      address1:     s(lead.address1) || null,
+      address2:     s(lead.address2) || null,
+      city:         s(lead.city) || null,
+      state:        s(lead.state) || null,
+      postal_code:  s(lead.postal_code) || null,
+      country:      s(lead.country) || null,
+      customer_id:  (lead.customer_id == null || lead.customer_id === '') ? null : Number(lead.customer_id),
+      pipeline_stage: lead.pipeline_stage || 'new',
+      source:       lead.source || null,
+      owner:        lead.owner || null,
+      assigned_to:  lead.assigned_to || null,
+      value:        Number(lead.value || 0),
+      priority:     lead.priority || 'medium',
+      tags,
+      notes:        lead.notes || null,
+      lost_reason:  lead.lost_reason || null,
+      expected_close_date: lead.expected_close_date || null,
+    };
+  },
+
   _calcScore: (lead) => {
     let s = 0;
     if (lead.email)               s += 20;

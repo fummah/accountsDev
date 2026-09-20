@@ -50,18 +50,26 @@ const FinancialHealth = ({ summary }) => {
         const totalExpenses = (s.expenseAnalysis || s.expenselist || []).reduce((acc, e) => acc + (Number(e.value || e.amount) || 0), 0);
         const netProfit = totalRevenue - totalExpenses;
 
-        const openInvAmt = Number(s.open_invoice?.[0]?.open_total_amount) || 0;
-        const dueInvAmt = Number(s.due_invoice?.[0]?.due_total_amount) || 0;
-        const openExpAmt = Number(s.open_expense?.[0]?.open_total_amount_expense) || 0;
-        const dueExpAmt = Number(s.due_expense?.[0]?.due_total_amount_expense) || 0;
+        // COGS from the expense categories (Cost of Goods Sold / COGS)
+        const cogs = (s.expenseAnalysis || s.expenselist || []).reduce((acc, e) => {
+          const n = String(e.name || '').toLowerCase();
+          return (n.includes('cost of goods') || n === 'cogs') ? acc + (Number(e.value || e.amount) || 0) : acc;
+        }, 0);
 
-        const grossMargin = totalRevenue > 0 ? ((totalRevenue - totalExpenses) / totalRevenue) * 100 : 0;
+        // 12-month windowed open/due amounts (aligned with revenue/expense windows)
+        const openInvAmt = Number(s.openInvoice12m?.[0]?.open_total_amount) || Number(s.open_invoice?.[0]?.open_total_amount) || 0;
+        const dueInvAmt = Number(s.dueInvoice12m?.[0]?.due_total_amount) || Number(s.due_invoice?.[0]?.due_total_amount) || 0;
+        const openExpAmt = Number(s.openExpense12m?.[0]?.open_total_amount_expense) || Number(s.open_expense?.[0]?.open_total_amount_expense) || 0;
+        const dueExpAmt = Number(s.dueExpense12m?.[0]?.due_total_amount_expense) || Number(s.due_expense?.[0]?.due_total_amount_expense) || 0;
+        const paidAmt = Number(s.paidInvoice12m?.[0]?.paid_total_amount) || Number(s.paid_invoice?.[0]?.paid_total_amount) || 0;
+
+        const grossMargin = totalRevenue > 0 ? ((totalRevenue - cogs) / totalRevenue) * 100 : 0;
         const currentRatio = openExpAmt > 0 ? (openInvAmt / openExpAmt) : openInvAmt > 0 ? 99 : 0;
         const dso = totalRevenue > 0 ? (openInvAmt / (totalRevenue / 365)) : 0;
         const dpo = totalExpenses > 0 ? (openExpAmt / (totalExpenses / 365)) : 0;
         const burnRate = totalExpenses / Math.max((s.monthlyPerformance || []).length, 1);
         const runway = burnRate > 0 ? ((openInvAmt - openExpAmt) / burnRate) : 99;
-        const collectionRate = openInvAmt > 0 ? ((1 - (dueInvAmt / openInvAmt)) * 100) : 100;
+        const collectionRate = (paidAmt + openInvAmt) > 0 ? (paidAmt / (paidAmt + openInvAmt)) * 100 : 100;
         const overduePct = openExpAmt > 0 ? ((dueExpAmt / openExpAmt) * 100) : 0;
 
         const overallScore = Math.min(100, Math.max(0,
@@ -115,7 +123,7 @@ const FinancialHealth = ({ summary }) => {
                 value={metrics.grossMargin}
                 suffix="%"
                 target={{ good: 30, warn: 10 }}
-                tooltip="(Revenue - Expenses) / Revenue"
+                tooltip="(Revenue - COGS) / Revenue"
               />
             </Col>
             <Col span={4}>
@@ -143,7 +151,7 @@ const FinancialHealth = ({ summary }) => {
                 value={metrics.collectionRate}
                 suffix="%"
                 target={{ good: 80, warn: 60 }}
-                tooltip="% of invoices paid on time"
+                tooltip="% of amounts billed that were collected"
               />
             </Col>
             <Col span={4}>

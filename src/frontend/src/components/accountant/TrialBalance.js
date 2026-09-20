@@ -42,16 +42,22 @@ const TrialBalance = () => {
           message.error(tb?.error || 'Failed to load trial balance');
           setData([]);
         } else {
-          const rows = (Array.isArray(tb) ? tb : []).map((r, idx) => ({
-            key: r.accountId || idx,
-            accountCode: r.accountCode || r.accountNumber || '',
-            accountName: r.accountName || '',
-            accountType: r.accountType || r.type || '',
-            debitNum: Number(r.debit) || 0,
-            creditNum: Number(r.credit) || 0,
-            debit: fmt(Number(r.debit) || 0),
-            credit: fmt(Number(r.credit) || 0),
-          }));
+          const rows = (Array.isArray(tb) ? tb : []).map((r, idx) => {
+            // Net the raw debit/credit sums so each account's balance lands on the correct side
+            const raw = (Number(r.debit) || 0) - (Number(r.credit) || 0);
+            const debit = raw > 0 ? raw : 0;
+            const credit = raw < 0 ? -raw : 0;
+            return {
+              key: r.accountId || idx,
+              accountCode: r.accountCode || r.accountNumber || '',
+              accountName: r.accountName || '',
+              accountType: r.accountType || r.type || '',
+              debitNum: debit,
+              creditNum: credit,
+              debit: fmt(debit),
+              credit: fmt(credit),
+            };
+          });
           setData(rows);
         }
       } else {
@@ -64,8 +70,11 @@ const TrialBalance = () => {
         const rows = (Array.isArray(accounts) ? accounts : []).map((acc, idx) => {
           const balance = Number(acc.balance) || 0;
           const type = (acc.accountType || acc.type || '').toLowerCase();
+          const nb = (acc.normalBalance || '').toLowerCase();
           let debit = 0, credit = 0;
-          const debitNormal = type.includes('asset') || type.includes('expense');
+          // Respect the COA normal balance first; fall back to type-based inference
+          const debitNormal = nb === 'debit' || type.includes('asset') || type.includes('expense')
+            || type === 'bank' || type === 'cash' || type.includes('cost of goods');
           if (balance >= 0) { if (debitNormal) debit = balance; else credit = balance; }
           else { if (debitNormal) credit = Math.abs(balance); else debit = Math.abs(balance); }
           return {
@@ -263,7 +272,7 @@ const TrialBalance = () => {
           dataSource={filtered}
           loading={loading}
           size="small"
-          pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100', '200'], showTotal: (t) => `${t} accounts` }}
+          pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100', '200'], showTotal: (t) => `${t} accounts` }}
           scroll={{ x: 700 }}
           rowClassName={(r) => r.debitNum === 0 && r.creditNum === 0 ? 'ant-table-row-muted' : ''}
           summary={pageData => {

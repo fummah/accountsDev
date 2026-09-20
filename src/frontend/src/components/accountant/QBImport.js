@@ -19,9 +19,9 @@ const QBImport = () => {
       ]
     },
     customers: {
-      headers: ['Display Name','First Name','Last Name','Email','Phone','Mobile','Fax','Billing Address Line 1','Billing Address Line 2','City','State','Postal Code','Country','Terms','Open Balance','Open Balance Date','Tax Number'],
+      headers: ['Active Status','Customer','Balance','Balance Total','Company','Mr./Ms./...','First Name','M.I.','Last Name','Primary Contact','Main Phone','Fax','Alt. Phone','Secondary Contact','Job Title','Main Email','Bill to 1','Bill to 2','Bill to 3','Bill to 4','Bill to 5','Ship to 1','Ship to 2','Ship to 3','Ship to 4','Ship to 5','Customer Type','Terms','Rep','Sales Tax Code','Tax item','Resale Num','Account No.','Credit Limit','Job Status','Job Type','Job Description','Start Date','Projected End','End Date'],
       rows: [
-        ['Acme Holdings','John','Doe','john@acme.com','555-0100','555-0101','','1 Main St','','Metropolis','NY','10001','USA','Net 30','1200.00','2025-12-31','1234567890']
+        ['Active','Acme Holdings','1200','1200','Acme Holdings Pty Ltd','Mr.','John','','Doe','John Smith','555-0100','','','','','john@acme.com','1 Main St','Metropolis NY 10001','','','','','','','','','Customer','Net 30','Sales Team','Standard','','','ACC-001','5000','','','','','','','']
       ]
     },
     products: {
@@ -55,9 +55,9 @@ const QBImport = () => {
       ]
     },
     vendors: {
-      headers: ['Display Name','First Name','Last Name','Email','Phone','Mobile','Fax','Address1','Address2','City','State','Postal Code','Country','Terms','Account Number','Open Balance','Open Balance Date','Notes'],
+      headers: ['Active Status','Vendor','Balance','Balance Total','Company','Mr./Ms./...','First Name','M.I.','Last Name','Bill from 1','Bill from 2','Bill from 3','Bill from 4','Bill from 5','Ship from 1','Ship from 2','Ship from 3','Ship from 4','Ship from 5','Primary Contact','Job Title','Main Phone','Fax','Alt. Phone','Secondary Contact'],
       rows: [
-        ['Widgets Inc','','','ap@widgets.com','555-0200','','','','100 Supplier Way','','Gotham','CA','90001','USA','Net 30','ACC-7789','0','2026-01-01','Preferred vendor']
+        ['Active','Widgets Inc','0','0','Widgets Inc','','','','','100 Supplier Way','Gotham CA 90001','','','','','','','','','Jane Smith','AP Contact','555-0200','','','sup@widgets.com']
       ]
     },
     tax: {
@@ -137,13 +137,7 @@ const QBImport = () => {
       const res = await fn(csv, { enteredBy: 'qb-import' });
       setResult(res);
       if (res?.success) {
-        let msg = `Import completed — ${res.inserted || 0} records`;
-        if (res.unmappedColumns?.length) {
-          msg += `. Unrecognized columns: ${res.unmappedColumns.join(', ')}`;
-          message.warning(msg);
-        } else {
-          message.success(msg);
-        }
+        message.success(`Import completed — ${res.inserted || 0} records`);
       } else {
         message.error(res?.error || 'Import failed');
       }

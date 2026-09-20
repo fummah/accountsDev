@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Descriptions, Table, Tabs, Button, Space, Tag, Statistic, Row, Col, message, Form, Input, Modal, Spin, Select, Empty, List, Avatar, Divider } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, FileTextOutlined, DollarOutlined, PlusOutlined, LeftOutlined, RightOutlined, FileDoneOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Table, Tabs, Button, Space, Tag, Statistic, Row, Col, message, Form, Modal, Spin, Empty, List, Avatar, Typography } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, FileTextOutlined, DollarOutlined, PlusOutlined, LeftOutlined, RightOutlined, FileDoneOutlined, MailOutlined, PhoneOutlined, ClockCircleOutlined, CheckCircleOutlined, SolutionOutlined, SnippetsOutlined, HistoryOutlined, ProfileOutlined, FunnelPlotOutlined } from '@ant-design/icons';
 import { useParams, useHistory, Link } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
-import { formatPhone, phoneInputHandler } from '../../utils/phone';
-import COUNTRIES from '../../utils/countries';
+import { formatPhone } from '../../utils/phone';
 import CustomerPaymentHistory from './payments/CustomerPaymentHistory';
+import CustomerContactFields from './shared/CustomerContactFields';
+import { resolveTaxRateFields, taxRateFormValue, describeTaxRate } from '../../utils/taxRate';
+import { MODAL_BODY_SCROLL_STYLE, MODAL_WIDTH } from '../shared/FormSection';
+import { normalizeStatus } from '../StatusBadge';
 
 const { TabPane } = Tabs;
-const statusColors = { Draft: 'default', Sent: 'processing', Pending: 'warning', Unpaid: 'warning', Paid: 'success', 'Partially Paid': 'orange', Overdue: 'error', Cancelled: 'default', Open: 'blue', Accepted: 'success', Declined: 'error', Expired: 'default', Invoiced: 'purple' };
+const { Title, Text } = Typography;
+// Automatic invoice statuses + quote workflow statuses (legacy labels kept as
+// a colour fallback for any pre-migration row still on disk).
+const statusColors = { Open: 'blue', 'Partially Paid': 'orange', Paid: 'success', Draft: 'default', Void: 'volcano', Cancelled: 'default', Pending: 'gold', Accepted: 'success', Declined: 'error', Converted: 'purple', Overdue: 'error' };
 
 const CustomerDetails = () => {
   const { symbol: cSym } = useCurrency();
@@ -18,20 +24,27 @@ const CustomerDetails = () => {
   const [customer, setCustomer] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [quotes, setQuotes] = useState([]);
+  const [leads, setLeads] = useState([]);
   const [allCustomers, setAllCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
+  const [vatRates, setVatRates] = useState([]);
   const [form] = Form.useForm();
+
+  useEffect(() => {
+    window.electronAPI.getAllVat?.().then(v => setVatRates(Array.isArray(v) ? v : [])).catch(() => {});
+  }, []);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [c, allCust, allInvRaw, allQRaw] = await Promise.all([
+      const [c, allCust, allInvRaw, allQRaw, leadsRaw] = await Promise.all([
         window.electronAPI.getSingleCustomer?.(id),
         window.electronAPI.getAllCustomers?.(),
         window.electronAPI.getAllInvoices?.(),
         window.electronAPI.getAllQuotes?.(),
+        window.electronAPI.crmListLeadsByCustomer?.(id),
       ]);
       if (c) setCustomer(c);
       const custArr = Array.isArray(allCust) ? allCust : (allCust?.all || []);
@@ -40,6 +53,7 @@ const CustomerDetails = () => {
       setInvoices(invArr.filter(inv => String(inv.customer) === String(id) || String(inv.customer_id) === String(id)));
       const qArr = Array.isArray(allQRaw) ? allQRaw : allQRaw || [];
       setQuotes(qArr.filter(q => String(q.customer) === String(id) || String(q.customer_id) === String(id)));
+      setLeads(Array.isArray(leadsRaw) ? leadsRaw : []);
     } catch {
       message.error('Failed to load customer');
     }
@@ -56,8 +70,10 @@ const CustomerDetails = () => {
   const openEdit = () => {
     if (!customer) return;
     form.setFieldsValue({
+      first_name: customer.first_name || '',
+      last_name: customer.last_name || '',
       display_name: customer.display_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-      company: customer.company || customer.company_name,
+      company_name: customer.company || customer.company_name,
       email: customer.email,
       phone_number: customer.phone_number || customer.mobile_number,
       mobile_number: customer.mobile_number || '',
@@ -68,6 +84,8 @@ const CustomerDetails = () => {
       postal_code: customer.postal_code || '',
       country: customer.country || '',
       notes: customer.notes,
+      taxable: customer.taxable != null ? !!Number(customer.taxable) : true,
+      default_tax_rate_id: taxRateFormValue(customer, vatRates),
     });
     setEditOpen(true);
   };
@@ -75,7 +93,8 @@ const CustomerDetails = () => {
   const handleUpdate = async () => {
     try {
       const vals = await form.validateFields();
-      await window.electronAPI.updateCustomer?.({ id: Number(id), display_name: vals.display_name, company_name: vals.company, email: vals.email, phone_number: vals.phone_number, mobile_number: vals.mobile_number, address1: vals.address1, address2: vals.address2, city: vals.city, state: vals.state, postal_code: vals.postal_code, country: vals.country, notes: vals.notes });
+      const tax = resolveTaxRateFields(vals, vatRates);
+      await window.electronAPI.updateCustomer?.({ id: Number(id), first_name: vals.first_name, last_name: vals.last_name, display_name: vals.display_name || `${vals.first_name || ''} ${vals.last_name || ''}`.trim() || vals.company_name || '', company_name: vals.company_name, email: vals.email, phone_number: vals.phone_number, mobile_number: vals.mobile_number, address1: vals.address1, address2: vals.address2, city: vals.city, state: vals.state, postal_code: vals.postal_code, country: vals.country, notes: vals.notes, taxable: vals.taxable, default_tax_rate: tax.default_tax_rate, default_tax_rate_id: tax.default_tax_rate_id });
       message.success('Customer updated');
       setEditOpen(false);
       load();
@@ -83,9 +102,11 @@ const CustomerDetails = () => {
   };
 
   const custName = customer?.display_name || customer?.name || `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim() || 'Customer';
-  const totalReceivables = invoices.filter(i => i.status !== 'Paid' && i.status !== 'Cancelled' && i.status !== 'Draft').reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const totalPaid = invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const overdue = invoices.filter(i => i.status !== 'Paid' && i.status !== 'Cancelled' && i.status !== 'Draft' && i.last_date && moment(i.last_date).isBefore(moment()));
+  const receivableInvoices = invoices.filter(i => ['Open', 'Partially Paid'].includes(normalizeStatus(i.status)));
+  const totalReceivables = receivableInvoices.reduce((s, i) => s + (Number(i.balance != null ? i.balance : i.amount) || 0), 0);
+  const totalPaid = invoices.reduce((s, i) => s + (Number(i.totalPaid != null ? i.totalPaid : (normalizeStatus(i.status) === 'Paid' ? i.amount : 0)) || 0), 0);
+  const overdue = receivableInvoices.filter(i => i.last_date && moment(i.last_date).isBefore(moment(), 'day'));
+  const openInvoiceCount = receivableInvoices.length;
   const recentInvoices = [...invoices].sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 5);
   const recentQuotes = [...quotes].sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 5);
 
@@ -98,7 +119,21 @@ const CustomerDetails = () => {
       render: d => d ? moment(d).format('MM/DD/YYYY') : '-' },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120,
       render: v => <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span> },
-    { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
+    { title: 'Paid', dataIndex: 'totalPaid', key: 'paid', width: 120,
+      render: v => {
+        const n = Number(v || 0);
+        return n > 0
+          ? <span style={{ color: '#52c41a', fontWeight: 500 }}>{cSym} {n.toFixed(2)}</span>
+          : <span style={{ color: '#bfbfbf' }}>{cSym} 0.00</span>;
+      } },
+    { title: 'Balance', dataIndex: 'balance', key: 'balance', width: 120,
+      render: v => {
+        const n = Number(v || 0);
+        return n > 0
+          ? <span style={{ color: '#fa541c', fontWeight: 500 }}>{cSym} {n.toFixed(2)}</span>
+          : <span style={{ color: '#52c41a' }}>{cSym} 0.00</span>;
+      } },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 120,
       render: s => <Tag color={statusColors[s] || 'default'}>{s}</Tag> },
   ];
 
@@ -117,63 +152,103 @@ const CustomerDetails = () => {
 
   if (!customer && !loading) return <div style={{ padding: 24 }}>Customer not found. <Button onClick={() => history.goBack()}>Go Back</Button></div>;
 
+  const initials = custName.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  const custEmail = customer?.email && customer.email !== 'null' ? customer.email : '';
+  const custPhone = customer?.phone_number && customer.phone_number !== 'null' ? formatPhone(customer.phone_number) : (customer?.mobile_number && customer.mobile_number !== 'null' ? formatPhone(customer.mobile_number) : '');
+
   return (
     <Spin spinning={loading}>
     <div style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <Button icon={<ArrowLeftOutlined />} onClick={() => history.push('/main/customers/center')}>Back</Button>
           {prevCustomer && <Button icon={<LeftOutlined />} onClick={() => history.push(`/main/customers/details/${prevCustomer.id}`)}>Prev</Button>}
           {nextCustomer && <Button onClick={() => history.push(`/main/customers/details/${nextCustomer.id}`)}>Next <RightOutlined /></Button>}
         </Space>
         <Space wrap>
-          <Button type="primary" icon={<EditOutlined />} onClick={openEdit}>Edit Customer</Button>
+          <Button type="primary" icon={<EditOutlined />} onClick={openEdit} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(24,144,255,0.35)', fontWeight: 600 }}>Edit Customer</Button>
           <Button icon={<FileTextOutlined />} onClick={() => history.push(`/main/customers/invoices/new?customer=${id}`)}>New Invoice</Button>
           <Button icon={<FileDoneOutlined />} onClick={() => history.push(`/main/customers/quotes/new?customer=${id}`)}>New Quote</Button>
         </Space>
       </div>
 
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Row gutter={16} align="middle">
+      {/* Profile header */}
+      <Card style={{ marginBottom: 20, borderRadius: 14, boxShadow: '0 2px 12px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0' }} bodyStyle={{ padding: 24 }}>
+        <Row gutter={16} align="middle" style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
           <Col flex="auto">
-            <h2 style={{ margin: 0 }}>{custName}</h2>
-            <span style={{ color: '#888' }}>{(customer?.email && customer.email !== 'null') ? customer.email : ''} {(customer?.phone_number && customer.phone_number !== 'null') ? `• ${formatPhone(customer.phone_number)}` : ''}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <Avatar size={64} style={{ background: 'linear-gradient(135deg,#1890ff,#69c0ff)', fontSize: 24, fontWeight: 700, flexShrink: 0 }}>{initials || 'C'}</Avatar>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <Title level={3} style={{ margin: 0 }}>{custName}</Title>
+                  <Tag color="processing" style={{ borderRadius: 20, paddingInline: 12, marginInlineEnd: 0 }}>Customer</Tag>
+                </div>
+                <Space wrap size={[8, 4]} style={{ marginTop: 6 }}>
+                  {custEmail && <a href={`mailto:${custEmail}`} style={{ color: 'rgba(0,0,0,0.65)' }}><MailOutlined style={{ marginRight: 4 }} />{custEmail}</a>}
+                  {custPhone && custEmail && <span style={{ color: '#d9d9d9' }}>•</span>}
+                  {custPhone && <a href={`tel:${custPhone}`} style={{ color: 'rgba(0,0,0,0.65)' }}><PhoneOutlined style={{ marginRight: 4 }} />{custPhone}</a>}
+                </Space>
+              </div>
+            </div>
           </Col>
-          <Col><Statistic title="Receivables" value={totalReceivables.toFixed(2)} prefix={cSym} valueStyle={{ fontSize: 18 }} /></Col>
-          <Col><Statistic title="Paid" value={totalPaid.toFixed(2)} prefix={cSym} valueStyle={{ fontSize: 18, color: '#52c41a' }} /></Col>
-          <Col><Statistic title="Overdue" value={overdue.length} valueStyle={{ fontSize: 18, color: overdue.length > 0 ? '#f5222d' : '#52c41a' }} /></Col>
+          <Col xs={24} sm={8}>
+            <Row gutter={[8, 8]}>
+              <Col span={24} style={{ textAlign: 'right' }}>
+                <Statistic title="Total Receivables" value={totalReceivables.toFixed(2)} prefix={cSym} valueStyle={{ fontSize: 22, color: '#1890ff' }} />
+              </Col>
+            </Row>
+          </Col>
         </Row>
       </Card>
 
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', borderBottom: '1px solid #f0f0f0', marginBottom: 16 }}>
-          {[
-            { key: 'details', label: 'Customer Details' },
-            { key: 'invoices', label: 'Invoices (' + invoices.length + ')' },
-            { key: 'quotes', label: 'Quotes (' + quotes.length + ')' },
-            { key: 'transactions', label: 'Transaction List' },
-            { key: 'payments', label: 'Payment History' },
-            { key: 'statements', label: 'Statements' },
-          ].map(function(t) {
-            return (
-              <div key={t.key}
-                onClick={function() { setActiveTab(t.key); }}
-                style={{
-                  padding: '12px 16px',
-                  cursor: 'pointer',
-                  borderBottom: activeTab === t.key ? '2px solid #1890ff' : '2px solid transparent',
-                  color: activeTab === t.key ? '#1890ff' : 'rgba(0,0,0,0.65)',
-                  fontWeight: activeTab === t.key ? 500 : 400,
-                  marginBottom: '-1px',
-                  transition: 'all 0.3s',
-                  userSelect: 'none',
-                }}
-              >
-                {t.label}
-              </div>
-            );
-          })}
-        </div>
+      {/* Stat tiles */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ borderRadius: 12, border: '1px solid #f0f0f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg,#1890ff,#69c0ff)', color: '#fff', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><DollarOutlined /></div>
+              <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Receivables</Text><Text strong style={{ fontSize: 18 }}>{cSym}{totalReceivables.toFixed(2)}</Text></div>
+            </div>
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ borderRadius: 12, border: '1px solid #f0f0f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg,#52c41a,#95de64)', color: '#fff', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CheckCircleOutlined /></div>
+              <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Paid</Text><Text strong style={{ fontSize: 18, color: '#3f8600' }}>{cSym}{totalPaid.toFixed(2)}</Text></div>
+            </div>
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ borderRadius: 12, border: '1px solid #f0f0f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg,#fa8c16,#ffc53d)', color: '#fff', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ClockCircleOutlined /></div>
+              <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Overdue</Text><Text strong style={{ fontSize: 18, color: overdue.length > 0 ? '#f5222d' : '#52c41a' }}>{overdue.length}</Text></div>
+            </div>
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ borderRadius: 12, border: '1px solid #f0f0f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg,#722ed1,#b37feb)', color: '#fff', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><SolutionOutlined /></div>
+              <div><Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Open Invoices</Text><Text strong style={{ fontSize: 18 }}>{openInvoiceCount}</Text></div>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      <Card style={{ borderRadius: 14, border: '1px solid #f0f0f0', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }} bodyStyle={{ padding: '16px 24px 24px' }}>
+      <div style={{ marginBottom: 8 }}>
+        <Tabs activeKey={activeTab} onChange={setActiveTab} type="card" tabBarStyle={{ marginBottom: 20 }}>
+          <TabPane tab={<span><ProfileOutlined /> Customer Details</span>} key="details" />
+          <TabPane tab={<span><FileTextOutlined /> Invoices ({invoices.length})</span>} key="invoices" />
+          <TabPane tab={<span><FileDoneOutlined /> Quotes ({quotes.length})</span>} key="quotes" />
+          <TabPane tab={<span><FunnelPlotOutlined /> Leads{leads.length ? ` (${leads.length})` : ''}</span>} key="leads" />
+          <TabPane tab={<span><ProfileOutlined /> Transaction List</span>} key="transactions" />
+          <TabPane tab={<span><HistoryOutlined /> Payments</span>} key="payments" />
+          <TabPane tab={<span><SnippetsOutlined /> Statements</span>} key="statements" />
+        </Tabs>
 
         {activeTab === 'details' && (
           <>
@@ -181,6 +256,11 @@ const CustomerDetails = () => {
               <Descriptions column={{ xs: 1, sm: 2, md: 2 }} bordered size="small">
                 <Descriptions.Item label="Display Name">{custName}</Descriptions.Item>
                 <Descriptions.Item label="Company">{(customer?.company_name && customer.company_name !== 'null') ? customer.company_name : '-'}</Descriptions.Item>
+                <Descriptions.Item label="First Name">{(customer?.first_name && customer.first_name !== 'null') ? customer.first_name : '-'}</Descriptions.Item>
+                <Descriptions.Item label="Last Name">{(customer?.last_name && customer.last_name !== 'null') ? customer.last_name : '-'}</Descriptions.Item>
+                <Descriptions.Item label="Date Entered">{(customer?.date_entered && customer.date_entered !== 'null') ? moment(customer.date_entered).format('MM/DD/YYYY') : '-'}</Descriptions.Item>
+                <Descriptions.Item label="Tax Status">{(customer?.taxable == null || Number(customer.taxable)) ? 'Taxable' : 'Tax-Exempt'}</Descriptions.Item>
+                <Descriptions.Item label="Default Tax Rate">{describeTaxRate(customer || {}, vatRates)}</Descriptions.Item>
                 <Descriptions.Item label="Email">{(customer?.email && customer.email !== 'null') ? customer.email : '-'}</Descriptions.Item>
                 <Descriptions.Item label="Phone">{(customer?.phone_number && customer.phone_number !== 'null') ? formatPhone(customer.phone_number) : ((customer?.mobile_number && customer.mobile_number !== 'null') ? formatPhone(customer.mobile_number) : '-')}</Descriptions.Item>
                 <Descriptions.Item label="Balance">{cSym} {Number(customer?.opening_balance || 0).toFixed(2)}</Descriptions.Item>
@@ -228,7 +308,7 @@ const CustomerDetails = () => {
               <Button type="primary" icon={<PlusOutlined />} onClick={function() { history.push('/main/customers/invoices/new?customer=' + id); }}>New Invoice</Button>
             </div>
             <Table dataSource={invoices} columns={invoiceColumns} rowKey="id" size="small"
-              pagination={{ pageSize: 15, showTotal: function(t) { return t + ' invoices'; } }} />
+              pagination={{ defaultPageSize: 15, showTotal: function(t) { return t + ' invoices'; } }} />
           </>
         )}
 
@@ -238,7 +318,7 @@ const CustomerDetails = () => {
               <Button type="primary" icon={<PlusOutlined />} onClick={function() { history.push('/main/customers/quotes/new?customer=' + id); }}>New Quote</Button>
             </div>
             <Table dataSource={quotes} columns={quoteColumns} rowKey="id" size="small"
-              pagination={{ pageSize: 15, showTotal: function(t) { return t + ' quotes'; } }} />
+              pagination={{ defaultPageSize: 15, showTotal: function(t) { return t + ' quotes'; } }} />
           </>
         )}
 
@@ -256,11 +336,42 @@ const CustomerDetails = () => {
                 render: function(s) { return <Tag color={statusColors[s] || 'default'}>{s}</Tag>; } },
             ]}
             rowKey={function(r) { return r.docType + '-' + r.id; }} size="small"
-            pagination={{ pageSize: 20, showTotal: function(t) { return t + ' transactions'; } }} />
+            pagination={{ defaultPageSize: 20, showTotal: function(t) { return t + ' transactions'; } }} />
         )}
 
         {activeTab === 'payments' && (
-          <CustomerPaymentHistory customerId={id} mode="customer" embedded />
+          <CustomerPaymentHistory customerId={id} mode="customer" embedded onChange={load} />
+        )}
+
+        {activeTab === 'leads' && (
+          <>
+            <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Leads linked to this customer. Leads are managed in CRM → Leads.
+              </Text>
+              <Button type="primary" size="small" icon={<PlusOutlined />}
+                onClick={function() { history.push('/main/customers/leads'); }}>Go to Leads</Button>
+            </div>
+            <Table dataSource={leads} rowKey="id" size="small" pagination={false}
+              locale={{ emptyText: <Empty description="No leads linked to this customer" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+              columns={[
+                { title: 'Lead', dataIndex: 'name', key: 'name',
+                  render: function(v) { return <strong>{v}</strong>; } },
+                { title: 'Stage', dataIndex: 'pipeline_stage', key: 'stage',
+                  render: function(s) {
+                    const colors = { new:'default', contacted:'blue', qualified:'purple', proposal:'orange', negotiation:'magenta', won:'success', lost:'error' };
+                    return <Tag color={colors[s] || 'default'}>{s || '—'}</Tag>;
+                  } },
+                { title: 'Priority', dataIndex: 'priority', key: 'priority',
+                  render: function(p) { return p ? <Tag>{p}</Tag> : '—'; } },
+                { title: 'Deal Value', dataIndex: 'value', key: 'value',
+                  render: function(v) { return <span style={{ color:'#1890ff' }}>{cSym} {Number(v || 0).toFixed(2)}</span>; } },
+                { title: 'Source', dataIndex: 'source', key: 'source', render: function(v) { return v || '—'; } },
+                { title: 'Expected Close', dataIndex: 'expected_close_date', key: 'close',
+                  render: function(d) { return d ? moment(d).format('MM/DD/YYYY') : '—'; } },
+                { title: 'Assigned To', dataIndex: 'assigned_to', key: 'assigned', render: function(v) { return v || '—'; } },
+              ]} />
+          </>
         )}
 
         {activeTab === 'statements' && (
@@ -274,40 +385,34 @@ const CustomerDetails = () => {
                 { title: 'Description', key: 'desc', render: function(_, r) { return 'Invoice ' + (r.number || '#' + r.id); } },
                 { title: 'Amount', dataIndex: 'amount', key: 'amount', render: function(v) { return <span>{cSym} {Number(v || 0).toFixed(2)}</span>; } },
                 { title: 'Status', dataIndex: 'status', key: 'status', render: function(s) { return <Tag color={statusColors[s] || 'default'}>{s}</Tag>; } },
-                { title: 'Balance', key: 'balance', render: function(_, r) { return r.status === 'Paid' ? `${cSym} 0.00` : <span style={{ color: '#f5222d' }}>{cSym} {Number(r.amount || 0).toFixed(2)}</span>; } },
+                { title: 'Paid', key: 'paid', render: function(_, r) {
+                    const p = Number(r.totalPaid || 0);
+                    return p > 0 ? <span style={{ color: '#52c41a' }}>{cSym} {p.toFixed(2)}</span> : <span style={{ color: '#bfbfbf' }}>{cSym} 0.00</span>;
+                  } },
+                { title: 'Balance', key: 'balance', render: function(_, r) {
+                    const b = Number(r.balance != null ? r.balance : r.amount || 0);
+                    return b > 0 ? <span style={{ color: '#f5222d' }}>{cSym} {b.toFixed(2)}</span> : <span style={{ color: '#52c41a' }}>{cSym} 0.00</span>;
+                  } },
               ]}
               rowKey="id" size="small" pagination={false}
               summary={function() { return (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0} colSpan={2}><strong>Total Outstanding</strong></Table.Summary.Cell>
                   <Table.Summary.Cell index={2}><strong>{cSym} {totalReceivables.toFixed(2)}</strong></Table.Summary.Cell>
-                  <Table.Summary.Cell index={3} colSpan={2} />
+                  <Table.Summary.Cell index={3} colSpan={3} />
                 </Table.Summary.Row>
               ); }} />
           </>
         )}
       </div>
+      </Card>
 
-      <Modal title="Edit Customer" visible={editOpen} onOk={handleUpdate} onCancel={() => setEditOpen(false)} okText="Save" width={800}>
+      <Modal title="Edit Customer" visible={editOpen} onOk={handleUpdate} onCancel={() => setEditOpen(false)} okText="Save" width={MODAL_WIDTH} bodyStyle={MODAL_BODY_SCROLL_STYLE}>
         <Form form={form} layout="vertical">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', columnGap: 16 }}>
-            <Form.Item name="display_name" label="Name" rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="company" label="Company"><Input /></Form.Item>
-            <Form.Item name="email" label="Email"><Input type="email" /></Form.Item>
-            <Form.Item name="phone_number" label="Phone"><Input onChange={e => form.setFieldsValue({ phone_number: phoneInputHandler(e.target.value) })} /></Form.Item>
-            <Form.Item name="mobile_number" label="Mobile"><Input onChange={e => form.setFieldsValue({ mobile_number: phoneInputHandler(e.target.value) })} /></Form.Item>
-            <Form.Item name="address1" label="Street Address"><Input placeholder="123 Main St" /></Form.Item>
-            <Form.Item name="address2" label="Address Line 2"><Input placeholder="Apt/Suite" /></Form.Item>
-            <Form.Item name="city" label="City"><Input /></Form.Item>
-            <Form.Item name="state" label="State"><Input /></Form.Item>
-            <Form.Item name="postal_code" label="ZIP"><Input /></Form.Item>
-            <Form.Item name="country" label="Country">
-              <Select showSearch placeholder="Select a country" allowClear optionFilterProp="children">
-                {COUNTRIES.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
-              </Select>
-            </Form.Item>
-            <Form.Item name="notes" label="Notes"><Input.TextArea rows={2} /></Form.Item>
-          </div>
+          <CustomerContactFields form={form}
+            vatRates={vatRates}
+            address1Placeholder="123 Main St" address2Placeholder="Apt/Suite"
+            countryPlaceholder="Select a country" />
         </Form>
       </Modal>
     </div>

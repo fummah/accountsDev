@@ -2,6 +2,10 @@ import React, { useState,forwardRef, useImperativeHandle, useEffect } from 'reac
 import { Button, Col, Select, Drawer, Form, Input, Row, Space,Upload,Dropdown, DatePicker } from 'antd';
 import { InboxOutlined,DownOutlined,IdcardOutlined,GlobalOutlined,EditOutlined,CreditCardOutlined,AuditOutlined,UpOutlined } from '@ant-design/icons';
 import Widget from "components/Widget/index";
+import ContactIdentityNote from "components/shared/ContactIdentityNote";
+import { identityRule } from "utils/contactIdentity";
+import TaxSettingsSection from "components/shared/TaxSettingsSection";
+import { taxRateFormValue, resolveTaxRateFields } from "utils/taxRate";
 import dayjs from 'dayjs';
 
 const { Option } = Select;
@@ -15,12 +19,26 @@ const AddCustomer = forwardRef(({ type,onSaveUser, onUserClose, showDrawer, open
   const [visible5, setVisible5] = useState(true); 
 
   const [form] = Form.useForm();
+  const [vatRates, setVatRates] = useState([]);
+
+  // Load the saved Tax Rates for the Default Tax Rate dropdown.
+  useEffect(() => {
+    let alive = true;
+    window.electronAPI?.getAllVat?.()
+      .then(v => { if (alive) setVatRates(Array.isArray(v) ? v : []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   const handleSave = () => {
     form.validateFields().then(values => {
       if (user) {
         values.id = user.id;
       }
+      // One rule for the tax columns: store the rate ID + percentage snapshot.
+      const tax = resolveTaxRateFields(values, vatRates);
+      values.default_tax_rate = tax.default_tax_rate;
+      values.default_tax_rate_id = tax.default_tax_rate_id;
       onSaveUser(values); 
     }).catch(info => {
       setMessage('Please complete the fields');
@@ -37,12 +55,27 @@ const AddCustomer = forwardRef(({ type,onSaveUser, onUserClose, showDrawer, open
 
 useEffect(() => {
   if (user && typeof user === 'object' && !Array.isArray(user)) {
-    user.as_of = null;
-    form.setFieldsValue(user); // Prepopulate form fields if editing
+    const u = { ...user, as_of: null };
+    form.setFieldsValue({
+      ...u,
+      // taxable is stored as INTEGER (0/1); the Select expects a boolean.
+      taxable: u.taxable != null ? !!Number(u.taxable) : true,
+      // Prefer the stored id; fall back to a unique legacy percentage match.
+      default_tax_rate_id: taxRateFormValue(u, vatRates),
+    });
   } else {
     form.resetFields(); // Clear form for adding a new user
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [user, form]);
+
+// Re-resolve the selected rate once the saved rates finish loading.
+useEffect(() => {
+  if (user && typeof user === 'object' && !Array.isArray(user)) {
+    form.setFieldsValue({ default_tax_rate_id: taxRateFormValue(user, vatRates) });
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [vatRates]);
 
   const toggleVisibility1 = () => {
     setVisible1(!visible1);
@@ -161,7 +194,7 @@ useEffect(() => {
               </Form.Item>
               </Col>
               <Col span={6}>
-              <Form.Item name="first_name" label="First Name" rules={[{ required: true, message: 'First Name', },]}>
+              <Form.Item name="first_name" label="First Name" rules={identityRule(form)}>
                    <Input/> 
               </Form.Item>
               </Col>
@@ -171,7 +204,7 @@ useEffect(() => {
               </Form.Item>
               </Col>
               <Col span={6}>
-              <Form.Item name="last_name" label="Last Name" rules={[{ required: true, message: 'Last Name', },]}>
+              <Form.Item name="last_name" label="Last Name">
                    <Input/> 
               </Form.Item>
               </Col>            
@@ -184,7 +217,7 @@ useEffect(() => {
 
               <Row gutter={16}>           
             <Col span={12}>
-              <Form.Item name="display_name" label="Display Name" rules={[{ required: true, message: 'Enter Display Name', },]}>
+              <Form.Item name="display_name" label="Display Name">
                    <Input placeholder="Enter Display Name" /> 
               </Form.Item>
               </Col>
@@ -194,6 +227,9 @@ useEffect(() => {
               </Form.Item>
               </Col>
               </Row>
+              {/* Neither First Name nor Company Name is required alone — the
+                  requirement is the pair, so it is a note rather than a `*`. */}
+              <ContactIdentityNote />
 
               <Row gutter={16}>           
             <Col span={12}>
@@ -489,6 +525,7 @@ useEffect(() => {
               </Form.Item>
               </Col>
               </Row>
+              <TaxSettingsSection vatRates={vatRates} form={form} />
               </>
         )}
               </Widget>

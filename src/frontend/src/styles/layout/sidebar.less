@@ -3,6 +3,113 @@
   .transition(all 0.2s ease);
 }
 
+/* Force all sidebar menu text white (normal, hover, active, selected, submenu, popups).
+   Uses !important so the dynamically-loaded theme CSS (public/css/*.min.css) cannot override. */
+.@{class-prefix}-app-sidebar,
+.@{class-prefix}-drawer-sidebar {
+  & .ant-menu-dark,
+  & .ant-menu {
+    color: @white-color !important;
+
+    & .ant-menu-item,
+    & .ant-menu-item > a,
+    & .ant-menu-submenu-title,
+    & .ant-menu-submenu-title > span,
+    & .ant-menu-submenu-title > a,
+    & .ant-menu-item-group-title {
+      color: @white-color !important;
+
+      &:hover {
+        color: @white-color !important;
+      }
+    }
+
+    & .ant-menu-item > a:hover {
+      color: @white-color !important;
+    }
+
+    & .ant-menu-item:hover,
+    & .ant-menu-item-active,
+    & .ant-menu-item-selected,
+    & .ant-menu-item-selected > a,
+    & .ant-menu-item-selected > a:hover,
+    & .ant-menu-submenu-active > .ant-menu-submenu-title,
+    & .ant-menu-submenu-open > .ant-menu-submenu-title,
+    & .ant-menu-submenu-selected > .ant-menu-submenu-title,
+    & .ant-menu-submenu-title:hover {
+      color: @menu-active-color !important;
+    }
+
+    & .ant-menu-item-selected .ant-menu-submenu-arrow:before,
+    & .ant-menu-item-selected .ant-menu-submenu-arrow:after,
+    & .ant-menu-submenu-active > .ant-menu-submenu-title .ant-menu-submenu-arrow:before,
+    & .ant-menu-submenu-active > .ant-menu-submenu-title .ant-menu-submenu-arrow:after,
+    & .ant-menu-submenu-open > .ant-menu-submenu-title .ant-menu-submenu-arrow:before,
+    & .ant-menu-submenu-open > .ant-menu-submenu-title .ant-menu-submenu-arrow:after,
+    & .ant-menu-submenu-selected > .ant-menu-submenu-title .ant-menu-submenu-arrow:before,
+    & .ant-menu-submenu-selected > .ant-menu-submenu-title .ant-menu-submenu-arrow:after,
+    & .ant-menu-submenu-title:hover .ant-menu-submenu-arrow:before,
+    & .ant-menu-submenu-title:hover .ant-menu-submenu-arrow:after {
+      background: @nav-dark-text-color !important;
+    }
+  }
+}
+
+/* Submenu popups are rendered in the body (not inside the sidebar) */
+.ant-menu-submenu-popup.ant-menu-dark,
+.ant-menu-submenu-popup.ant-menu-dark .ant-menu {
+  color: @white-color !important;
+
+  & .ant-menu-item,
+  & .ant-menu-item > a,
+  & .ant-menu-submenu-title,
+  & .ant-menu-submenu-title > span,
+  & .ant-menu-submenu-title > a,
+  & .ant-menu-item-group-title {
+    color: @white-color !important;
+
+    &:hover {
+      color: @white-color !important;
+    }
+  }
+
+  & .ant-menu-item:hover,
+  & .ant-menu-item-active,
+  & .ant-menu-item-selected,
+  & .ant-menu-item-selected > a,
+  & .ant-menu-submenu-active > .ant-menu-submenu-title,
+  & .ant-menu-submenu-open > .ant-menu-submenu-title,
+  & .ant-menu-submenu-selected > .ant-menu-submenu-title,
+  & .ant-menu-submenu-title:hover {
+    color: @menu-active-color !important;
+  }
+
+  & .ant-menu-item-selected .ant-menu-submenu-arrow:before,
+  & .ant-menu-item-selected .ant-menu-submenu-arrow:after,
+  & .ant-menu-submenu-active > .ant-menu-submenu-title .ant-menu-submenu-arrow:before,
+  & .ant-menu-submenu-active > .ant-menu-submenu-title .ant-menu-submenu-arrow:after,
+  & .ant-menu-submenu-open > .ant-menu-submenu-title .ant-menu-submenu-arrow:before,
+  & .ant-menu-submenu-open > .ant-menu-submenu-title .ant-menu-submenu-arrow:after,
+  & .ant-menu-submenu-selected > .ant-menu-submenu-title .ant-menu-submenu-arrow:before,
+  & .ant-menu-submenu-selected > .ant-menu-submenu-title .ant-menu-submenu-arrow:after,
+  & .ant-menu-submenu-title:hover .ant-menu-submenu-arrow:before,
+  & .ant-menu-submenu-title:hover .ant-menu-submenu-arrow:after {
+    background: @nav-dark-text-color !important;
+  }
+}
+
+/* Keep the dark navy sidebar background so stale theme CSS can't grey it out */
+.@{class-prefix}-layout-sider-dark,
+.@{class-prefix}-drawer-sidebar-dark {
+  background-color: @nav-dark-bg !important;
+}
+
+/* Selected item keeps a subtle lighter background so it still stands out */
+.@{class-prefix}-app-sidebar .ant-menu-dark .ant-menu-item-selected,
+.@{class-prefix}-drawer-sidebar .ant-menu-dark .ant-menu-item-selected {
+  background-color: lighten(@nav-dark-bg, 10%) !important;
+}
+
 .ant-layout-sider {
   background-color: @nav-bar-bg;
   color: @nav-bar-text-color;

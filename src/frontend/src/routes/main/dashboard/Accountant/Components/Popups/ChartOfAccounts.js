@@ -12,6 +12,7 @@ import {
   Tag
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../../../../../utils/currency';
 
 const { Option } = Select;
 const { Title } = Typography;
@@ -19,6 +20,7 @@ const { Title } = Typography;
 
 
 const ChartOfAccounts = () => {
+  const { symbol: cSym } = useCurrency();
   const [accounts, setAccounts] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [form] = Form.useForm();
@@ -104,7 +106,7 @@ const ChartOfAccounts = () => {
       title: 'Balance',
       dataIndex: 'balance',
       key: 'balance',
-      render: (text) => `$ ${text.toFixed(2)}`
+      render: (text) => `${cSym} ${text.toFixed(2)}`
     },
     {
       title: 'Status',
@@ -128,7 +130,7 @@ const ChartOfAccounts = () => {
         columns={columns}
         dataSource={accounts}
         style={{ marginTop: 24 }}
-        pagination={{ pageSize: 6 }}
+        pagination={{ defaultPageSize: 6 }}
         loading={loading}
       />
 

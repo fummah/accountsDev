@@ -57,6 +57,27 @@ const Documents = {
     const stmt = db.prepare('DELETE FROM documents WHERE id = ?');
     return stmt.run(id);
   },
+
+  // Cascade-delete every attachment linked to a deleted parent record
+  // (category + linked_id), unlinking the physical file from disk too so
+  // orphaned files never accumulate in the attachments directory.
+  deleteByLinked: (category, linkedId) => {
+    try {
+      const fs = require('fs');
+      const FileStorage = require('../services/fileStorage');
+      const rows = db.prepare('SELECT id, file_path, random_number FROM documents WHERE category = ? AND linked_id = ?').all(category, Number(linkedId) || 0);
+      for (const r of rows) {
+        const filePath = FileStorage.resolveAttachmentPath(r.file_path || r.random_number);
+        if (filePath) {
+          try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+        }
+        try { db.prepare('DELETE FROM documents WHERE id = ?').run(r.id); } catch {}
+      }
+      return { success: true, removed: rows.length };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  },
 };
 
 // Ensure the Documents table is created

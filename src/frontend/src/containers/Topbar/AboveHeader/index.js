@@ -79,14 +79,6 @@ const AboveHeader = () => {
       <div className="gx-header-horizontal-top">
         <div className="gx-container">
           <div className="gx-header-horizontal-top-flex">
-            <div className="gx-header-horizontal-top-left">
-              <i className="icon icon-alert gx-mr-3"/>
-              <p className="gx-mb-0 gx-text-truncate"><IntlMessages id="app.announced"/></p>
-            </div>
-            <ul className="gx-login-list">
-              <li><IntlMessages id="app.userAuth.login"/></li>
-              <li><IntlMessages id="app.userAuth.signUp"/></li>
-            </ul>
           </div>
         </div>
       </div>

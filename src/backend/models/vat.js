@@ -59,16 +59,23 @@ const Vat = {
     }
   },
   deleteRecord : async (id,table) => {
-    
     try {
-      // dleleting record
-      await db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(
-        [
-          id,
-        ]
-      );
-  
-      return { success: true, message: 'Record successfully deleted successfully.' };
+      // Journal entries live in journal_entries/journal_lines (not `journal`),
+      // and their lines must be deleted too.
+      if (String(table).toLowerCase() === 'journal') {
+        const db2 = require('./dbmgr');
+        db2.prepare(`DELETE FROM journal_lines WHERE journal_id = ? OR entry_id = ?`).run(id, id);
+        const res = db2.prepare(`DELETE FROM journal_entries WHERE id = ?`).run(id);
+        return { success: res.changes > 0, message: res.changes > 0 ? 'Record successfully deleted successfully.' : 'No record found.' };
+      }
+      // Whitelist of allowed tables to prevent SQL injection via the table name.
+      const allowed = new Set(['vat', 'vat_rates', 'customers', 'suppliers', 'invoices', 'expenses', 'payments', 'transactions', 'items', 'products', 'journal_entries', 'chart_of_accounts']);
+      const tbl = String(table).toLowerCase();
+      if (!allowed.has(tbl)) {
+        return { success: false, error: `Table "${table}" is not allowed for deletion` };
+      }
+      const res = await db.prepare(`DELETE FROM ${tbl} WHERE id = ?`).run(id);
+      return { success: res.changes > 0, message: res.changes > 0 ? 'Record successfully deleted successfully.' : 'No record found.' };
     } catch (error) {
       console.error('Error deleting record:', error);
       throw error;

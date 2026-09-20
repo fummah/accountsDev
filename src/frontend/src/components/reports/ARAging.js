@@ -62,7 +62,7 @@ const ARAging = () => {
         <Col span={4}><Card><Statistic title="Total" value={data.summary.total || 0} precision={2} prefix={cSym} /></Card></Col>
       </Row>
       <Card>
-        <Table columns={columns} dataSource={rows} loading={loading} pagination={{ pageSize: 20 }} />
+        <Table columns={columns} dataSource={rows} loading={loading} pagination={{ defaultPageSize: 20 }} />
       </Card>
     </div>
   );

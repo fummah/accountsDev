@@ -12,12 +12,18 @@ const DEFAULT_SETTINGS = {
   // Branding
   logoBase64: '',
   primaryColor: '#2962FF',
+  topBorderColor: '#2962FF',
+  headingColor: '#2962FF',
   accentColor: '#f5f7fa',
   // Typography
   fontFamily: 'helvetica',
   headerFontSize: 18,
   bodyFontSize: 9,
-  // Layout
+  titleAlign: 'right',
+  // Layout / Topology
+  headerLayout: 'side',
+  cardStyle: 'cards',
+  tableStyle: 'striped',
   showLogo: true,
   showCompanyAddress: true,
   showCustomerEmail: true,
@@ -31,9 +37,9 @@ const DEFAULT_SETTINGS = {
   footerText: 'Thank you for your business!',
   paymentInstructions: '',
   termsAndConditions: '',
-  // Custom labels
+  // Custom labels (invoice-specific)
   invoiceLabel: 'INVOICE',
-  quoteLabel: 'QUOTE',
+  invoiceNoLabel: 'INVOICE #',
   billToLabel: 'BILL TO',
   dateLabel: 'DATE',
   dueDateLabel: 'DUE DATE',
@@ -105,7 +111,7 @@ const InvoiceCustomization = () => {
       docType: 'Invoice',
       header: {
         number: 'SAMPLE-001',
-        status: 'Unpaid',
+        status: 'Open',
         date: new Date().toLocaleDateString(),
         dueDate: new Date(Date.now() + 30 * 86400000).toLocaleDateString(),
         terms: 'Net 30',
@@ -195,7 +201,15 @@ const InvoiceCustomization = () => {
                   <Form.Item name="primaryColor" label="Primary Color (Header/Accents)">
                     <Input type="color" style={{ width: 80, height: 36 }} />
                   </Form.Item>
-                  <Form.Item name="accentColor" label="Alternate Row Color">
+                  <Form.Item name="accentColor" label="Alternate Row / Table Head Color">
+                    <Input type="color" style={{ width: 80, height: 36 }} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="topBorderColor" label="Top Border Color">
+                    <Input type="color" style={{ width: 80, height: 36 }} />
+                  </Form.Item>
+                  <Form.Item name="headingColor" label="Heading Color (BILL TO / section titles)">
                     <Input type="color" style={{ width: 80, height: 36 }} />
                   </Form.Item>
                 </Col>
@@ -229,6 +243,15 @@ const InvoiceCustomization = () => {
                     </Select>
                   </Form.Item>
                 </Col>
+                <Col span={8}>
+                  <Form.Item name="titleAlign" label="Title Alignment">
+                    <Select>
+                      <Option value="right">Right (default)</Option>
+                      <Option value="left">Left</Option>
+                      <Option value="center">Center</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
               </Row>
             </Card>
             </Form>
@@ -237,6 +260,33 @@ const InvoiceCustomization = () => {
           <TabPane tab="Layout & Columns" key="3">
             <Form form={form} layout="vertical">
             <Card size="small">
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item name="headerLayout" label="Header Layout">
+                    <Select>
+                      <Option value="side">Company left, title right (default)</Option>
+                      <Option value="stacked">Company centered, title below</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="cardStyle" label="Address Card Style">
+                    <Select>
+                      <Option value="cards">Cards with border (default)</Option>
+                      <Option value="plain">Plain text (no boxes)</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="tableStyle" label="Line Table Style">
+                    <Select>
+                      <Option value="striped">Striped (default)</Option>
+                      <Option value="bordered">Bordered</Option>
+                      <Option value="minimal">Minimal</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
               <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item name="showCompanyAddress" label="Show Company Address" valuePropName="checked"><Switch /></Form.Item>
@@ -272,7 +322,7 @@ const InvoiceCustomization = () => {
             <Card size="small">
               <Row gutter={16}>
                 <Col span={8}><Form.Item name="invoiceLabel" label="Invoice Title"><Input /></Form.Item></Col>
-                <Col span={8}><Form.Item name="quoteLabel" label="Quote Title"><Input /></Form.Item></Col>
+                <Col span={8}><Form.Item name="invoiceNoLabel" label="Invoice Number Label"><Input /></Form.Item></Col>
                 <Col span={8}><Form.Item name="billToLabel" label="Bill To Label"><Input /></Form.Item></Col>
               </Row>
               <Row gutter={16}>

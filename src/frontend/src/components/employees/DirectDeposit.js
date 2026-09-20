@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, Select, Input, message, Tag, Space, Tabs } from 'antd';
 import { BankOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 const { TabPane } = Tabs;
 
 const DirectDeposit = () => {
+  const { symbol: cSym } = useCurrency();
   const [files, setFiles] = useState([]);
   const [payrollRuns, setPayrollRuns] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -72,7 +74,7 @@ const DirectDeposit = () => {
     { title: 'Format', dataIndex: 'file_format', key: 'file_format', render: v => <Tag color="blue">{v}</Tag> },
     { title: 'Payroll Run', dataIndex: 'payroll_run_id', key: 'payroll_run_id' },
     { title: 'Records', dataIndex: 'record_count', key: 'record_count' },
-    { title: 'Total', dataIndex: 'total_amount', key: 'total_amount', render: v => `$${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}` },
+    { title: 'Total', dataIndex: 'total_amount', key: 'total_amount', render: v => `${cSym}${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}` },
     { title: 'Status', dataIndex: 'status', key: 'status', render: v => <Tag color={v === 'Submitted' ? 'green' : 'orange'}>{v}</Tag> },
     { title: 'Created', dataIndex: 'created_at', key: 'created_at', render: v => v ? new Date(v).toLocaleDateString() : '' },
     {

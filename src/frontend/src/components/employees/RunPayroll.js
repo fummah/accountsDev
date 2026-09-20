@@ -246,7 +246,7 @@ const RunPayroll = () => {
 
       <Card title="Recent Payroll Runs" style={{ marginTop: 16 }} size="small">
         <Table columns={recordColumns} dataSource={payrollRecords} rowKey="id"
-          pagination={{ pageSize: 10, showSizeChanger: true }} size="small" />
+          pagination={{ defaultPageSize: 10, showSizeChanger: true }} size="small" />
       </Card>
     </div>
   );

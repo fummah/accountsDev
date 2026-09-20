@@ -1,5 +1,6 @@
-const { app, BrowserWindow, Menu, ipcMain, protocol, dialog } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, protocol, dialog, shell } = require('electron');
 const path = require('path');
+const ExternalLinks = require('./services/externalLinks');
 const registerIpcHandlers = require('./handlers/ipcHandlers');
 const registerEmployeeHandlers = require('./handlers/employeeHandlers');
 const registerPayrollHandlers = require('./handlers/payrollHandlers');
@@ -21,54 +22,92 @@ const registerBackupHandlers = require('./handlers/backupHandlers');
 const registerCloudSyncHandlers = require('./handlers/cloudSyncHandlers');
 const registerSyncHandlers = require('./handlers/syncHandlers');
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      enableRemoteModule: false,
-    },
-  });
+const devUrlBase = () => (process.env.ELECTRON_START_URL || 'http://localhost:3000').replace(/\/$/, '');
+const buildRoot = path.join(__dirname, '..', 'frontend', 'build');
+const localIndex = path.join(buildRoot, 'index.html');
 
-  const devUrl = process.env.ELECTRON_START_URL || 'http://localhost:3000';
-  const buildRoot = path.join(__dirname, '..', 'frontend', 'build');
-  const localIndex = path.join(buildRoot, 'index.html');
+// Application icon — the multi-resolution .ico packaged under assets/.
+// app.getAppPath() is the project root in development and the asar root when
+// packaged, so this resolves identically in both.
+const appIconPath = () => path.join(app.getAppPath(), 'assets', 'icon.ico');
 
-  // In production, rewrite file:// absolute paths (/assets, /static, /css, /loader.css) to the build folder
+// Windows: match the packaged appId so the taskbar/Start menu group the app
+// under its own icon (executable icon, window icon and AUMID all agree).
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.tendai.myapp');
+}
+
+// ── Window lifecycle state ──────────────────────────────────────────────
+// The application main window keeps a dedicated stable reference. Every
+// secondary window (New Window, print/preview, etc.) is tracked independently
+// so it can never overwrite mainWindow or be reused after it is destroyed.
+let mainWindow = null;
+const childWindows = new Set();
+
+// In production, rewrite file:// absolute paths (/assets, /static, /css, /loader.css) to the build folder
+function registerProtocols() {
+  if (!app.isPackaged) return;
+  try {
+    protocol.interceptFileProtocol('file', (request, callback) => {
+      try {
+        const url = new URL(request.url);
+        const p = url.pathname || '';
+        const mapPrefix = (prefix) => path.join(buildRoot, prefix, p.replace(new RegExp(`^/${prefix}/`), ''));
+        if (p === '/loader.css') {
+          return callback({ path: path.join(buildRoot, 'loader.css') });
+        }
+        if (p.startsWith('/assets/')) {
+          return callback({ path: mapPrefix('assets') });
+        }
+        if (p.startsWith('/static/')) {
+          return callback({ path: mapPrefix('static') });
+        }
+        if (p.startsWith('/css/')) {
+          return callback({ path: mapPrefix('css') });
+        }
+        if (p === '/favicon.ico' || p === '/favicon1.ico') {
+          return callback({ path: path.join(buildRoot, p.replace(/^\//, '')) });
+        }
+        return callback(decodeURIComponent(url.pathname));
+      } catch (e) {
+        return callback(request.url);
+      }
+    });
+  } catch (e) {
+    console.error('Failed to intercept file protocol:', e);
+  }
+}
+
+// Resolve a valid window at call time. Never return a destroyed BrowserWindow.
+function getValidNavigationWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
+  const openWindows = BrowserWindow.getAllWindows().filter(win => !win.isDestroyed());
+  return openWindows[0] || null;
+}
+
+// Navigate the intended application window. Menu navigation always targets the
+// main window when available (never a print/preview popup); otherwise it falls
+// back to the first valid window.
+function navigateTo(routePath) {
+  const target = getValidNavigationWindow();
+  if (!target) {
+    console.error('navigateTo: No valid BrowserWindow available');
+    return;
+  }
+  const normalized = routePath && routePath.startsWith('/') ? routePath : `/${routePath || ''}`;
   if (app.isPackaged) {
     try {
-      protocol.interceptFileProtocol('file', (request, callback) => {
-        try {
-          const url = new URL(request.url);
-          const p = url.pathname || '';
-          const mapPrefix = (prefix) => path.join(buildRoot, prefix, p.replace(new RegExp(`^/${prefix}/`), ''));
-          if (p === '/loader.css') {
-            return callback({ path: path.join(buildRoot, 'loader.css') });
-          }
-          if (p.startsWith('/assets/')) {
-            return callback({ path: mapPrefix('assets') });
-          }
-          if (p.startsWith('/static/')) {
-            return callback({ path: mapPrefix('static') });
-          }
-          if (p.startsWith('/css/')) {
-            return callback({ path: mapPrefix('css') });
-          }
-          if (p === '/favicon.ico' || p === '/favicon1.ico') {
-            return callback({ path: path.join(buildRoot, p.replace(/^\//, '')) });
-          }
-          return callback(decodeURIComponent(url.pathname));
-        } catch (e) {
-          return callback(request.url);
-        }
-      });
+      target.webContents.send('navigate', normalized);
     } catch (e) {
-      console.error('Failed to intercept file protocol:', e);
+      console.error('navigateTo: webContents.send failed:', e.message);
     }
+  } else {
+    const base = devUrlBase();
+    target.loadURL(`${base}/#${normalized}`).catch(err => console.error('navigateTo: loadURL failed:', err));
   }
+}
 
+function attachWindowHandlers(win) {
   const loadRenderer = async () => {
     if (app.isPackaged) {
       // Always use local build in production
@@ -77,10 +116,10 @@ function createWindow() {
     }
     // In development try dev server then fall back to local build
     try {
-      await win.loadURL(devUrl);
-      console.log(`Loaded URL: ${devUrl}`);
+      await win.loadURL(devUrlBase());
+      console.log(`Loaded URL: ${devUrlBase()}`);
     } catch (err) {
-      console.error(`Error loading ${devUrl}:`, err);
+      console.error(`Error loading ${devUrlBase()}:`, err);
       try {
         await win.loadFile(localIndex);
         console.log(`Loaded local index at ${localIndex}`);
@@ -93,8 +132,41 @@ function createWindow() {
   // Attach basic load-failure handling and then attempt initial load.
   win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
     console.error('Renderer failed to load URL', { errorCode, errorDescription, validatedURL });
-    // try fallback if dev URL failed
-    win.loadFile(localIndex).catch(err => console.error('Fallback loadFile failed:', err));
+    if (!win.isDestroyed()) {
+      win.loadFile(localIndex).catch(err => console.error('Fallback loadFile failed:', err));
+    }
+  });
+
+  // ── External links ────────────────────────────────────────────────────
+  // Without these two handlers, clicking an email address or a documentation
+  // link inside the app does the wrong thing: a `mailto:` link starts an
+  // in-page navigation that fails (and the did-fail-load handler above then
+  // RELOADS THE WHOLE APP), and a `target="_blank"` http link opens a bare
+  // Electron window with no preload. Both should reach the OS instead.
+  //
+  // The decision lives in services/externalLinks.js so it can be tested. The
+  // critical case is `window.open('', '_blank')`, which every print feature
+  // uses — classifyNavigation() returns 'allow' for it, so printing is
+  // untouched. Do not make this handler deny by default.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (ExternalLinks.classifyNavigation(url, win.webContents.getURL()) === 'external') {
+      shell.openExternal(url).catch((err) => console.error('openExternal failed:', err));
+      return { action: 'deny' };
+    }
+    // 'allow' — this is how the print windows (window.open('', '_blank')) work.
+    return { action: 'allow' };
+  });
+
+  win.webContents.on('will-navigate', (event, url) => {
+    const verdict = ExternalLinks.classifyNavigation(url, win.webContents.getURL());
+    if (verdict === 'external') {
+      event.preventDefault();
+      shell.openExternal(url).catch((err) => console.error('openExternal failed:', err));
+    } else if (verdict === 'block') {
+      // Unknown scheme (javascript:, etc.) — refuse without telling the OS.
+      event.preventDefault();
+    }
+    // 'allow' falls through to normal navigation.
   });
 
   win.webContents.on('did-finish-load', () => {
@@ -102,10 +174,25 @@ function createWindow() {
   });
 
   loadRenderer();
+}
 
-  // Ask for confirmation before closing
-  win.on('close', (e) => {
-    const choice = dialog.showMessageBoxSync(win, {
+function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    icon: appIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      enableRemoteModule: false,
+    },
+  });
+
+  attachWindowHandlers(mainWindow);
+
+  // Ask for confirmation before closing the main window
+  mainWindow.on('close', (e) => {
+    const choice = dialog.showMessageBoxSync(mainWindow, {
       type: 'question',
       buttons: ['Yes', 'No'],
       defaultId: 1,
@@ -117,24 +204,46 @@ function createWindow() {
     }
   });
 
-  // Helper to navigate consistently in dev and production (hash routing in dev too)
-  const navigateTo = (routePath) => {
-    if (!win) return;
-    const normalized = routePath && routePath.startsWith('/') ? routePath : `/${routePath || ''}`;
-    if (app.isPackaged) {
-      win.webContents.send('navigate', normalized);
-    } else {
-      const base = (process.env.ELECTRON_START_URL || devUrl || 'http://localhost:3000').replace(/\/$/, '');
-      win.loadURL(`${base}/#${normalized}`);
-    }
-  };
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 
+  return mainWindow;
+}
+
+function createChildWindow() {
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    icon: appIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      enableRemoteModule: false,
+    },
+  });
+
+  childWindows.add(win);
+  attachWindowHandlers(win);
+
+  win.on('closed', () => {
+    childWindows.delete(win);
+  });
+
+  return win;
+}
+
+function createWindow() {
+  return createMainWindow();
+}
+
+function buildApplicationMenu() {
   const menuTemplate = [
     // 🟦 Classic Menus
     {
       label: 'File',
       submenu: [
-        { label: 'New Window', click: () => { createWindow(); } },
+        { label: 'New Window', click: () => { createChildWindow(); } },
         { type: 'separator' },
         { label: 'Open File...' },
         { label: 'Save' },
@@ -288,7 +397,7 @@ function createWindow() {
           submenu: [
             { label: 'Vendor Center', click: () => { navigateTo('/main/vendors/list'); }  },
             { type: 'separator' },
-            { label: 'Bill Tracker', click: () => { navigateTo('/main/vendors/bills/tracker'); } },
+            { label: 'Bill Management', click: () => { navigateTo('/main/vendors/bills/tracker'); } },
             { label: 'Enter Bills', click: () => { navigateTo('/main/vendors/bills/new'); } },
             { label: 'Pay Bills', click: () => { navigateTo('/main/vendors/bills/pay'); }},
             { type: 'separator' },
@@ -329,10 +438,8 @@ function createWindow() {
       label: 'Expense Tracking',
       submenu: [
         { label: 'Bill Management', click: () => { navigateTo('/main/vendors/bills/tracker'); } },
-        { label: 'Expense Tracking', click: () => { navigateTo('/main/expenses/tracking'); } },
         { type: 'separator' },
-        { label: 'Credit Card Charges', click: () => { navigateTo('/main/expenses/credit-cards'); } },
-        { label: 'Transactions', click: () => { navigateTo('/main/expenses/transactions'); } }
+        { label: 'Credit Card Charges', click: () => { navigateTo('/main/expenses/credit-cards'); } }
       ]
     },
 
@@ -435,24 +542,20 @@ function createWindow() {
 
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
-
-  // Fallback listener for UI navigation requests from preload
-  ipcMain.on('open-payroll-calendar', () => {
-    if (!win) return;
-    if (app.isPackaged) {
-      win.webContents.send('navigate', '/main/banking/payroll-calendar');
-    } else {
-      const base = (process.env.ELECTRON_START_URL || devUrl || 'http://localhost:3000').replace(/\/$/, '');
-      win.loadURL(`${base}/#/main/banking/payroll-calendar`);
-    }
-  });
 }
+
+// Fallback listener for UI navigation requests from preload (registered once,
+// resolves a valid window at call time)
+ipcMain.on('open-payroll-calendar', () => {
+  navigateTo('/main/banking/payroll-calendar');
+});
 
 const registerAllHandlers = async () => {
   const handlers = [
     { name: 'Auth', register: registerAuthHandlers },
     { name: 'Backup', register: registerBackupHandlers },
     { name: 'Invoice', register: registerInvoiceHandlers },      // Register first as others might depend on it
+    { name: 'Quote', register: require('./handlers/quoteHandlers') },
     { name: 'Tax', register: registerTaxHandlers },
     { name: 'Banking', register: registerBankingHandlers },
     { name: 'Transaction', register: registerTransactionHandlers },
@@ -507,8 +610,10 @@ const registerAllHandlers = async () => {
 
 app.whenReady().then(async () => {
   try {
+    registerProtocols();
     await registerAllHandlers();
     createWindow();
+    buildApplicationMenu();
   } catch (error) {
     console.error('Error during app initialization:', error);
   }

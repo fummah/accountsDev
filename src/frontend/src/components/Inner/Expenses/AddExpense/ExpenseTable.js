@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Input, Button, InputNumber, Select, Typography, Divider } from 'antd';
 import { DeleteOutlined, UploadOutlined } from '@ant-design/icons';
+import { useCurrency } from '../../../../utils/currency';
 
 const { Text } = Typography;
 const { Option } = Select;
 
 const ExpenseTable = ({expense, setLines,cats,onSubtotalChange, initialLines=[]}) => {
+  const { symbol: cSym } = useCurrency();
   const [dataSource, setDataSource] = useState([]);
   const [total, setTotal] = useState(0);
   const [hasMergedInitialLines, setHasMergedInitialLines] = useState(false);
@@ -206,11 +208,11 @@ const ExpenseTable = ({expense, setLines,cats,onSubtotalChange, initialLines=[]}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Text>Subtotal</Text>
-        <Text>R{subtotal.toFixed(2)}</Text>
+        <Text>{cSym}{subtotal.toFixed(2)}</Text>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
         <Text>Total</Text>
-        <Text><Text>${total}</Text></Text>
+        <Text><Text>{cSym}{total}</Text></Text>
       </div>
 
       <Divider />

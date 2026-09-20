@@ -1,5 +1,57 @@
 // src/backend/models/Invoices.js
 const db = require('./dbmgr.js');
+const { getInvoiceFinancials, recalcInvoiceFinancials } = require('../services/invoiceFinancials');
+const { INVOICE_STATUS, isInvoiceDocumentState, isFinanciallyEffective } = require('../services/documentStatus');
+const { getExpectedNormalBalance, normalizeNormalBalance } = require('../services/normalBalance');
+
+/**
+ * The inventory lines of an invoice, in the shape
+ * services/documentInventory.js expects.
+ *
+ * Read back from the DATABASE rather than from the caller's array, so the stock
+ * reconciliation always sees exactly what was persisted — which matters most on
+ * an edit, where the lines have just been deleted and re-inserted.
+ *
+ * Two deliberate differences from the bill equivalent:
+ *
+ *  • The filter is the CLASSIFICATION of the product, not a `line_type` column.
+ *    `invoice_lines` has no line-type column, and an invoice line for a Service
+ *    product must never move stock — so the rule is `tracksInventory(type)`,
+ *    the same one the renderer uses. This also fails safe: an unknown product
+ *    type is NOT inventory, so a mystery row cannot silently empty a shelf.
+ *
+ *  • `unitCost` is deliberately NULL. On a bill the line rate is a purchase
+ *    cost; here it is a SELLING price, and recording it as a cost would quietly
+ *    invent a margin. Decision D1 defers valuation anyway — the GL uses the line
+ *    amount, and the movement records no cost for an issue.
+ *
+ * The warehouse is left unset: `invoice_lines` has no warehouse column, so the
+ * reconciler places every line in the default warehouse.
+ */
+const readInvoiceItemLines = (invoiceId) => {
+  let rows = [];
+  try {
+    rows = db.prepare(
+      `SELECT id, product, description, quantity, rate, amount
+         FROM invoice_lines WHERE invoice_id = ? ORDER BY id`
+    ).all(Number(invoiceId));
+  } catch { return []; }
+
+  const Classification = require('../services/productClassification');
+  const lines = [];
+  for (const r of rows) {
+    const prod = db.prepare('SELECT id, type FROM products WHERE id = ?').get(Number(r.product));
+    if (!prod || !Classification.tracksInventory(prod.type)) continue;
+    lines.push({
+      lineId: r.id,
+      productId: r.product,
+      quantity: r.quantity,
+      warehouseId: null, // invoice_lines has no warehouse — use the default
+      unitCost: null,    // a selling price is not a cost (D1)
+    });
+  }
+  return lines;
+};
 
 const Invoices = {
   // Create the Invoices table if it doesn't exist
@@ -28,6 +80,11 @@ const Invoices = {
       )
     `;
     db.prepare(stmt).run();
+    // Best-effort DB-level uniqueness on invoice numbers. Silently skipped if
+    // legacy data already contains duplicates (model-level guards still apply).
+    try {
+      db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number_unique ON invoices(number) WHERE number IS NOT NULL AND number != \'\'').run();
+    } catch (e) { /* leave enforcement to the model guards */ }
     // Migration: ensure additional columns exist on older DBs
     try {
       const colInfo = db.prepare("PRAGMA table_info(invoices)").all();
@@ -87,26 +144,62 @@ const Invoices = {
   }, 
   
   // Insert a new Invoices
+  //
+  // `status` is accepted for backward compatibility but is NOT authoritative:
+  // the only values honoured are document lifecycle states (Draft / Void /
+  // Cancelled) chosen through explicit actions. Any financial status supplied by
+  // a caller (Paid / Open / Pending …) is ignored — the stored status is derived
+  // from the invoice total and the (empty) payment history right after insert.
   insertInvoice: (customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines) => {
     try {
-    const stmt = db.prepare('INSERT INTO invoices (customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by, vat, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    const result = stmt.run(
-      Number(customer) || 0,
-      String(customer_email || ''),
-      islater ? 1 : 0,
-      String(billing_address || ''),
-      String(terms || ''),
-      String(start_date || ''),
-      String(last_date || ''),
-      String(message || ''),
-      String(statement_message || ''),
-      String(number || ''),
-      entered_by != null ? String(entered_by) : null,
-      Number(vat) || 0,
-      String(status || 'Draft')
-    );
+    // Invoice numbers must be unique; reject duplicates before the insert.
+    if (number && String(number).trim() !== '') {
+      const dup = db.prepare('SELECT id FROM invoices WHERE number = ? AND id != 0 LIMIT 1').get(String(number).trim());
+      if (dup) {
+        return { success: false, error: `Invoice number "${number}" already exists (invoice #${dup.id}). Invoice numbers must be unique.` };
+      }
+    }
+    const requestedStatus = String(status || '').trim();
+    const initialStatus = isInvoiceDocumentState(requestedStatus) ? requestedStatus : INVOICE_STATUS.OPEN;
 
-    if (result.changes > 0) {
+    // ── ONE transaction around header + lines + number + financials + STOCK ──
+    //
+    // Two reasons this lives here rather than in the IPC handler:
+    //
+    //  • The insert was not atomic at all before. It was a bare sequence of
+    //    .run() calls inside a try/catch, so a failure part-way through the
+    //    line loop left an invoice holding half of its lines.
+    //
+    //  • FIVE callers create invoices — the `insert-invoice` handler, a
+    //    recurring run (`recurring-run-now`), the scheduler, project timesheets
+    //    and the bulk importer. With the reconcile in the handler, the other
+    //    four silently never moved stock: the Part 1 bug again, on paths the
+    //    handler-driven suite could not reach. Keeping it in the model means
+    //    there is exactly one place an invoice becomes real.
+    //
+    // Everything inside MUST be synchronous. `db.transaction()` commits when
+    // the callback RETURNS, so an `await` here would end the transaction early
+    // and silently destroy the atomicity this exists to provide.
+    const tx = db.transaction(() => {
+      const stmt = db.prepare('INSERT INTO invoices (customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by, vat, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      const result = stmt.run(
+        Number(customer) || 0,
+        String(customer_email || ''),
+        islater ? 1 : 0,
+        String(billing_address || ''),
+        String(terms || ''),
+        String(start_date || ''),
+        String(last_date || ''),
+        String(message || ''),
+        String(statement_message || ''),
+        String(number || ''),
+        entered_by != null ? String(entered_by) : null,
+        Number(vat) || 0,
+        initialStatus
+      );
+
+      if (!(result.changes > 0)) return { success: false };
+
       const invoiceId = result.lastInsertRowid;
       const linesArr = Array.isArray(invoiceLines) ? invoiceLines : [];
       if (linesArr.length > 0) {
@@ -127,20 +220,44 @@ const Invoices = {
         const formattedNumber = `INV-${String(Number(invoiceId)).padStart(5, '0')}`;
         db.prepare('UPDATE invoices SET number = ? WHERE id = ?').run(formattedNumber, invoiceId);
       }
-      // Compute and set balance (line totals + VAT)
-      const lineSum = linesArr.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-      const balance = lineSum * (1 + (Number(vat) || 0) / 100);
-      db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(balance, invoiceId);
+      // Authoritative financial state: derive balance + status from the persisted
+      // lines and payment history (there is none yet on a brand-new invoice, so a
+      // normal invoice with an outstanding balance lands on "Open").
+      const financials = recalcInvoiceFinancials(Number(invoiceId));
+
+      // ── Issue the stock, behind the SAME predicate the GL posting uses ────
+      // A Draft / Void / Cancelled invoice is a non-financial lifecycle state and
+      // moves nothing — the same rule the bill path applies.
+      //
+      // An unresolvable line THROWS, so the whole invoice rolls back. That is
+      // deliberate and matches the bill: an invoice that claims to have shipped
+      // goods but moved no stock is precisely the silent inconsistency this
+      // integration exists to prevent. It cannot fire on a low stock count —
+      // Inventory.issueStock deliberately allows a negative balance (the count
+      // may simply be wrong) and reports it as `negative` for the UI to surface.
+      //
+      // The failure modes are otherwise unreachable: readInvoiceItemLines only
+      // returns lines whose product EXISTS and tracks inventory, and
+      // resolveInventoryItem cannot return null for such a product.
+      const effectiveStatus = (financials && financials.status) || initialStatus;
+      if (isFinanciallyEffective(effectiveStatus)) {
+        const DocumentInventory = require('../services/documentInventory');
+        const stock = DocumentInventory.reconcileInvoiceStock(
+          Number(invoiceId), readInvoiceItemLines(Number(invoiceId))
+        );
+        if (stock && stock.errors && stock.errors.length) {
+          throw new Error(`Invoice stock could not be issued — ${stock.errors.join('; ')}`);
+        }
+      }
 
       // Note: The authoritative GL journal entry (DR AR / CR Income per line) is posted by
       // JournalEntries.postInvoice() called from invoiceHandlers.js after this insert returns.
       // computedBalance() in chartOfAccounts.getAllAccounts() reads those journal_lines live.
 
-      return { success: true, invoiceId: Number(invoiceId), id: Number(invoiceId), invoice_id: Number(invoiceId) }; 
-    } 
-      else {
-        return { success: false };
-      }
+      return { success: true, invoiceId: Number(invoiceId), id: Number(invoiceId), invoice_id: Number(invoiceId), financials };
+    });
+
+    return tx();
     } catch (error) {
       console.error("Error inserting Invoice:", error);
       return { success: false, error: error.message || String(error) };
@@ -149,15 +266,15 @@ const Invoices = {
 
   // Retrieve all Invoices
   getAllInvoices: function () {
-    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id GROUP BY invoices.id ORDER BY invoices.id DESC");
+    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, COALESCE(NULLIF(customers.display_name, ''), NULLIF(customers.company_name, ''), NULLIF(TRIM(customers.first_name || ' ' || customers.last_name), ''), '') AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, COALESCE(pt.totalPaid, 0) AS totalPaid, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0), 2) AS balance, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id LEFT JOIN (SELECT i.id AS invoiceId, COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a.invoiceId = i.id), 0) + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId = i.id AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)), 0) AS totalPaid FROM invoices i) pt ON pt.invoiceId = invoices.id GROUP BY invoices.id ORDER BY invoices.id DESC");
     const report = this.getInvoiceReport();
     return {all:stmt.all(), report:report};
   },
 
-  getPaginated: function (page = 1, pageSize = 25, search = '', status = '', dueFrom = '', dueTo = '', startFrom = '', startTo = '', customerId = '') {
+  getPaginated: function (page = 1, pageSize = 25, search = '', status = '', dueFrom = '', dueTo = '', startFrom = '', startTo = '', customerId = '', onlyOutstanding = false) {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
-    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, customers.first_name || ' ' || customers.last_name AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address, invoices.sent_date, invoices.sent_method, invoices.sent_status FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id`;
+    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, COALESCE(NULLIF(customers.display_name, ''), NULLIF(customers.company_name, ''), NULLIF(TRIM(customers.first_name || ' ' || customers.last_name), ''), '') AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, COALESCE(pt.totalPaid, 0) AS totalPaid, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0), 2) AS balance, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address, invoices.sent_date, invoices.sent_method, invoices.sent_status FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id LEFT JOIN (SELECT i.id AS invoiceId, COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a.invoiceId = i.id), 0) + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId = i.id AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)), 0) AS totalPaid FROM invoices i) pt ON pt.invoiceId = invoices.id`;
     const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
     const statusParam = status && status.trim() ? status.trim() : null;
     const whereParts = [];
@@ -167,8 +284,17 @@ const Invoices = {
       params.push(searchParam, searchParam);
     }
     if (statusParam) {
-      whereParts.push(`invoices.status = ?`);
-      params.push(statusParam);
+      if (statusParam.startsWith('!')) {
+        const excluded = statusParam.slice(1).split(',').map(s => s.trim()).filter(Boolean);
+        if (excluded.length) {
+          whereParts.push(`invoices.status COLLATE NOCASE NOT IN (${excluded.map(() => '?').join(',')})`);
+          params.push(...excluded);
+        }
+      } else {
+        const included = statusParam.split(',').map(s => s.trim()).filter(Boolean);
+        whereParts.push(`invoices.status COLLATE NOCASE IN (${included.map(() => '?').join(',')})`);
+        params.push(...included);
+      }
     }
     if (dueFrom) {
       whereParts.push(`invoices.last_date >= ?`);
@@ -191,9 +317,17 @@ const Invoices = {
       params.push(Number(customerId));
     }
     const whereClause = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
-    const groupOrder = ` GROUP BY invoices.id, customers.first_name, customers.last_name, invoices.status, invoices.start_date, invoices.last_date ORDER BY invoices.id DESC`;
+    // When onlyOutstanding is requested, keep only invoices that still have a
+    // real outstanding balance (> 0 after rounding to cents). This is the
+    // authoritative balance (line totals + VAT minus paid amount) — the same
+    // expression the SELECT exposes as the `balance` alias — so it stays in
+    // sync with the displayed column and is immune to floating-point residue.
+    const balanceHaving = onlyOutstanding
+      ? ` HAVING ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0), 2) > 0`
+      : '';
+    const groupOrder = ` GROUP BY invoices.id, customers.first_name, customers.last_name, invoices.status, invoices.start_date, invoices.last_date, pt.totalPaid${balanceHaving} ORDER BY invoices.id DESC`;
     let total;
-    if (params.length) {
+    if (params.length || onlyOutstanding) {
       const innerSql = `${baseSql}${whereClause}${groupOrder}`;
       total = db.prepare(`SELECT COUNT(*) AS total FROM (${innerSql})`).get(...params).total;
     } else {
@@ -206,8 +340,8 @@ const Invoices = {
     return { data, total };
   },
   getInvoiceSummary: () => {
-    const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') ");
-    const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date < ?");
+    const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Open','Partially Paid') ");
+    const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Open','Partially Paid') AND i.last_date < ?");
     const stmt_open_expense = db.prepare("SELECT COUNT(DISTINCT e.id) AS open_expense,SUM(l.amount) AS open_total_amount_expense FROM expense_lines AS l INNER JOIN expenses AS e ON l.expense_id = e.id WHERE e.approval_status = 'Pending' ");
     const stmt_due_expense = db.prepare("SELECT COUNT(DISTINCT e.id) AS due_expense,SUM(l.amount) AS due_total_amount_expense FROM expense_lines AS l INNER JOIN expenses AS e ON l.expense_id = e.id WHERE e.approval_status = 'Pending' AND e.payment_date < ?");
  
@@ -223,8 +357,8 @@ const Invoices = {
   return {open_invoice,due_invoice,open_expense,due_expense};
   },
   getInvoiceReport: function (){
-    const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') ");
-    const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date < ?");
+    const stmt_open = db.prepare("SELECT COUNT(DISTINCT i.id) AS open_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS open_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Open','Partially Paid') ");
+    const stmt_due = db.prepare("SELECT COUNT(DISTINCT i.id) AS due_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS due_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status IN ('Open','Partially Paid') AND i.last_date < ?");
     const stmt_paid = db.prepare("SELECT COUNT(DISTINCT i.id) AS paid_invoice,SUM(l.amount + (l.amount*i.vat/100)) AS paid_total_amount FROM invoice_lines AS l INNER JOIN invoices AS i ON l.invoice_id = i.id WHERE i.status = 'Paid' ");
 
     // Recently paid invoices (last 30 days) — based on payment date
@@ -285,7 +419,7 @@ const Invoices = {
              SUM(l.amount * (1 + i.vat/100)) AS not_due_total_amount 
       FROM invoice_lines AS l 
       INNER JOIN invoices AS i ON l.invoice_id = i.id 
-      WHERE i.status IN ('Pending','Partially Paid','Sent','Unpaid') AND i.last_date > ?`);
+      WHERE i.status IN ('Open','Partially Paid') AND i.last_date > ?`);
 
     // Open expenses (unpaid bills, approved expenses, pending approval)
     const stmt_open_expense = db.prepare(`
@@ -310,6 +444,48 @@ const Invoices = {
       FROM quote_lines AS l 
       INNER JOIN quotes AS i ON l.quote_id = i.id 
       WHERE i.status = 'Pending' AND i.last_date < ?`);
+
+    // 12-month windowed open/due/paid figures so health ratios align with the
+    // 12-month revenue/expense windows. All-time open amounts (used elsewhere)
+    // skew DSO / runway / collection metrics on the dashboard.
+    const stmt_open_invoice_12m = db.prepare(`
+      SELECT COUNT(DISTINCT i.id) AS open_invoice,
+             SUM(l.amount + (l.amount*i.vat/100)) AS open_total_amount 
+      FROM invoice_lines AS l 
+      INNER JOIN invoices AS i ON l.invoice_id = i.id 
+      WHERE i.status IN ('Open','Partially Paid')
+        AND i.start_date >= date('now', '-12 months')`);
+
+    const stmt_due_invoice_12m = db.prepare(`
+      SELECT COUNT(DISTINCT i.id) AS due_invoice,
+             SUM(l.amount + (l.amount*i.vat/100)) AS due_total_amount 
+      FROM invoice_lines AS l 
+      INNER JOIN invoices AS i ON l.invoice_id = i.id 
+      WHERE i.status IN ('Open','Partially Paid')
+        AND i.start_date >= date('now', '-12 months') AND i.last_date < ?`);
+
+    const stmt_paid_invoice_12m = db.prepare(`
+      SELECT COUNT(DISTINCT i.id) AS paid_invoice,
+             SUM(l.amount + (l.amount*i.vat/100)) AS paid_total_amount 
+      FROM invoice_lines AS l 
+      INNER JOIN invoices AS i ON l.invoice_id = i.id 
+      WHERE i.status = 'Paid' AND i.start_date >= date('now', '-12 months')`);
+
+    const stmt_open_expense_12m = db.prepare(`
+      SELECT COUNT(DISTINCT e.id) AS open_expense,
+             SUM(l.amount) AS open_total_amount_expense 
+      FROM expense_lines AS l 
+      INNER JOIN expenses AS e ON l.expense_id = e.id 
+      WHERE e.approval_status IN ('Unpaid','Partially Paid','Approved','Pending')
+        AND e.payment_date >= date('now', '-12 months')`);
+
+    const stmt_due_expense_12m = db.prepare(`
+      SELECT COUNT(DISTINCT e.id) AS due_expense,
+             SUM(l.amount) AS due_total_amount_expense 
+      FROM expense_lines AS l 
+      INNER JOIN expenses AS e ON l.expense_id = e.id 
+      WHERE e.approval_status IN ('Unpaid','Partially Paid','Approved','Pending')
+        AND e.payment_date >= date('now', '-12 months') AND e.payment_date < ?`);
     
     // Invoice trends with comprehensive metrics
     const stmt_invoicetrend = db.prepare(`
@@ -318,9 +494,9 @@ const Invoices = {
         COUNT(DISTINCT i.id) AS number,
         SUM(l.amount * (1 + i.vat/100)) as revenue_total_amount,
         SUM(CASE WHEN i.status = 'Paid' THEN l.amount * (1 + i.vat/100) ELSE 0 END) as paid_amount,
-        SUM(CASE WHEN i.status IN ('Pending','Partially Paid','Sent','Unpaid') THEN l.amount * (1 + i.vat/100) ELSE 0 END) as pending_amount,
+        SUM(CASE WHEN i.status IN ('Open','Partially Paid') THEN l.amount * (1 + i.vat/100) ELSE 0 END) as pending_amount,
         COUNT(DISTINCT CASE WHEN i.status = 'Paid' THEN i.id END) as paid_count,
-        COUNT(DISTINCT CASE WHEN i.status IN ('Pending','Partially Paid','Sent','Unpaid') THEN i.id END) as pending_count,
+        COUNT(DISTINCT CASE WHEN i.status IN ('Open','Partially Paid') THEN i.id END) as pending_count,
         AVG(l.amount * (1 + i.vat/100)) as avg_invoice_value
       FROM invoices i
       INNER JOIN invoice_lines l ON l.invoice_id = i.id
@@ -415,6 +591,56 @@ const Invoices = {
       GROUP BY name
       ORDER BY value DESC`);
 
+    // Monthly expense totals (for dashboard P&L / expense widgets)
+    const stmt_monthly_expenses = db.prepare(`
+      SELECT strftime('%Y-%m', e.payment_date) AS month,
+             SUM(l.amount) AS total
+      FROM expense_lines l
+      INNER JOIN expenses e ON e.id = l.expense_id
+      WHERE e.payment_date >= date('now', '-12 months')
+      GROUP BY strftime('%Y-%m', e.payment_date)
+      ORDER BY month ASC`);
+
+    // Monthly expense breakdown by category (for dashboard pie chart)
+    const stmt_monthly_expense_categories = db.prepare(`
+      SELECT el.category AS name,
+             SUM(el.amount) AS value,
+             strftime('%Y-%m', e.payment_date) AS month
+      FROM expense_lines el
+      INNER JOIN expenses e ON e.id = el.expense_id
+      WHERE e.payment_date >= date('now', '-12 months')
+      GROUP BY el.category, strftime('%Y-%m', e.payment_date)`);
+
+    // Daily revenue (for dashboard Today/Yesterday/Custom Range selectors)
+    const stmt_daily_revenue = db.prepare(`
+      SELECT strftime('%Y-%m-%d', i.start_date) AS day,
+             SUM(l.amount * (1 + i.vat/100)) AS revenue
+      FROM invoices i
+      INNER JOIN invoice_lines l ON l.invoice_id = i.id
+      WHERE i.start_date >= date('now', '-36 months')
+      GROUP BY strftime('%Y-%m-%d', i.start_date)
+      ORDER BY day ASC`);
+
+    // Daily expense totals (for dashboard Today/Yesterday/Custom Range selectors)
+    const stmt_daily_expenses = db.prepare(`
+      SELECT strftime('%Y-%m-%d', e.payment_date) AS day,
+             SUM(l.amount) AS total
+      FROM expense_lines l
+      INNER JOIN expenses e ON e.id = l.expense_id
+      WHERE e.payment_date >= date('now', '-36 months')
+      GROUP BY strftime('%Y-%m-%d', e.payment_date)
+      ORDER BY day ASC`);
+
+    // Daily expense breakdown by category (for dashboard pie chart)
+    const stmt_daily_expense_categories = db.prepare(`
+      SELECT el.category AS name,
+             SUM(el.amount) AS value,
+             strftime('%Y-%m-%d', e.payment_date) AS day
+      FROM expense_lines el
+      INNER JOIN expenses e ON e.id = el.expense_id
+      WHERE e.payment_date >= date('now', '-36 months')
+      GROUP BY el.category, strftime('%Y-%m-%d', e.payment_date)`);
+
     // Get current date for due date calculations
     const now = new Date();
     const year = now.getFullYear();
@@ -433,10 +659,20 @@ const Invoices = {
     const open_expense = stmt_open_expense.all();
     const due_expense = stmt_due_expense.all(due_date);
     const due_quote = stmt_quote.all(due_date);
+    const open_invoice_12m = stmt_open_invoice_12m.all();
+    const due_invoice_12m = stmt_due_invoice_12m.all(due_date);
+    const paid_invoice_12m = stmt_paid_invoice_12m.all();
+    const open_expense_12m = stmt_open_expense_12m.all();
+    const due_expense_12m = stmt_due_expense_12m.all(due_date);
     const invoicetrend = stmt_invoicetrend.all();
     const customertrend = stmt_customertrend.all();
     const suppliertrend = stmt_suppliertrend.all();
     const expenselist = stmt_expenselist.all();
+    const monthlyExpenses = stmt_monthly_expenses.all();
+    const monthlyExpenseCategories = stmt_monthly_expense_categories.all();
+    const dailyRev = stmt_daily_revenue.all();
+    const dailyExp = stmt_daily_expenses.all();
+    const dailyExpCat = stmt_daily_expense_categories.all();
 
     // Calculate some derived values
     const currentMonthInvoices = invoicetrend.length > 0 ? invoicetrend[invoicetrend.length - 1] : { number: 0, revenue_total_amount: 0 };
@@ -473,6 +709,15 @@ const Invoices = {
     // Calculate totals
     const totalExpenses = enhancedExpenseList.reduce((sum, item) => sum + item.value, 0);
     const totalRevenue = monthly_performance.reduce((sum, month) => sum + (Number(month.revenue) || 0), 0);
+
+    // Per-month maps for dashboard P&L / expenses widgets
+    const monthlyExpensesMap = {};
+    monthlyExpenses.forEach(r => { monthlyExpensesMap[r.month] = Number(r.total) || 0; });
+    const monthlyExpenseCategoriesMap = {};
+    monthlyExpenseCategories.forEach(r => {
+      if (!monthlyExpenseCategoriesMap[r.month]) monthlyExpenseCategoriesMap[r.month] = [];
+      monthlyExpenseCategoriesMap[r.month].push({ name: r.name, value: Number(r.value) || 0 });
+    });
     
     return {
       // Original metrics
@@ -481,6 +726,12 @@ const Invoices = {
       open_expense,
       due_expense,
       due_quote,
+      // 12-month windowed metrics (aligned with revenue/expense windows)
+      openInvoice12m: open_invoice_12m,
+      dueInvoice12m: due_invoice_12m,
+      paidInvoice12m: paid_invoice_12m,
+      openExpense12m: open_expense_12m,
+      dueExpense12m: due_expense_12m,
       invoicetrend,
       customertrend,
       suppliertrend,
@@ -490,6 +741,11 @@ const Invoices = {
 
       // Enhanced metrics
       expenseAnalysis: enhancedExpenseList,
+      monthlyExpensesMap,
+      monthlyExpenseCategoriesMap,
+      dailyRevenue: dailyRev.map(r => ({ day: r.day, revenue: Number(r.revenue) || 0 })),
+      dailyExpenses: dailyExp.map(r => ({ day: r.day, total: Number(r.total) || 0 })),
+      dailyExpenseCategories: dailyExpCat.map(r => ({ day: r.day, name: r.name, value: Number(r.value) || 0 })),
       monthlyPerformance: monthly_performance.map(month => ({
         ...month,
         revenue: Number(month.revenue) || 0,
@@ -545,8 +801,31 @@ const Invoices = {
   
     const rows = stmt.all(invoice_id);
     if (!rows || rows.length === 0) return null;
+
+    // Paid to date from payment allocations + direct payments (same source as
+    // the list balance) so partially-paid invoices show what's been collected.
+    let paidToDate = 0;
+    try {
+      const pd = db.prepare(`
+        SELECT COALESCE(SUM(a.amount), 0) AS paid
+        FROM payment_allocations a WHERE a.invoiceId = ?
+      `).get(invoice_id);
+      const direct = db.prepare(`
+        SELECT COALESCE(SUM(p.amount), 0) AS paid
+        FROM payments p WHERE p.invoiceId = ? AND p.invoiceId != 0
+          AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)
+      `).get(invoice_id);
+      paidToDate = (Number(pd?.paid) || 0) + (Number(direct?.paid) || 0);
+    } catch (e) {
+      console.error('[invoices] paid-to-date compute error:', e.message);
+    }
   
     const first = rows[0];
+    // Authoritative financial state (read-only): the status returned to callers
+    // is derived from total + real payment allocations, so a stale stored value
+    // can never be shown. Document lifecycle states are preserved by the service.
+    let fin = null;
+    try { fin = getInvoiceFinancials(invoice_id); } catch { fin = null; }
     const result = {
       invoice_id: first.invoice_id,
       customer_id: first.customer_id,
@@ -556,7 +835,8 @@ const Invoices = {
       last_name: first.last_name,
       phone_number: first.phone_number,
       mobile_number: first.mobile_number,
-      status: first.status,
+      status: fin ? fin.status : first.status,
+      statusStored: first.status,
       vat: first.vat,
       customer_email: first.customer_email,
       islater: first.islater,
@@ -571,8 +851,16 @@ const Invoices = {
       number: first.number,
       entered_by: first.entered_by,
       date_entered: first.date_entered,
+      totalPaid: paidToDate,
+      balance: fin
+        ? fin.balance
+        : Math.max(0, Number(rows.reduce((s, r) => s + (Number(r.amount) || 0), 0)) * (1 + (Number(first.vat) || 0) / 100) - paidToDate),
+      overpayment: fin ? fin.overpayment : 0,
       lines: [],
     };
+    // Actual date the invoice became fully paid (from payment history), used by
+    // the PAID stamp. Null while an outstanding balance remains.
+    result.paidDate = fin ? fin.paidDate : null;
     for (const row of rows) {
       if (row.line_id) {
         result.lines.push({ id: row.line_id, amount: row.amount, description: row.description, quantity: row.quantity, product_id: row.product, rate: row.rate });
@@ -631,7 +919,28 @@ const Invoices = {
     const { id, lines, invoiceLines, ...invoiceDetails } = invoiceData;
     const lineItems = lines || invoiceLines || [];
 
-    try {
+    // Capture the prior financial state so the caller can audit the impact.
+    const previous = getInvoiceFinancials(Number(id));
+
+    // ── ONE transaction around header + lines + financials + stock + GL ─────
+    // The lines are DELETEd and re-inserted below; without a transaction a
+    // failure between those two statements destroys the invoice's original
+    // lines and leaves a partial set behind. Everything inside must be
+    // SYNCHRONOUS — db.transaction() commits when the callback RETURNS, so an
+    // `await` would end the transaction early and silently.
+    const tx = db.transaction(() => {
+      // ── Status is system controlled ─────────────────────────────────────
+      // The ONLY client value honoured here is an explicit document lifecycle
+      // state (Draft / Void / Cancelled) requested through an explicit action.
+      // Any financial value a client tries to inject (Paid / Open / Pending / …)
+      // is ignored outright: the status is recomputed from real money below.
+      const storedRow = db.prepare('SELECT status FROM invoices WHERE id = ?').get(Number(id));
+      const storedStatus = storedRow ? String(storedRow.status || '') : '';
+      const requestedStatus = String(invoiceDetails.status || '').trim();
+      const statusToWrite = isInvoiceDocumentState(requestedStatus)
+        ? requestedStatus
+        : (isInvoiceDocumentState(storedStatus) ? storedStatus : INVOICE_STATUS.OPEN);
+
       db.prepare(
         `UPDATE invoices
          SET customer = ?, customer_email = ?, islater = ?, billing_address = ?, 
@@ -649,7 +958,7 @@ const Invoices = {
           Number(invoiceDetails.vat) || 0,
           String(invoiceDetails.message || ''),
           String(invoiceDetails.statement_message || ''),
-          String(invoiceDetails.status || 'Draft'),
+          statusToWrite,
           Number(id)
       );
   
@@ -671,25 +980,52 @@ const Invoices = {
         );
       }
   
-      // Recalculate balance (line totals + VAT - existing payments)
-      const lineSum = lineItems.reduce((s, l) => s + (Number(l.amount) || 0) * (Number(l.quantity) || 1), 0);
-      const invoiceTotal = lineSum * (1 + (Number(invoiceDetails.vat) || 0) / 100);
-      let totalPaid = 0;
-      try {
-        const paidRow = db.prepare('SELECT COALESCE(SUM(amount), 0) AS totalPaid FROM payments WHERE invoiceId = ?').get(Number(id));
-        totalPaid = Number(paidRow?.totalPaid) || 0;
-      } catch (_) {}
-      const balance = Math.max(0, invoiceTotal - totalPaid);
-      db.prepare('UPDATE invoices SET balance = ? WHERE id = ?').run(balance, Number(id));
+      // Authoritative financial state: derive balance + status from the persisted
+      // lines and the EXISTING payment history (never from the client payload).
+      // Editing an invoice must not rewrite payment history: existing payments
+      // keep their original amounts; only the balance/status follow.
+      const financials = recalcInvoiceFinancials(Number(id));
 
-      // Void old journal entries then re-post using per-line income accounts
+      // ── Reconcile the stock to the lines just written ────────────────────
+      // Runs for EVERY outcome, including the Draft/Void early return below: a
+      // voided invoice must still give its goods back.
+      //
+      // The test is `isInvoiceDocumentState` (an EXPLICIT Draft/Void/Cancelled)
+      // rather than `!isFinanciallyEffective`. A blank or unexpected status
+      // means we do not know, and reconciling to the lines is the safe default
+      // — silently putting goods back on an unknown state would be the more
+      // damaging guess.
+      //
+      // An unresolvable line THROWS so the whole update rolls back, matching the
+      // insert path and the bill. It cannot fire on a low count: issueStock
+      // deliberately allows a negative balance and reports `negative` for the UI.
+      {
+        const DocumentInventory = require('../services/documentInventory');
+        const stock = DocumentInventory.reconcileInvoiceStock(
+          Number(id),
+          isInvoiceDocumentState(String((financials && financials.status) || ''))
+            ? []
+            : readInvoiceItemLines(Number(id))
+        );
+        if (stock && stock.errors && stock.errors.length) {
+          throw new Error(`Invoice stock could not be reconciled — ${stock.errors.join('; ')}`);
+        }
+      }
+
+      // Void old journal entries then re-post using per-line income accounts.
+      // A voided invoice contributes $0 — void the old postings but do NOT
+      // create a fresh full-amount entry (keeps GL/AR consistent with the register).
       try {
+        const JournalEntries = require('./journalEntries');
         const oldEntries = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted'").all(Number(id));
         for (const oe of oldEntries) {
-          db.prepare("UPDATE journal_entries SET status = 'Void' WHERE id = ?").run(oe.id);
+          JournalEntries.voidEntry(oe.id);
+        }
+        const nextStatus = String((financials && financials.status) || '').toLowerCase();
+        if (nextStatus === 'void' || nextStatus === 'voided' || nextStatus === 'cancelled' || nextStatus === 'canceled' || nextStatus === 'draft') {
+          return { success: true, message: 'Invoice updated successfully.', financials, previous };
         }
         // postInvoice has a hasPosting guard, but we just voided all old entries so it will proceed
-        const JournalEntries = require('./journalEntries');
         JournalEntries.postInvoice({
           id: Number(id),
           date: String(invoiceDetails.start_date || new Date().toISOString().slice(0, 10)),
@@ -700,7 +1036,11 @@ const Invoices = {
         console.error('[invoices] GL re-post on update failed (non-fatal):', glUpdateErr);
       }
 
-      return { success: true, message: 'Invoice updated successfully.' };
+      return { success: true, message: 'Invoice updated successfully.', financials, previous };
+    });
+
+    try {
+      return tx();
     } catch (error) {
       console.error('Error updating invoice:', error);
       throw error;
@@ -710,14 +1050,22 @@ const Invoices = {
     try {
       // Void journal entries so computedBalance() stops counting them (excludes non-'Posted' entries)
       try {
+        const JournalEntries = require('./journalEntries');
         const oldEntries = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted'").all(Number(id));
         for (const oe of oldEntries) {
-          db.prepare("UPDATE journal_entries SET status = 'Void' WHERE id = ?").run(oe.id);
+          JournalEntries.voidEntry(oe.id);
         }
       } catch (glErr) {
         console.error('[invoices] GL void on delete failed (non-fatal):', glErr);
       }
       const transaction = db.transaction((invoiceId) => {
+        // Put back the stock this invoice issued, BEFORE its lines are torn
+        // down. Without this a deleted invoice would leave the shelf empty
+        // forever — goods gone with no document to explain them.
+        // `readInvoiceItemLines` is irrelevant here: reversing passes no lines,
+        // so the reconciler gives back exactly what was posted.
+        const DocumentInventory = require('../services/documentInventory');
+        DocumentInventory.reverseInvoiceStock(invoiceId);
         db.prepare(`DELETE FROM invoice_lines WHERE invoice_id = ?`).run(invoiceId);
         const res = db.prepare(`DELETE FROM invoices WHERE id = ?`).run(invoiceId);
         return res.changes;
@@ -729,14 +1077,20 @@ const Invoices = {
       return { success: false, error: error.message };
     }
   },
-  getFinancialReport: function (start_date, last_date) {
+  getFinancialReport: function (start_date, last_date, options = {}) {
     try {
       const dateFrom = start_date || '0000-01-01';
       const dateTo = last_date || '9999-12-31';
+      const basis = String(options.basis || 'accrual').toLowerCase() === 'cash' ? 'cash' : 'accrual';
+      const loc = options.location || null;
+      const cls = options.class || null;
+      const dept = options.department || null;
+      const hasDimensions = !!(loc || cls || dept);
 
       // ── COA-driven balances from journal_lines ──────────────────────────
       const acctRows = db.prepare(`
-        SELECT coa.id, coa.name, coa.type, coa.normalBalance, coa.openingBalance,
+        SELECT coa.id, coa.name, coa.type, coa.subType, coa.number, coa.parentId,
+               coa.normalBalance, coa.openingBalance,
                COALESCE(SUM(CASE WHEN je.date <= ? AND jl.account_id = coa.id THEN jl.debit ELSE 0 END), 0) AS totalDebit,
                COALESCE(SUM(CASE WHEN je.date <= ? AND jl.account_id = coa.id THEN jl.credit ELSE 0 END), 0) AS totalCredit,
                COALESCE(SUM(CASE WHEN je.date BETWEEN ? AND ? AND jl.account_id = coa.id THEN jl.debit ELSE 0 END), 0) AS periodDebit,
@@ -746,44 +1100,70 @@ const Invoices = {
         LEFT JOIN journal_entries je ON je.id = jl.journal_id AND je.status = 'Posted'
         WHERE coa.status = 'Active'
         GROUP BY coa.id
+        ORDER BY CAST(coa.number AS INTEGER) ASC, coa.name ASC
       `).all(dateTo, dateTo, dateFrom, dateTo, dateFrom, dateTo);
+
+      // ── P&L period detail (accrual = journal date; cash = cash recognition date) ──
+      const plDetail = this._getPLAccountRows(dateFrom, dateTo, basis, loc, cls, dept);
+      const plById = new Map(plDetail.map((r) => [r.id, r]));
 
       // Compute balance for each account (period-driven for income/expense, cumulative for BS)
       let totalIncome = 0, totalCOGS = 0, totalExpenses = 0;
       let totalAssets = 0, totalLiabilities = 0, totalEquity = 0;
       const assetAccts = [], liabilityAccts = [], equityAccts = [];
-      const incomeAccts = [], expenseAccts = [];
+      const incomeAccts = [], cogsAccts = [], expenseAccts = [];
 
       for (const r of acctRows) {
-        const nb = r.normalBalance || 'Debit';
+        // Single source of truth for the normal side (services/normalBalance.js).
+        const nb = getExpectedNormalBalance(r.type) || normalizeNormalBalance(r.normalBalance) || 'Debit';
         const openBal = Number(r.openingBalance || 0);
         // Balance sheet: cumulative (to date)
         const bsBalance = nb === 'Debit'
           ? openBal + Number(r.totalDebit) - Number(r.totalCredit)
           : openBal + Number(r.totalCredit) - Number(r.totalDebit);
-        // P&L: period only (income/expense accounts reset each period)
-        const plBalance = nb === 'Debit'
-          ? Number(r.periodDebit) - Number(r.periodCredit)
-          : Number(r.periodCredit) - Number(r.periodDebit);
 
         const t = (r.type || '').toLowerCase();
-        if (t === 'income' || t === 'other income') {
-          totalIncome += plBalance;
-          incomeAccts.push({ name: r.name, amount: plBalance });
-        } else if (t === 'cost of goods sold') {
-          totalCOGS += plBalance;
-        } else if (t === 'expense' || t === 'other expense') {
-          totalExpenses += plBalance;
-          expenseAccts.push({ name: r.name, amount: plBalance });
+        const isPL = t === 'income' || t === 'other income' || t === 'cost of goods sold' || t === 'expense' || t === 'other expense';
+        // P&L: period only (income/expense accounts reset each period)
+        const plRow = plById.get(r.id);
+        const pd = plRow ? plRow.debit : Number(r.periodDebit);
+        const pc = plRow ? plRow.credit : Number(r.periodCredit);
+        const plBalance = nb === 'Debit' ? pd - pc : pc - pd;
+
+        const plRecord = {
+          id: r.id,
+          number: r.number || '',
+          name: r.name,
+          type: r.type,
+          subType: r.subType || '',
+          parentId: r.parentId || null,
+          amount: Number(plBalance.toFixed(2)),
+          debit: Number(pd.toFixed(2)),
+          credit: Number(pc.toFixed(2)),
+          txnCount: plRow ? plRow.txnCount : 0,
+          lastDate: plRow ? plRow.lastDate : null,
+        };
+
+        if (isPL) {
+          if (t === 'income' || t === 'other income') {
+            totalIncome += plBalance;
+            incomeAccts.push(plRecord);
+          } else if (t === 'cost of goods sold') {
+            totalCOGS += plBalance;
+            cogsAccts.push(plRecord);
+          } else {
+            totalExpenses += plBalance;
+            expenseAccts.push(plRecord);
+          }
         } else if (t === 'asset' || t === 'bank' || t === 'cash') {
           totalAssets += bsBalance;
-          assetAccts.push({ name: r.name, amount: bsBalance, type: r.type });
+          assetAccts.push({ id: r.id, number: r.number || '', name: r.name, amount: bsBalance, type: r.type, parentId: r.parentId || null });
         } else if (t === 'liability' || t === 'credit card' || t === 'loan') {
           totalLiabilities += bsBalance;
-          liabilityAccts.push({ name: r.name, amount: bsBalance, type: r.type });
+          liabilityAccts.push({ id: r.id, number: r.number || '', name: r.name, amount: bsBalance, type: r.type, parentId: r.parentId || null });
         } else if (t === 'equity') {
           totalEquity += bsBalance;
-          equityAccts.push({ name: r.name, amount: bsBalance, type: r.type });
+          equityAccts.push({ id: r.id, number: r.number || '', name: r.name, amount: bsBalance, type: r.type, parentId: r.parentId || null });
         }
       }
 
@@ -791,17 +1171,17 @@ const Invoices = {
       const netProfit = grossProfit - totalExpenses;
 
       // ── Fallback: if no journal data found, aggregate from invoices/expenses directly ──
-      if (totalIncome === 0 && totalExpenses === 0) {
+      if (!hasDimensions && basis === 'accrual' && totalIncome === 0 && totalExpenses === 0) {
         try {
           const invIncome = db.prepare(`
             SELECT COALESCE(SUM(il.amount * (1 + COALESCE(i.vat,0)/100)), 0) AS total
             FROM invoice_lines il
             JOIN invoices i ON i.id = il.invoice_id
-            WHERE i.status NOT IN ('Draft') AND i.start_date BETWEEN ? AND ?
+            WHERE i.status COLLATE NOCASE NOT IN ('draft','cancelled','canceled','void','voided') AND i.start_date BETWEEN ? AND ?
           `).get(dateFrom, dateTo);
           if (invIncome && Number(invIncome.total) > 0) {
             totalIncome = Number(invIncome.total);
-            incomeAccts.push({ name: 'Invoices Revenue', amount: totalIncome });
+            incomeAccts.push({ id: null, number: '', name: 'Invoices Revenue', type: 'income', subType: '', parentId: null, amount: Number(totalIncome.toFixed(2)), debit: 0, credit: 0, txnCount: 0, lastDate: null });
           }
 
           const expTotal = db.prepare(`
@@ -812,7 +1192,7 @@ const Invoices = {
           `).get(dateFrom, dateTo);
           if (expTotal && Number(expTotal.total) > 0) {
             totalExpenses = Number(expTotal.total);
-            expenseAccts.push({ name: 'Expenses Total', amount: totalExpenses });
+            expenseAccts.push({ id: null, number: '', name: 'Expenses Total', type: 'expense', subType: '', parentId: null, amount: Number(totalExpenses.toFixed(2)), debit: 0, credit: 0, txnCount: 0, lastDate: null });
           }
 
           const cogsTotal = db.prepare(`
@@ -875,6 +1255,7 @@ const Invoices = {
           grossProfit: grossProfitFinal,
           netProfit: netProfitFinal,
           incomeAccounts: incomeAccts,
+          cogsAccounts: cogsAccts,
           expenseAccounts: expenseAccts,
         },
         balanceSheet: {
@@ -904,6 +1285,85 @@ const Invoices = {
       console.error('Error fetching report:', error);
       throw error;
     }
+  },
+  // P&L period detail rows, one per account with activity in the window.
+  // Accrual: lines whose journal date falls in [dateFrom, dateTo].
+  // Cash: lines recognised on the payment/bill-payment date within the window.
+  _getPLAccountRows: function (dateFrom, dateTo, basis, loc, cls, dept) {
+    const byId = new Map();
+    const add = (account_id, debit, credit, entryDate) => {
+      if (!account_id) return;
+      const a = byId.get(account_id) || { id: account_id, debit: 0, credit: 0, txnCount: 0, lastDate: null };
+      a.debit += Number(debit || 0);
+      a.credit += Number(credit || 0);
+      a.txnCount += 1;
+      if (!a.lastDate || entryDate > a.lastDate) a.lastDate = entryDate;
+      byId.set(account_id, a);
+    };
+
+    if (basis === 'cash') {
+      // Fetch lines up to dateTo, then recognise by cash date in JS
+      const lines = db.prepare(`
+        SELECT jl.account_id, jl.debit, jl.credit, jl.class AS lclass, jl.location AS lloc, jl.department AS ldept,
+               je.id AS entryId, je.date AS entryDate, je.source_type, je.source_id
+        FROM journal_lines jl
+        JOIN journal_entries je ON je.id = jl.journal_id AND je.status = 'Posted'
+        WHERE je.date <= ? AND jl.account_id IS NOT NULL
+      `).all(dateTo);
+
+      // Build cash recognition date per entry
+      const invIds = [...new Set(lines.filter((l) => l.source_type === 'invoice' && l.source_id).map((l) => Number(l.source_id)))];
+      const expIds = [...new Set(lines.filter((l) => l.source_type === 'expense' && l.source_id).map((l) => Number(l.source_id)))];
+      const invPayDate = new Map();
+      if (invIds.length) {
+        const ph = invIds.map(() => '?').join(',');
+        for (const row of db.prepare(`SELECT invoiceId, MIN(date) AS d FROM payments WHERE invoiceId IN (${ph}) GROUP BY invoiceId`).all(...invIds)) {
+          invPayDate.set(Number(row.invoiceId), row.d);
+        }
+      }
+      const expPayDate = new Map();
+      if (expIds.length) {
+        const ph = expIds.map(() => '?').join(',');
+        for (const row of db.prepare(`SELECT id, payment_date FROM expenses WHERE id IN (${ph})`).all(...expIds)) {
+          expPayDate.set(Number(row.id), row.payment_date);
+        }
+      }
+      const cashDate = (l) => {
+        if (l.source_type === 'invoice') return invPayDate.get(Number(l.source_id)) || l.entryDate;
+        if (l.source_type === 'expense') return expPayDate.get(Number(l.source_id)) || l.entryDate;
+        return l.entryDate;
+      };
+
+      for (const l of lines) {
+        const d = cashDate(l);
+        if (!d || d < dateFrom || d > dateTo) continue;
+        if (loc && l.lloc !== loc) continue;
+        if (cls && l.lclass !== cls) continue;
+        if (dept && l.ldept !== dept) continue;
+        add(l.account_id, l.debit, l.credit, l.entryDate);
+      }
+    } else {
+      let where = 'je.date BETWEEN ? AND ?';
+      const params = [dateFrom, dateTo];
+      if (loc) { where += ' AND jl.location = ?'; params.push(loc); }
+      if (cls) { where += ' AND jl.class = ?'; params.push(cls); }
+      if (dept) { where += ' AND jl.department = ?'; params.push(dept); }
+      const lines = db.prepare(`
+        SELECT jl.account_id, jl.debit, jl.credit, je.date AS entryDate
+        FROM journal_lines jl
+        JOIN journal_entries je ON je.id = jl.journal_id AND je.status = 'Posted'
+        WHERE ${where} AND jl.account_id IS NOT NULL
+      `).all(...params);
+      for (const l of lines) add(l.account_id, l.debit, l.credit, l.entryDate);
+    }
+
+    return [...byId.values()].map((a) => ({
+      id: a.id,
+      debit: Number(a.debit.toFixed(2)),
+      credit: Number(a.credit.toFixed(2)),
+      txnCount: a.txnCount,
+      lastDate: a.lastDate || null,
+    }));
   },
   getManagementReport: function (start_date, last_date) {
     try {
@@ -960,8 +1420,9 @@ const Invoices = {
         FROM invoices i
         LEFT JOIN customers c ON c.id = i.customer
         LEFT JOIN (SELECT invoice_id, SUM(amount) AS totalAmount FROM invoice_lines GROUP BY invoice_id) lt ON lt.invoice_id = i.id
-        LEFT JOIN (SELECT invoiceId, SUM(amount) AS totalPaid FROM payments GROUP BY invoiceId) pt ON pt.invoiceId = i.id
-        WHERE i.status IS NULL OR i.status NOT IN ('Paid')
+        LEFT JOIN (SELECT i2.id AS invoiceId, COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a.invoiceId = i2.id), 0) + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId = i2.id AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)), 0) AS totalPaid FROM invoices i2) pt ON pt.invoiceId = i.id
+        WHERE i.status IS NULL
+           OR LOWER(i.status) NOT IN ('paid', 'void', 'voided', 'cancelled', 'canceled', 'draft')
       `).all();
 
       const enriched = [];
@@ -1118,11 +1579,47 @@ const Invoices = {
       console.error('[invoices] getSalesSummary error:', e);
       return { success: false, error: e.message };
     }
-  }
+  },
+
+  // ── Sales by Income Account drill-down ─────────────────────────────────
+  getSalesByAccountDetail: function ({ dateFrom, dateTo, account } = {}) {
+    try {
+      const from = dateFrom || '0000-01-01';
+      const to = dateTo || '9999-12-31';
+      const rows = db.prepare(`
+        SELECT
+          il.invoice_id,
+          i.number AS invoiceNumber,
+          i.start_date AS invoiceDate,
+          i.status,
+          COALESCE(c.first_name || ' ' || c.last_name, 'Unknown') AS customerName,
+          SUM(il.amount) AS amount,
+          COUNT(*) AS lineCount
+        FROM invoice_lines il
+        JOIN invoices i ON il.invoice_id = i.id
+        LEFT JOIN customers c ON i.customer = c.id
+        LEFT JOIN products p ON il.product = p.id
+        WHERE COALESCE(p.income_account, 'Sales Revenue') = ?
+          AND i.status NOT IN ('Draft','Cancelled','Void')
+          AND i.start_date BETWEEN ? AND ?
+        GROUP BY il.invoice_id
+        ORDER BY i.start_date DESC
+      `).all(account, from, to);
+      return rows;
+    } catch (e) {
+      console.error('[invoices] getSalesByAccountDetail error:', e);
+      return [];
+    }
+  },
 };
 
 // Ensure the Invoices table is created
 Invoices.createTable();
 Invoices.createInvoiceItem();
+
+// Exposed so handlers (and the verification suite) never re-implement the rule
+// that decides which invoice lines are inventory — the same discipline as
+// Expenses exporting LINE_TYPE_ITEM / normalizeLineType.
+Invoices.readInvoiceItemLines = readInvoiceItemLines;
 
 module.exports = Invoices;

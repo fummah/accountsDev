@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Table, Button, Form, Input, DatePicker, Select, Modal, message, Card, Row, Col,
   Tag, Space, Typography, Tooltip, Statistic, Badge, Alert, Divider, InputNumber,
-  Popconfirm
+  Popconfirm, Spin
 } from 'antd';
 import {
   PlusOutlined, SearchOutlined, ReloadOutlined, FileTextOutlined, CheckCircleOutlined,
@@ -12,33 +12,18 @@ import {
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
-import { useHistory } from 'react-router-dom';
+import { useHistory, useLocation } from 'react-router-dom';
+import { dedupeAccounts } from '../../utils/accounts';
+import { SOURCE_LABELS, SOURCE_COLORS, getSourceTransactionRoute } from '../../utils/sourceRoutes';
+import AccountSelect from '../shared/AccountSelect';
+import JournalEntryDetailModal from './JournalEntryDetailModal';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
 
-// Map source_type to a route path for drill-down navigation
-const SOURCE_ROUTES = {
-  invoice:      '/inner/sales',
-  payment:      '/main/customers',
-  expense:      '/main/expenses',
-  bill:         '/main/vendors/bills',
-  bill_payment: '/main/vendors/bills',
-  deposit:      '/main/banking',
-  transaction:  '/main/accountant/journal-entries',
-  check:        '/main/accountant/checks',
-  transfer:     '/main/banking',
-  payroll:      '/main/employees',
-};
-
-const SOURCE_COLORS = {
-  invoice: 'blue', payment: 'green', expense: 'orange', bill: 'volcano',
-  bill_payment: 'magenta', deposit: 'cyan', transaction: 'geekblue',
-  check: 'purple', transfer: 'lime', payroll: 'gold', manual: 'default',
-};
-
 const JournalEntries = () => {
   const history = useHistory();
+  const location = useLocation();
   const { symbol: cSym } = useCurrency();
   const fmtC = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -54,7 +39,48 @@ const JournalEntries = () => {
   const [searchText, setSearchText] = useState('');
   const [dateFilter, setDateFilter] = useState([moment().startOf('month'), moment().endOf('month')]);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sourceTypeFilter, setSourceTypeFilter] = useState('all');
+  const [accountFilter, setAccountFilter] = useState(null);
+  const [partyFilter, setPartyFilter] = useState('');
+  const [enteredByFilter, setEnteredByFilter] = useState('');
+  const [referenceFilter, setReferenceFilter] = useState('');
   const [form] = Form.useForm();
+
+  // Source transaction drill-down modal
+  const [sourceRecord, setSourceRecord] = useState(null);
+  const [sourceDetail, setSourceDetail] = useState(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+
+  // Journal entry detail modal (shared)
+  const [journalDetailId, setJournalDetailId] = useState(null);
+
+  const openJournal = (journalId) => {
+    if (!journalId) return;
+    setJournalDetailId(journalId);
+  };
+
+  // Deep-link support: ?journal=<id> opens that specific journal entry's
+  // detail modal instead of dumping the user on the full list.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const journalId = params.get('journal');
+    if (journalId) openJournal(journalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
+  // Account activity drill-down modal (click an account name → register)
+  const [activity, setActivity] = useState(null);
+
+  const openAccountActivity = async (accountId, accountName) => {
+    if (!accountId) return;
+    setActivity({ accountId, accountName, txns: [], loading: true });
+    try {
+      const txns = await window.electronAPI.getAccountActivity?.(accountId) || [];
+      setActivity(a => ({ ...a, txns: Array.isArray(txns) ? txns : [], loading: false }));
+    } catch {
+      setActivity(a => ({ ...a, txns: [], loading: false }));
+    }
+  };
 
   // Live balance tracking for the form
   const [formLines, setFormLines] = useState([]);
@@ -125,7 +151,7 @@ const JournalEntries = () => {
         return { ...e, debitTotal, creditTotal, balanced, lineCount: lines.length };
       }) : [];
       setEntries(rows);
-      setAccounts(Array.isArray(accountsData) ? accountsData : []);
+      setAccounts(Array.isArray(accountsData) ? dedupeAccounts(accountsData) : []);
       setEntities(Array.isArray(entitiesData) ? entitiesData : []);
       setClasses(Array.isArray(cls) ? cls : []);
       setLocations(Array.isArray(locs) ? locs : []);
@@ -147,6 +173,24 @@ const JournalEntries = () => {
         (e.entered_by || '').toLowerCase().includes(lower)
       );
     }
+    if (referenceFilter) {
+      const lower = referenceFilter.toLowerCase();
+      result = result.filter(e => (e.reference || '').toLowerCase().includes(lower));
+    }
+    if (partyFilter) {
+      const lower = partyFilter.toLowerCase();
+      result = result.filter(e => (e.source?.party || '').toLowerCase().includes(lower));
+    }
+    if (enteredByFilter) {
+      result = result.filter(e => (e.entered_by || '') === enteredByFilter);
+    }
+    if (sourceTypeFilter !== 'all') {
+      result = result.filter(e => (e.source_type || 'manual') === sourceTypeFilter);
+    }
+    if (accountFilter) {
+      const target = Number(accountFilter);
+      result = result.filter(e => (Array.isArray(e.lines) ? e.lines : []).some(l => Number(l.account_id) === target));
+    }
     if (dateFilter && dateFilter[0] && dateFilter[1]) {
       const start = dateFilter[0].startOf('day');
       const end = dateFilter[1].endOf('day');
@@ -158,12 +202,32 @@ const JournalEntries = () => {
     if (statusFilter === 'balanced') result = result.filter(e => e.balanced);
     if (statusFilter === 'unbalanced') result = result.filter(e => !e.balanced);
     return result;
-  }, [entries, searchText, dateFilter, statusFilter]);
+  }, [entries, searchText, dateFilter, statusFilter, sourceTypeFilter, accountFilter, partyFilter, enteredByFilter, referenceFilter]);
 
   // Summary stats
   const totalDebits = useMemo(() => filteredEntries.reduce((s, e) => s + e.debitTotal, 0), [filteredEntries]);
   const totalCredits = useMemo(() => filteredEntries.reduce((s, e) => s + e.creditTotal, 0), [filteredEntries]);
   const unbalancedCount = useMemo(() => entries.filter(e => !e.balanced).length, [entries]);
+
+  // Filter options derived from loaded data
+  const enteredByOptions = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const e of entries) {
+      const v = e.entered_by;
+      if (v && !seen.has(v)) { seen.add(v); out.push(v); }
+    }
+    return out.sort();
+  }, [entries]);
+
+  const hasActiveFilters = !!(searchText || referenceFilter || partyFilter || enteredByFilter ||
+    (dateFilter && dateFilter[0] && dateFilter[1]) || statusFilter !== 'all' ||
+    sourceTypeFilter !== 'all' || accountFilter);
+
+  const clearFilters = () => {
+    setSearchText(''); setReferenceFilter(''); setPartyFilter(''); setEnteredByFilter('');
+    setDateFilter(null); setStatusFilter('all'); setSourceTypeFilter('all'); setAccountFilter(null);
+  };
 
   // Form balance computation
   const formDebitTotal = formLines.reduce((s, l) => s + (l.type === 'debit' ? (Number(l.amount) || 0) : 0), 0);
@@ -276,12 +340,40 @@ const JournalEntries = () => {
     }
   };
 
+  const openSource = async (record) => {
+    if (!record || !record.source_type) return;
+    setSourceRecord(record);
+    setSourceDetail(null);
+    setSourceLoading(true);
+    try {
+      const detail = await window.electronAPI.journalSourceDetail?.(record.source_type, record.source_id);
+      setSourceDetail(detail && !detail.error ? detail : null);
+    } catch {
+      setSourceDetail(null);
+    }
+    setSourceLoading(false);
+  };
+
   // Expandable row renderer showing line items
   const expandedRowRender = (record) => {
     const lines = Array.isArray(record.lines) ? record.lines : [];
     if (!lines.length) return <Text type="secondary">No line items</Text>;
     const lineColumns = [
-      { title: 'Account', dataIndex: 'account', key: 'account', render: v => <Text strong>{v || '-'}</Text> },
+      { title: '#', key: 'idx', width: 44, align: 'center', render: (_, __, i) => <Text type="secondary">{i + 1}</Text> },
+      { title: 'Account', key: 'account', width: 280,
+        render: (_, l) => (
+          <div>
+            {l.account_id
+              ? <a onClick={(e) => { e.stopPropagation(); openAccountActivity(l.account_id, l.accountName || l.account); }}
+                  style={{ cursor: 'pointer' }} title="View account activity">
+                  <Text strong style={{ color: '#1890ff' }}>{l.accountName || l.account || '-'}</Text>
+                </a>
+              : <Text strong>{l.accountName || l.account || '-'}</Text>}
+            {l.accountNumber ? <div><Text type="secondary" style={{ fontSize: 11 }}># {l.accountNumber}</Text></div> : null}
+          </div>
+        ) },
+      { title: 'Description / Memo', dataIndex: 'description', key: 'description',
+        render: v => v ? <Text>{v}</Text> : <Text type="secondary">-</Text> },
       { title: 'Debit', dataIndex: 'debit', key: 'debit', width: 130, align: 'right',
         render: v => Number(v) > 0 ? <Text style={{ color: '#3f8600', fontWeight: 500 }}>{fmtC(v)}</Text> : <Text type="secondary">-</Text> },
       { title: 'Credit', dataIndex: 'credit', key: 'credit', width: 130, align: 'right',
@@ -293,11 +385,27 @@ const JournalEntries = () => {
           size="small" pagination={false} bordered
           summary={() => (
             <Table.Summary.Row style={{ background: '#fafafa' }}>
-              <Table.Summary.Cell><Text strong>Totals</Text></Table.Summary.Cell>
+              <Table.Summary.Cell colSpan={3}><Text strong>Totals ({lines.length} lines)</Text></Table.Summary.Cell>
               <Table.Summary.Cell align="right"><Text strong style={{ color: '#3f8600' }}>{fmtC(record.debitTotal)}</Text></Table.Summary.Cell>
               <Table.Summary.Cell align="right"><Text strong style={{ color: '#cf1322' }}>{fmtC(record.creditTotal)}</Text></Table.Summary.Cell>
             </Table.Summary.Row>
           )} />
+        {record.source_type && (() => {
+          const st = record.source_type;
+          const label = SOURCE_LABELS[st] || String(st).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const src = record.source || {};
+          const srcInfo = [label, src.number || record.reference || '', src.party || '', src.date ? moment(src.date).format('MM/DD/YYYY') : ''].filter(Boolean).join(' · ');
+          return (
+            <div style={{ marginTop: 8 }}>
+              <Button size="small" type="primary" icon={<FileTextOutlined />}
+                style={{ borderRadius: 6, color: '#fff' }}
+                onClick={(e) => { e.stopPropagation(); openSource(record); }}
+                title="View source transaction">View Source Transaction</Button>
+              <Tag style={{ marginTop: 4, marginLeft: 8 }} color={SOURCE_COLORS[st] || 'default'}>Source: {srcInfo}</Tag>
+            </div>
+          );
+        })()}
+        {record.entered_by && <Tag style={{ marginTop: 6 }}>Entered By: {record.entered_by}</Tag>}
         {record.entity_id && <Tag style={{ marginTop: 6 }}>Entity: {record.entity_id}</Tag>}
         {record.class && <Tag style={{ marginTop: 6 }}>Class: {record.class}</Tag>}
         {record.location && <Tag style={{ marginTop: 6 }}>Location: {record.location}</Tag>}
@@ -307,20 +415,44 @@ const JournalEntries = () => {
   };
 
   const columns = [
+    { title: 'Journal', dataIndex: 'id', key: 'journal', width: 80, align: 'center',
+      render: v => v
+        ? <a onClick={(e) => { e.stopPropagation(); openJournal(v); }} style={{ cursor: 'pointer' }} title="Open journal entry"><Text code style={{ cursor: 'pointer' }}>#{v}</Text></a>
+        : '-' },
     { title: 'Date', dataIndex: 'date', key: 'date', width: 110, sorter: (a, b) => new Date(a.date) - new Date(b.date),
       defaultSortOrder: 'descend', render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true,
-      render: v => v ? <Tag style={{ fontSize: 11, borderRadius: 4 }}>{v}</Tag> : <Text type="secondary">-</Text> },
+      render: (v, r) => r.source_type
+        ? <a onClick={(e) => { e.stopPropagation(); openSource(r); }} style={{ cursor: 'pointer' }} title="View source transaction">
+            <Tag color={SOURCE_COLORS[r.source_type] || 'default'} style={{ fontSize: 11, borderRadius: 4 }}>{v || '-'}</Tag>
+          </a>
+        : (v ? <Tag style={{ fontSize: 11, borderRadius: 4 }}>{v}</Tag> : <Text type="secondary">-</Text>) },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
-    { title: 'Source', key: 'source', width: 110, render: (_, r) => {
+    { title: 'Source', key: 'source', width: 210, render: (_, r) => {
       const st = r.source_type || 'manual';
-      const label = st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      const route = SOURCE_ROUTES[st];
-      if (route) {
-        return <Tag color={SOURCE_COLORS[st] || 'default'} style={{ cursor: 'pointer', borderRadius: 4 }}
-          onClick={() => history.push(route)}>{label}</Tag>;
+      const label = SOURCE_LABELS[st] || st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const src = r.source || {};
+      const num = src.number || r.reference || '';
+      const party = src.party || '';
+      const sdate = src.date || r.date || '';
+      const info = (
+        <div>
+          <Tag color={SOURCE_COLORS[st] || 'default'} style={{ borderRadius: 4, marginBottom: 2 }}>{label}</Tag>
+          {num ? <div style={{ fontSize: 12, fontWeight: 600 }}>{num}</div> : null}
+          {party ? <div style={{ fontSize: 11, color: '#666', lineHeight: 1.4 }}>{party}</div> : null}
+          {sdate ? <div style={{ fontSize: 10, color: '#999' }}>{moment(sdate).format('MM/DD/YYYY')}</div> : null}
+        </div>
+      );
+      if (r.source_type) {
+        return (
+          <a onClick={(e) => { e.stopPropagation(); openSource(r); }}
+            style={{ cursor: 'pointer', display: 'block' }}
+            title="View source transaction">
+            {info}
+          </a>
+        );
       }
-      return <Tag color="default" style={{ borderRadius: 4 }}>{label}</Tag>;
+      return info;
     }},
     { title: 'Lines', dataIndex: 'lineCount', key: 'lineCount', width: 65, align: 'center',
       render: v => <Badge count={v || 0} style={{ backgroundColor: '#1890ff' }} overflowCount={99} /> },
@@ -362,7 +494,7 @@ const JournalEntries = () => {
           </div>
           <div>
             <Title level={3} style={{ margin: 0, lineHeight: 1.2 }}>Journal Entries</Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>{filteredEntries.length} entries {searchText || dateFilter ? '(filtered)' : ''}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{filteredEntries.length} entries {hasActiveFilters ? '(filtered)' : ''}</Text>
           </div>
         </div>
         <Space wrap size={6}>
@@ -407,7 +539,13 @@ const JournalEntries = () => {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <Input placeholder="Search description, reference..." prefix={<SearchOutlined />}
             value={searchText} onChange={e => setSearchText(e.target.value)}
-            style={{ width: 260, borderRadius: 6 }} allowClear />
+            style={{ width: 250, borderRadius: 6 }} allowClear />
+          <Input placeholder="Reference number" value={referenceFilter}
+            onChange={e => setReferenceFilter(e.target.value)}
+            style={{ width: 170, borderRadius: 6 }} allowClear />
+          <Input placeholder="Vendor / Customer" value={partyFilter}
+            onChange={e => setPartyFilter(e.target.value)}
+            style={{ width: 170, borderRadius: 6 }} allowClear />
           <DatePicker.RangePicker size="middle" value={dateFilter} onChange={setDateFilter}
             format="MM/DD/YYYY" allowClear style={{ borderRadius: 6 }} placeholder={['From date', 'To date']} />
           <Select value={statusFilter} onChange={setStatusFilter} style={{ width: 140, borderRadius: 6 }}>
@@ -415,10 +553,23 @@ const JournalEntries = () => {
             <Option value="balanced">Balanced Only</Option>
             <Option value="unbalanced">Unbalanced Only</Option>
           </Select>
-          {(searchText || dateFilter || statusFilter !== 'all') && (
-            <Button size="small" onClick={() => { setSearchText(''); setDateFilter(null); setStatusFilter('all'); }}
-              style={{ borderRadius: 6 }}>Clear Filters</Button>
+          <Select value={sourceTypeFilter} onChange={setSourceTypeFilter} style={{ width: 150, borderRadius: 6 }} allowClear={false}>
+            <Option value="all">All Sources</Option>
+            {Object.entries(SOURCE_LABELS).map(([val, lab]) => <Option key={val} value={val}>{lab}</Option>)}
+            <Option value="manual">Manual</Option>
+          </Select>
+          <AccountSelect value={accountFilter} onChange={setAccountFilter} style={{ width: 230, borderRadius: 6 }}
+            accounts={accounts} placeholder="Filter by account" allowClear />
+          <Select value={enteredByFilter || undefined} onChange={v => setEnteredByFilter(v || '')}
+            style={{ width: 150, borderRadius: 6 }} placeholder="Entered by" allowClear showSearch optionFilterProp="children">
+            {enteredByOptions.map(u => <Option key={u} value={u}>{u}</Option>)}
+          </Select>
+          {hasActiveFilters && (
+            <Button size="small" onClick={clearFilters} style={{ borderRadius: 6 }}>Clear Filters</Button>
           )}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 11, color: '#999' }}>
+          Tip: double-click a row, or click a Reference / Source to view the original transaction. Click an Account to see its register.
         </div>
       </Card>
 
@@ -430,16 +581,17 @@ const JournalEntries = () => {
           rowKey="id"
           size="small"
           loading={loading}
+          onRow={(record) => ({ onDoubleClick: () => { if (record.source_type) openSource(record); } })}
           expandable={{ expandedRowRender, expandRowByClick: true }}
-          pagination={{ pageSize: 20, showTotal: t => `${t} entries`, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'] }}
+          pagination={{ defaultPageSize: 20, showTotal: t => `${t} entries`, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'] }}
           scroll={{ x: 900 }}
           summary={() => filteredEntries.length > 0 ? (
             <Table.Summary fixed>
               <Table.Summary.Row style={{ background: '#fafafa' }}>
-                <Table.Summary.Cell index={0} colSpan={4}><Text strong>Page Totals</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: '#3f8600' }}>{fmtC(totalDebits)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={5} align="right"><Text strong style={{ color: '#cf1322' }}>{fmtC(totalCredits)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={6} colSpan={3}>
+                <Table.Summary.Cell index={0} colSpan={6}><Text strong>Page Totals</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={6} align="right"><Text strong style={{ color: '#3f8600' }}>{fmtC(totalDebits)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={7} align="right"><Text strong style={{ color: '#cf1322' }}>{fmtC(totalCredits)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={8} colSpan={3}>
                   {Math.abs(totalDebits - totalCredits) < 0.01
                     ? <Tag icon={<CheckCircleOutlined />} color="success">Balanced</Tag>
                     : <Tag icon={<WarningOutlined />} color="error">Diff: {fmtC(Math.abs(totalDebits - totalCredits))}</Tag>}
@@ -556,13 +708,7 @@ const JournalEntries = () => {
                   <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'flex-start' }}>
                     <Form.Item {...restField} name={[name, 'accountId']} rules={[{ required: true, message: 'Required' }]}
                       style={{ flex: 3, marginBottom: 0 }}>
-                      <Select placeholder="Select account" showSearch optionFilterProp="children" size="middle">
-                        {accounts.map(account => (
-                          <Option key={account.id} value={account.id}>
-                            {account.account_number ? `${account.account_number} - ` : ''}{account.accountName || account.name}
-                          </Option>
-                        ))}
-                      </Select>
+                      <AccountSelect accounts={accounts} placeholder="Select account" size="middle" />
                     </Form.Item>
                     <Form.Item {...restField} name={[name, 'type']} rules={[{ required: true, message: 'Required' }]}
                       style={{ flex: 1, marginBottom: 0 }}>
@@ -615,6 +761,145 @@ const JournalEntries = () => {
         onCancel={() => { setNewClassModal(false); setNewClassName(''); }} okText="Add" destroyOnClose>
         <Input placeholder="Class name" value={newClassName} onChange={e => setNewClassName(e.target.value)} onPressEnter={addNewClass} />
       </Modal>
+
+      {/* ═══ SOURCE TRANSACTION DETAIL MODAL ══════════════════════════════ */}
+      <Modal
+        title={
+          sourceRecord ? (
+            <span>
+              <Tag color={SOURCE_COLORS[sourceRecord.source_type] || 'default'} style={{ borderRadius: 4 }}>{sourceDetail?.label || SOURCE_LABELS[sourceRecord.source_type] || sourceRecord.source_type}</Tag>
+              <span style={{ fontWeight: 600 }}>{sourceDetail?.number ? `${sourceDetail.number} ` : ''}</span>
+              <Text type="secondary" style={{ fontSize: 13 }}>from journal entry #{sourceRecord.id}</Text>
+            </span>
+          ) : 'Source Transaction'
+        }
+        visible={!!sourceRecord}
+        onCancel={() => setSourceRecord(null)}
+        footer={[
+          <Button key="close" onClick={() => setSourceRecord(null)} style={{ borderRadius: 6 }}>Close</Button>,
+          sourceRecord && getSourceTransactionRoute(sourceRecord.source_type, sourceRecord.source_id, sourceRecord.source || {}, sourceRecord.id)
+            ? <Button key="open" type="primary" icon={<FileTextOutlined />} style={{ borderRadius: 6 }}
+                onClick={() => { const src = sourceRecord.source || {}; history.push(getSourceTransactionRoute(sourceRecord.source_type, sourceRecord.source_id, src, sourceRecord.id)); }}>
+                Open Original
+              </Button>
+            : null,
+        ]}
+        width={820}
+        bodyStyle={{ maxHeight: '70vh', overflowY: 'auto' }}
+        destroyOnClose
+      >
+        {sourceLoading ? (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Spin tip="Loading source transaction..." />
+          </div>
+        ) : sourceDetail ? (
+          <div>
+            <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+              <Col span={6}>
+                <Text type="secondary" style={{ fontSize: 11 }}>{sourceDetail.partyLabel || 'Party'}</Text>
+                {sourceDetail.partyType && sourceDetail.partyId ? (
+                  <div style={{ fontWeight: 600 }}>
+                    <a style={{ cursor: 'pointer', color: '#1890ff' }}
+                      onClick={() => history.push(sourceDetail.partyType === 'customer'
+                        ? `/main/customers/details/${sourceDetail.partyId}`
+                        : `/main/vendors/details/${sourceDetail.partyId}`)}
+                      title={`Open ${sourceDetail.partyLabel || 'party'} profile`}>
+                      {sourceDetail.party || '—'}
+                    </a>
+                  </div>
+                ) : <div style={{ fontWeight: 600 }}>{sourceDetail.party || '—'}</div>}
+              </Col>
+              <Col span={6}><Text type="secondary" style={{ fontSize: 11 }}>Date</Text><div style={{ fontWeight: 600 }}>{sourceDetail.date ? moment(sourceDetail.date).format('MM/DD/YYYY') : '—'}</div></Col>
+              <Col span={6}><Text type="secondary" style={{ fontSize: 11 }}>Status</Text><div><Tag color={String(sourceDetail.status || '').toLowerCase().includes('paid') || String(sourceDetail.status || '').toLowerCase().includes('deposit') ? 'success' : 'default'} style={{ borderRadius: 4 }}>{sourceDetail.status || '—'}</Tag></div></Col>
+              <Col span={6}><Text type="secondary" style={{ fontSize: 11 }}>Total</Text><div style={{ fontWeight: 700, color: '#cf1322' }}>{fmtC(sourceDetail.total)}</div></Col>
+            </Row>
+            {sourceDetail.memo ? (
+              <Alert type="info" showIcon style={{ marginBottom: 12, borderRadius: 8 }}
+                message={<span><Text strong>Memo / Notes: </Text>{sourceDetail.memo}</span>} />
+            ) : null}
+            <Table
+              columns={[
+                { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+                { title: 'Account', dataIndex: 'account', key: 'account', width: 180, ellipsis: true,
+                  render: v => v ? <Text>{v}</Text> : <Text type="secondary">-</Text> },
+                { title: 'Qty', dataIndex: 'quantity', key: 'quantity', width: 60, align: 'right',
+                  render: v => (v != null && v !== '' && Number(v) !== 1) ? Number(v) : <Text type="secondary">1</Text> },
+                { title: 'Rate', dataIndex: 'rate', key: 'rate', width: 110, align: 'right',
+                  render: v => fmtC(v) },
+                { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right',
+                  render: v => <Text strong>{fmtC(v)}</Text> },
+              ]}
+              dataSource={(sourceDetail.lines || []).map((l, i) => ({ ...l, key: i }))}
+              size="small" pagination={false} bordered
+              summary={() => (
+                <Table.Summary.Row style={{ background: '#fafafa' }}>
+                  <Table.Summary.Cell colSpan={4}><Text strong>Total</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text strong style={{ color: '#cf1322' }}>{fmtC(sourceDetail.total)}</Text></Table.Summary.Cell>
+                </Table.Summary.Row>
+              )}
+            />
+          </div>
+        ) : (
+          <Alert type="warning" showIcon message="Could not load the source transaction details." />
+        )}
+      </Modal>
+
+      {/* ═══ ACCOUNT ACTIVITY MODAL (account register drill-down) ═══════ */}
+      <Modal
+        title={activity ? (
+          <span>
+            <AuditOutlined style={{ marginRight: 8 }} />
+            <span style={{ fontWeight: 600 }}>Account Activity — {activity.accountName || `Account #${activity.accountId}`}</span>
+          </span>
+        ) : 'Account Activity'}
+        visible={!!activity}
+        onCancel={() => setActivity(null)}
+        footer={[
+          <Button key="coa" onClick={() => history.push('/main/accountant/chart-of-accounts')} style={{ borderRadius: 6 }}>
+            Open Chart of Accounts
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setActivity(null)} style={{ borderRadius: 6 }}>Close</Button>,
+        ]}
+        width={860}
+        bodyStyle={{ maxHeight: '70vh', overflowY: 'auto' }}
+        destroyOnClose
+      >
+        {activity && activity.loading ? (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin tip="Loading account activity..." /></div>
+        ) : activity && activity.txns.length ? (
+          <Table
+            columns={[
+              { title: 'Date', dataIndex: 'date', key: 'date', width: 100,
+                render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
+              { title: 'Journal #', dataIndex: 'journalId', key: 'journalId', width: 90,
+                render: v => <Text code>{v}</Text> },
+              { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true,
+                render: v => v || <Text type="secondary">-</Text> },
+              { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true,
+                render: (v, r) => <span>{r.lineDesc || v || '-'}</span> },
+              { title: 'Debit', dataIndex: 'debit', key: 'debit', width: 120, align: 'right',
+                render: v => Number(v) > 0 ? <Text style={{ color: '#3f8600', fontWeight: 500 }}>{fmtC(v)}</Text> : <Text type="secondary">-</Text> },
+              { title: 'Credit', dataIndex: 'credit', key: 'credit', width: 120, align: 'right',
+                render: v => Number(v) > 0 ? <Text style={{ color: '#cf1322', fontWeight: 500 }}>{fmtC(v)}</Text> : <Text type="secondary">-</Text> },
+            ]}
+            dataSource={activity.txns.map((t, i) => ({ ...t, key: i }))}
+            size="small" pagination={{ defaultPageSize: 15, showTotal: t => `${t} transactions` }}
+            onRow={(t) => ({ onDoubleClick: () => {
+              const rec = entries.find(e => e.id === t.journalId);
+              if (rec && rec.source_type) openSource(rec);
+            } })}
+          />
+        ) : (
+          <Alert type="info" showIcon message="No journal activity found for this account." />
+        )}
+      </Modal>
+
+      {/* ═══ JOURNAL ENTRY DETAIL MODAL (shared) ═════════════════════════ */}
+      <JournalEntryDetailModal
+        journalEntryId={journalDetailId}
+        visible={!!journalDetailId}
+        onClose={() => setJournalDetailId(null)}
+      />
     </div>
   );
 };

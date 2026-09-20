@@ -157,7 +157,7 @@ const DatabaseShare = () => {
           columns={tableColumns}
           rowKey="table"
           size="small"
-          pagination={{ pageSize: 15 }}
+          pagination={{ defaultPageSize: 15 }}
           loading={loading}
         />
       </Card>

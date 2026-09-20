@@ -132,7 +132,7 @@ const Payslips = () => {
         </div>
 
         <Table dataSource={payslips} columns={columns} rowKey="id" loading={loading} size="small"
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} payslips` }} />
+          pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: (t) => `${t} payslips` }} />
       </Card>
 
       <Modal

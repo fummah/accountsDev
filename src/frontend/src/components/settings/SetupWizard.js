@@ -14,6 +14,7 @@ import {
 import { useHistory } from 'react-router-dom';
 import COUNTRIES from '../../utils/countries';
 import { phoneInputHandler } from '../../utils/phone';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 
@@ -125,6 +126,7 @@ const PickerCard = ({ selected, onClick, icon, label, desc, color, badge }) => (
 ═══════════════════════════════════════════════════════════════════ */
 const SetupWizard = ({ onComplete, modal = false }) => {
   const history = useHistory();
+  const { symbol: cSym } = useCurrency();
   const [step, setStep]           = useState(0);
   const [saving, setSaving]       = useState(false);
   const [done, setDone]           = useState(false);
@@ -165,7 +167,7 @@ const SetupWizard = ({ onComplete, modal = false }) => {
             tax_rate: comp.vat_rate != null ? comp.vat_rate : 0,
             tax_name: comp.tax_name || 'VAT',
             fiscal_year_start: comp.fy_start || 'january',
-            terms: comp.terms != null ? comp.terms : 30,
+            terms: comp.terms != null ? comp.terms : 'Net 30',
             date_format: dateFmt,
             jurisdiction: juris,
           });
@@ -227,14 +229,24 @@ const SetupWizard = ({ onComplete, modal = false }) => {
         await window.electronAPI?.settingsSet?.('tax_jurisdiction', vals.jurisdiction || 'US');
         await window.electronAPI?.settingsSet?.('fiscal_year_start', vals.fiscal_year_start || 'january');
         const compVals = companyForm.getFieldsValue();
+        const taxRate = vals.tax_rate != null ? vals.tax_rate : (existing.vat_rate != null ? existing.vat_rate : 0);
+        const taxName = vals.tax_name || existing.tax_name || 'VAT';
         await window.electronAPI?.saveCompany?.({
           ...existing, ...compVals, industry, logo,
           currency: vals.base_currency || existing.currency || '',
-          vat_rate: vals.tax_rate != null ? vals.tax_rate : (existing.vat_rate != null ? existing.vat_rate : 0),
-          tax_name: vals.tax_name || existing.tax_name || 'VAT',
+          vat_rate: taxRate,
+          tax_name: taxName,
           fy_start: vals.fiscal_year_start || existing.fy_start || '',
-          terms: vals.terms != null ? vals.terms : (existing.terms != null ? existing.terms : 30),
+          terms: vals.terms != null ? vals.terms : (existing.terms != null ? existing.terms : 'Net 30'),
         });
+        // Ensure default tax rate exists in vat_rates
+        if (Number(taxRate) > 0) {
+          const existingRates = await window.electronAPI?.getAllVat?.() || [];
+          const match = existingRates.find(r => Number(r.vat_percentage) === Number(taxRate));
+          if (!match) {
+            await window.electronAPI?.insertVat?.(taxName, Number(taxRate), null);
+          }
+        }
       }
       if (step === 6) {
         const vals = bankForm.getFieldsValue();
@@ -308,18 +320,8 @@ const SetupWizard = ({ onComplete, modal = false }) => {
       // Seed system accounts if not yet done
       await window.electronAPI?.coaSeedSystemAccounts?.().catch(() => {});
 
-      // Create bank account in COA if provided (read from existing data)
-      const bankAcctName = existing.account_number || 'Business Checking';
-      try {
-        await window.electronAPI?.insertChartAccount?.({
-          name: bankAcctName, type: 'Bank',
-          number: existing.routing_number || null,
-          status: 'Active',
-          openingBalance: Number(existing.opening_balance) || 0,
-          normalBalance: 'Debit',
-          description: existing.bank_name || '',
-        });
-      } catch {} // may already exist
+      // Bank account was already created in COA by step 6's continue handler.
+      // Do NOT create a second one here — it would duplicate.
 
       await window.electronAPI?.setupWizardComplete?.({
         company: existing,
@@ -448,11 +450,6 @@ const SetupWizard = ({ onComplete, modal = false }) => {
               </Col>
             </Row>
             <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="website" label="Website">
-                  <Input placeholder="www.yourbusiness.com" />
-                </Form.Item>
-              </Col>
               <Col span={12}>
                 <Form.Item name="reg_number" label="Registration Number">
                   <Input placeholder="Company registration #" />
@@ -651,8 +648,15 @@ const SetupWizard = ({ onComplete, modal = false }) => {
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="terms" label="Default Invoice Terms (Days)" initialValue={30}>
-                  <InputNumber min={0} max={365} style={{ width: '100%' }} />
+                <Form.Item name="terms" label="Default Payment Terms" initialValue="Net 30">
+                  <Select allowClear>
+                    <Select.Option value="Net 7">Net 7</Select.Option>
+                    <Select.Option value="Net 15">Net 15</Select.Option>
+                    <Select.Option value="Net 30">Net 30</Select.Option>
+                    <Select.Option value="Net 45">Net 45</Select.Option>
+                    <Select.Option value="Net 60">Net 60</Select.Option>
+                    <Select.Option value="Due on Receipt">Due on Receipt</Select.Option>
+                  </Select>
                 </Form.Item>
               </Col>
             </Row>
@@ -690,7 +694,7 @@ const SetupWizard = ({ onComplete, modal = false }) => {
               </Col>
               <Col span={8}>
                 <Form.Item name="opening_balance" label="Opening Balance">
-                  <InputNumber min={0} step={0.01} style={{ width: '100%' }} prefix="$" />
+                  <InputNumber min={0} step={0.01} style={{ width: '100%' }} prefix={cSym} />
                 </Form.Item>
               </Col>
             </Row>
@@ -743,7 +747,7 @@ const SetupWizard = ({ onComplete, modal = false }) => {
                 { icon: <AppstoreOutlined />, label: 'Chart of Accounts', route: '/main/accountant/chart-of-accounts',    color: '#52c41a' },
                 { icon: <BankOutlined />,     label: 'Banking',           route: '/main/banking/reconcile',               color: '#722ed1' },
                 { icon: <TeamOutlined />,     label: 'Add Customers',     route: '/main/customers/center',                color: '#eb2f96' },
-                { icon: <ThunderboltOutlined />,label: 'Run Reports',     route: '/main/accountant/reports',              color: '#13c2c2' },
+                { icon: <ThunderboltOutlined />,label: 'Run Reports',     route: '/main/reports/sales',                   color: '#13c2c2' },
               ].map((a, i) => (
                 <div key={i}
                   onClick={() => { if (history) { if (onComplete) onComplete(); history.push(a.route); } }}

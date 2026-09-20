@@ -16,6 +16,7 @@ import Leads from './Leads';
 import CreditNoteList from './creditNotes/CreditNoteList';
 import CustomerPaymentHistory from './payments/CustomerPaymentHistory';
 import InvoiceCustomization from './invoices/InvoiceCustomization';
+import QuoteCustomization from './quotes/QuoteCustomization';
 
 const CustomerRoutes = ({ match }) => {
   return (
@@ -39,6 +40,7 @@ const CustomerRoutes = ({ match }) => {
       <Route exact path={`${match.path}/payment-history`} component={CustomerPaymentHistory} />
       <Route exact path={`${match.path}/payment-history/:customerId`} component={CustomerPaymentHistory} />
       <Route exact path={`${match.path}/invoices/customize`} component={InvoiceCustomization} />
+      <Route exact path={`${match.path}/quotes/customize`} component={QuoteCustomization} />
     </Switch>
   );
 };

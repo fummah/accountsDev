@@ -6,13 +6,12 @@ import {
   NAV_STYLE_FIXED,
   NAV_STYLE_MINI_SIDEBAR,
   NAV_STYLE_NO_HEADER_MINI_SIDEBAR,
-  TAB_SIZE,
-  THEME_TYPE_LITE
+  TAB_SIZE
 } from "../../constants/ThemeSetting";
 
 
 const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
-  const {width, themeType} = useSelector(({settings}) => settings);
+  const {width} = useSelector(({settings}) => settings);
   let navStyle = useSelector(({settings}) => settings.navStyle);
   const [companyLogo, setCompanyLogo] = useState(null);
   const [companyName, setCompanyName] = useState('');
@@ -43,9 +42,7 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
     ? <img alt="logo" src={companyLogo} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
     : navStyle === NAV_STYLE_NO_HEADER_MINI_SIDEBAR && !isMobile
       ? <img alt="logo" src={`${publicUrl}/assets/images/w-logo.png`} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
-      : themeType === THEME_TYPE_LITE
-        ? <img alt="logo" src={`${publicUrl}/assets/images/logo.png`} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />
-        : <img alt="logo" src={`${publicUrl}/assets/images/logo-white.png`} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />;
+      : <img alt="logo" src={`${publicUrl}/assets/images/logo-white.png`} style={{ height: 36, maxWidth: 140, objectFit: 'contain' }} />;
 
   // Show fold/unfold toggle on desktop only (mobile uses the Drawer close button)
   const showToggle = !isMobile && (navStyle === NAV_STYLE_FIXED || navStyle === NAV_STYLE_MINI_SIDEBAR);
@@ -54,7 +51,7 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
     <div className="gx-layout-sider-header">
       {showToggle ? <div className="gx-linebar">
         <i
-          className={`gx-icon-btn icon icon-${sidebarCollapsed ? 'menu-fold' : 'menu-unfold'} ${themeType !== THEME_TYPE_LITE ? 'gx-text-white' : ''}`}
+          className={`gx-icon-btn gx-text-white icon icon-${sidebarCollapsed ? 'menu-fold' : 'menu-unfold'}`}
           onClick={() => {
             if (typeof setSidebarCollapsed === 'function') setSidebarCollapsed();
           }}
@@ -65,7 +62,7 @@ const SidebarLogo = ({sidebarCollapsed, setSidebarCollapsed}) => {
         {sidebarCollapsed ? null : (
           <>
             {logoImg}
-            {companyName && <span style={{ fontSize: 13, fontWeight: 600, color: themeType === THEME_TYPE_LITE ? '#1a1a1a' : '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>{companyName}</span>}
+            {companyName && <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>{companyName}</span>}
           </>
         )}
       </Link>

@@ -13,8 +13,8 @@ const formattedNumber = (number) => { return new Intl.NumberFormat('en-US', {
 const InvoicesCard = ({ Report, title = '1' }) => {
   const { symbol: cSym } = useCurrency();
 
-  const unpaidTotal = Number(Report?.open_invoice?.[0]?.open_total_amount) || 0;
-  const overdueTotal = Number(Report?.due_invoice?.[0]?.due_total_amount) || 0;
+  const unpaidTotal = Number(Report?.openInvoice12m?.[0]?.open_total_amount) || Number(Report?.open_invoice?.[0]?.open_total_amount) || 0;
+  const overdueTotal = Number(Report?.dueInvoice12m?.[0]?.due_total_amount) || Number(Report?.due_invoice?.[0]?.due_total_amount) || 0;
   const notDueYet = Math.max(0, unpaidTotal - overdueTotal);
   const overduePct = unpaidTotal > 0 ? Math.round((overdueTotal / unpaidTotal) * 100) : 0;
 

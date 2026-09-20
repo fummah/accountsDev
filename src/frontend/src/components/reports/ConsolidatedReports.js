@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, Select, DatePicker, message, Tag, Space, Row, Col, Statistic, Tabs, Divider } from 'antd';
 import { ClusterOutlined, FileTextOutlined } from '@ant-design/icons';
 import moment from 'moment';
+import { useCurrency } from '../../utils/currency';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 const { TabPane } = Tabs;
 
 const ConsolidatedReports = () => {
+  const { symbol: cSym } = useCurrency();
   const [runs, setRuns] = useState([]);
   const [entities, setEntities] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -100,9 +102,9 @@ const ConsolidatedReports = () => {
           <Tabs defaultActiveKey="1">
             <TabPane tab="Profit & Loss" key="1">
               <Row gutter={16} style={{ marginBottom: 16 }}>
-                <Col span={8}><Statistic title="Total Revenue" value={viewData.profitAndLoss?.totalRevenue} prefix="$" precision={2} /></Col>
-                <Col span={8}><Statistic title="Total Expenses" value={viewData.profitAndLoss?.totalExpenses} prefix="$" precision={2} /></Col>
-                <Col span={8}><Statistic title="Net Income" value={viewData.profitAndLoss?.netIncome} prefix="$" precision={2} valueStyle={{ color: (viewData.profitAndLoss?.netIncome || 0) >= 0 ? '#3f8600' : '#cf1322' }} /></Col>
+                <Col span={8}><Statistic title="Total Revenue" value={viewData.profitAndLoss?.totalRevenue} prefix={cSym} precision={2} /></Col>
+                <Col span={8}><Statistic title="Total Expenses" value={viewData.profitAndLoss?.totalExpenses} prefix={cSym} precision={2} /></Col>
+                <Col span={8}><Statistic title="Net Income" value={viewData.profitAndLoss?.netIncome} prefix={cSym} precision={2} valueStyle={{ color: (viewData.profitAndLoss?.netIncome || 0) >= 0 ? '#3f8600' : '#cf1322' }} /></Col>
               </Row>
               <Divider>Revenue</Divider>
               <Table columns={acctColumns} dataSource={viewData.profitAndLoss?.revenue || []} rowKey="name" size="small" pagination={false} />
@@ -111,9 +113,9 @@ const ConsolidatedReports = () => {
             </TabPane>
             <TabPane tab="Balance Sheet" key="2">
               <Row gutter={16} style={{ marginBottom: 16 }}>
-                <Col span={8}><Statistic title="Total Assets" value={viewData.balanceSheet?.totalAssets} prefix="$" precision={2} /></Col>
-                <Col span={8}><Statistic title="Total Liabilities" value={viewData.balanceSheet?.totalLiabilities} prefix="$" precision={2} /></Col>
-                <Col span={8}><Statistic title="Total Equity" value={viewData.balanceSheet?.totalEquity} prefix="$" precision={2} /></Col>
+                <Col span={8}><Statistic title="Total Assets" value={viewData.balanceSheet?.totalAssets} prefix={cSym} precision={2} /></Col>
+                <Col span={8}><Statistic title="Total Liabilities" value={viewData.balanceSheet?.totalLiabilities} prefix={cSym} precision={2} /></Col>
+                <Col span={8}><Statistic title="Total Equity" value={viewData.balanceSheet?.totalEquity} prefix={cSym} precision={2} /></Col>
               </Row>
               <Divider>Assets</Divider>
               <Table columns={acctColumns} dataSource={viewData.balanceSheet?.assets || []} rowKey="name" size="small" pagination={false} />
@@ -123,7 +125,7 @@ const ConsolidatedReports = () => {
               <Table columns={acctColumns} dataSource={viewData.balanceSheet?.equity || []} rowKey="name" size="small" pagination={false} />
             </TabPane>
             <TabPane tab="All Accounts" key="3">
-              <Table columns={acctColumns} dataSource={viewData.allAccounts || []} rowKey="name" size="small" pagination={{ pageSize: 25 }} />
+              <Table columns={acctColumns} dataSource={viewData.allAccounts || []} rowKey="name" size="small" pagination={{ defaultPageSize: 25 }} />
             </TabPane>
           </Tabs>
         )}

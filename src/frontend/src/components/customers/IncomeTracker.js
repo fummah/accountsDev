@@ -133,7 +133,7 @@ const IncomeTracker = () => {
         </Space>
 
         <Table columns={columns} dataSource={filtered} loading={loading} rowKey={(r) => r.id || String(Math.random())}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }} size="middle" />
+          pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `${t} transactions` }} size="middle" />
       </Card>
     </div>
   );
