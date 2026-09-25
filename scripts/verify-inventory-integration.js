@@ -103,7 +103,7 @@ const money = (n) => Math.round(Number(n || 0) * 100) / 100;
   `).run();
   const customerId = Number(cust.lastInsertRowid);
 
-  const invProduct = db.prepare("SELECT id, name, sku FROM products WHERE LOWER(type)='product' ORDER BY id LIMIT 1").get();
+  const invProduct = db.prepare("SELECT id, name, sku FROM products WHERE LOWER(type) IN ('product','inventory_part','inventory part','raw material','asset','bundle') ORDER BY id LIMIT 1").get();
   const svcProduct = db.prepare("SELECT id, name, type FROM products WHERE LOWER(type)='service' ORDER BY id LIMIT 1").get();
   const supplier = db.prepare('SELECT id FROM suppliers ORDER BY id LIMIT 1').get();
   const expenseAcct = db.prepare(

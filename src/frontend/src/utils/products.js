@@ -1,34 +1,32 @@
 /**
- * productClassification — renderer-side mirror of
- * src/backend/services/productClassification.js
+ * products.js — renderer-side stock classification.
  *
- * Which Products & Services move stock. Decided from the product's TYPE, never
- * from its NAME: product names repeat heavily in real data (in the live DB, 33
- * product rows share the names of just 7 inventory items), so a name-based rule
+ * REFACTORED: this module no longer keeps its own hardcoded type lists. It is a
+ * thin compatibility facade over the ONE canonical Item Type capability model
+ * (utils/itemTypes.js → src/shared/itemTypes.json). Anything that still imports
+ * from here gets the same answer as the rest of the app, so the two can never
+ * disagree.
+ *
+ * Which Products & Services move stock is decided from the product's TYPE, never
+ * from its NAME: product names repeat heavily in real data, so a name-based rule
  * would move the wrong product's stock.
- *
- * The Add Product form constrains `type` to:
- *     Product | Service | Raw Material | Asset | Bundle
- *
- *   • Service                                 → never moves stock
- *   • Product / Raw Material / Asset / Bundle → moves stock
- *   • anything else (blank, null, custom)     → does NOT move stock (fail safe)
- *
- * Keep the two type sets in sync with the backend service.
  */
 
-// Product types that hold physical stock.
-export const INVENTORY_PRODUCT_TYPES = new Set([
-  'product',
-  'raw material',
-  'asset',
-  'bundle',
-]);
+import {
+  ITEM_TYPES,
+  ITEM_TYPE_CODES,
+  normalizeTypeCode,
+  capabilities,
+  tracksInventory as capTracksInventory,
+} from './itemTypes';
 
-// Product types that explicitly never hold stock.
-export const NON_INVENTORY_PRODUCT_TYPES = new Set([
-  'service',
-]);
+// Derived sets, kept for any legacy reader. The authority is the capability model.
+export const INVENTORY_PRODUCT_TYPES = new Set(
+  ITEM_TYPE_CODES.filter((code) => capTracksInventory(code))
+);
+export const NON_INVENTORY_PRODUCT_TYPES = new Set(
+  ITEM_TYPE_CODES.filter((code) => !capTracksInventory(code))
+);
 
 /** Lower-case, whitespace-normalised product type key. */
 export const productTypeKey = (productOrType) => {
@@ -40,22 +38,27 @@ export const productTypeKey = (productOrType) => {
 
 /** True when the type is a known inventory type. */
 export const isInventoryType = (productOrType) =>
-  INVENTORY_PRODUCT_TYPES.has(productTypeKey(productOrType));
+  capTracksInventory(productTypeKey(productOrType));
 
 /** True when the type is an explicitly non-inventory (service) type. */
-export const isServiceType = (productOrType) =>
-  NON_INVENTORY_PRODUCT_TYPES.has(productTypeKey(productOrType));
+export const isServiceType = (productOrType) => {
+  const cap = capabilities(productTypeKey(productOrType));
+  return !!cap && !cap.tracksQuantity;
+};
 
 /**
  * Does this product move stock?
  * Accepts a product row, a bare type string, or nothing.
  * Unknown / blank types return false (fail safe).
  */
-export const tracksInventory = (productOrType) => isInventoryType(productOrType);
+export const tracksInventory = (productOrType) =>
+  capTracksInventory(productTypeKey(productOrType));
 
 /** Filter a list of products down to those that move stock. */
 export const getInventoryProducts = (products) =>
   (Array.isArray(products) ? products : []).filter(tracksInventory);
+
+export { ITEM_TYPES, normalizeTypeCode };
 
 export default {
   INVENTORY_PRODUCT_TYPES,

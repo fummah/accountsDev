@@ -2,9 +2,12 @@ import React, {useContext} from "react";
 import Widget from "components/Widget";
 import { Table } from "antd";
 import {TypeContext} from "appContext/TypeContext.js";
+import { normalizeDocumentLines } from "utils/lineItems";
 
 const LineItems = ({lines}) => {
   const type = useContext(TypeContext);
+  // Never show the empty convenience row (or a legacy blank DB row).
+  const cleanLines = normalizeDocumentLines(lines);
   
   const columns = [
     {
@@ -45,7 +48,7 @@ const LineItems = ({lines}) => {
       <Widget title={
         <h3 className="gx-ml-3">{type} Items</h3>
       } styleName="gx-card-tabs gx-card-profile">
-       <Table dataSource={lines} columns={columns} />;
+       <Table dataSource={cleanLines} columns={columns} />;
       </Widget>
     );
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useHistory } from 'react-router-dom';
-import { Card, Table, Button, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Tabs, Statistic, Popconfirm, Badge, Avatar, Typography, Descriptions, Empty, Divider } from 'antd';
-import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, DollarOutlined, ClockCircleOutlined, FileTextOutlined, FileAddOutlined, ShopOutlined, TeamOutlined, UsergroupAddOutlined, MailOutlined, PhoneOutlined, GlobalOutlined, EnvironmentOutlined, IdcardOutlined, BankOutlined, AccountBookOutlined, ProfileOutlined, TagsOutlined, ArrowUpOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Tabs, Popconfirm, Avatar, Typography, Descriptions, Empty, Divider } from 'antd';
+import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, DollarOutlined, ClockCircleOutlined, FileTextOutlined, FileAddOutlined, ShopOutlined, TeamOutlined, UsergroupAddOutlined, PhoneOutlined, EnvironmentOutlined, TagsOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { formatPhone, phoneInputHandler } from '../../utils/phone';
@@ -9,6 +9,8 @@ import COUNTRIES from '../../utils/countries';
 import FormSection, { FORM_ITEM_STYLE } from '../shared/FormSection';
 import ContactIdentityNote from '../shared/ContactIdentityNote';
 import TaxSettingsSection from '../shared/TaxSettingsSection';
+import ListToolbar from '../shared/ListToolbar';
+import { toCsv, downloadCsv, csvDate } from '../../utils/csv';
 import { deriveDisplayName, identityRule } from '../../utils/contactIdentity';
 import { resolveTaxRateFields, taxRateFormValue, describeTaxRate } from '../../utils/taxRate';
 
@@ -250,14 +252,18 @@ const SupplierVendorList = () => {
 
   const exportCSV = () => {
     try {
-      const headers = ['id', 'display_name', 'company_name', 'email', 'phone_number', 'city', 'status'];
-      const rows = filtered.map(r => headers.map(h => `"${(r[h] ?? '').toString().replace(/"/g, '""')}"`).join(','));
-      const csv = [headers.join(','), ...rows].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `suppliers_${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    } catch (_) { message.error('Export failed'); }
+      const headers = ['Vendor Number', 'Display Name', 'Company', 'Email', 'Phone', 'City', 'Status', 'Created Date'];
+      const rows = filtered.map(r => ([
+        r.id != null ? r.id : '',
+        r.display_name || `${r.first_name || ''} ${r.last_name || ''}`.trim() || r.company_name || '',
+        r.company_name || '', r.email || '', r.phone_number || '', r.city || '',
+        r.status || 'Active', csvDate(r.date_entered),
+      ]));
+      downloadCsv(`Suppliers_${new Date().toISOString().slice(0, 10)}.csv`, toCsv(headers, rows));
+    } catch (e) {
+      console.error('[suppliers] export failed:', e);
+      message.error('Export failed');
+    }
   };
 
   const activeCount = suppliers.filter(s => (s.status || 'Active') === 'Active').length;
@@ -330,8 +336,6 @@ const SupplierVendorList = () => {
           <Title level={3} style={{ margin: 0 }}><ShopOutlined style={{ marginRight: 8 }} />Suppliers / Vendors</Title>
           <Text type="secondary">Manage your suppliers, vendors, payables and terms</Text>
         </div>
-        <Button type="primary" size="large" icon={<PlusOutlined />} onClick={openAdd}
-          style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(114,46,209,0.35)', fontWeight: 600 }}>Add Supplier / Vendor</Button>
       </div>
 
       {/* Stat tiles */}
@@ -386,17 +390,21 @@ const SupplierVendorList = () => {
 
       {/* Table card */}
       <Card size="small" style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0' }} bodyStyle={{ padding: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap' }}>
-          <Input.Search allowClear placeholder="Search by name, company, email, phone..." prefix={<SearchOutlined />}
-            onChange={e => setSearch(e.target.value)} onSearch={v => setSearch(v)} style={{ width: 320, marginRight: 'auto' }} />
-          <Select value={statusFilter} onChange={v => setStatusFilter(v)} style={{ width: 150 }}>
-            <Option value="all">All Statuses</Option>
-            <Option value="Active">Active</Option>
-            <Option value="Inactive">Inactive</Option>
-          </Select>
-          <Button icon={<DownloadOutlined />} onClick={exportCSV}>Export</Button>
-          <Button icon={<ReloadOutlined />} onClick={loadSuppliers}>Refresh</Button>
-        </div>
+        <ListToolbar
+          searchPlaceholder="Search by name, company, email, phone..."
+          searchValue={search}
+          onSearchChange={setSearch}
+          onSearch={v => setSearch(v)}
+          statusValue={statusFilter}
+          onStatusChange={setStatusFilter}
+          onExport={exportCSV}
+          onRefresh={loadSuppliers}
+          refreshLoading={loading}
+          primaryAction={
+            <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}
+              style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(114,46,209,0.35)', fontWeight: 600 }}>Add Supplier / Vendor</Button>
+          }
+        />
         <Table columns={columns} dataSource={filtered} loading={loading} rowKey={r => r.id} scroll={{ x: 1000 }}
           pagination={{ defaultPageSize: 20, defaultCurrent: 1, showSizeChanger: true, showTotal: t => `${t} suppliers/vendors` }}
           size="middle" />

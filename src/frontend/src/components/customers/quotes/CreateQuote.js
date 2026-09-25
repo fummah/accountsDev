@@ -6,7 +6,7 @@ import SendEmailModal from '../shared/SendEmailModal';
 import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
-import { ensureTrailingEmptyLine, removeLineAndEnsureEmpty, collapseToSingleTrailingEmpty } from '../../../utils/lineItems';
+import { ensureTrailingEmptyLine, removeLineItem, normalizeDocumentLines, collapseToSingleTrailingEmpty } from '../../../utils/lineItems';
 import { confirmSavedDocumentEdit, confirmDocumentAction, useUnsavedChanges } from '../shared/documentEditGuard';
 import CustomerContactFields from '../shared/CustomerContactFields';
 import { deriveDisplayName } from '../../../utils/contactIdentity';
@@ -295,7 +295,9 @@ const CreateQuote = () => {
         });
         setVatPercent(q.vat != null ? Number(q.vat) : 0);
         if (Array.isArray(q.lines) && q.lines.length > 0) {
-          const loaded = q.lines.map((l, i) => ({
+          // Drop any legacy blank rows before editing, then add exactly ONE
+          // convenience row so the form never shows multiple empty lines.
+          const loaded = normalizeDocumentLines(q.lines).map((l, i) => ({
             key: Date.now() + i,
             description: l.description || '',
             quantity: l.quantity || 1,
@@ -321,7 +323,10 @@ const CreateQuote = () => {
   };
 
   const removeLine = (key) => {
-    runEditGuard(() => setLines(prev => removeLineAndEnsureEmpty(prev, l => l.key !== key, makeEmptyLine)));
+    // Deleting a line — including the auto-created blank convenience row —
+    // actually removes it. A trailing blank is NOT force-recreated here; the
+    // next product selection (or "Add Line") provides one again.
+    runEditGuard(() => setLines(prev => removeLineItem(prev, l => l.key !== key, makeEmptyLine)));
   };
 
   const updateLine = (key, field, value) => {
@@ -343,11 +348,21 @@ const CreateQuote = () => {
       )));
       return;
     }
-    const rate = Number(prod.selling_price || prod.price || 0);
+    const rate = Number(prod.price || 0);
+    const desc = prod.sales_description || prod.description || prod.name || '';
+    // Sales tax defaults from the Item Master's Sales Tax Code when the quote has
+    // no explicit rate yet. The line snapshots the rate on the backend too.
+    const prodTax = prod.sales_tax_rate_id != null
+      ? vatRates.find(v => Number(v.id) === Number(prod.sales_tax_rate_id))
+      : null;
+    if (prodTax && !(Number(form.getFieldValue('vat')) > 0)) {
+      form.setFieldsValue({ vat: Number(prodTax.vat_percentage) || 0 });
+      setVatPercent(Number(prodTax.vat_percentage) || 0);
+    }
     runEditGuard(() => setLines(prev => {
       const updated = prev.map(l => {
         if (l.key !== key) return l;
-        return { ...l, description: prod.description || prod.name, rate, amount: (l.quantity || 1) * rate, product_id: productId };
+        return { ...l, description: desc, rate, amount: (l.quantity || 1) * rate, product_id: productId };
       });
       // Product selected → make sure a fresh empty line waits below.
       return ensureTrailingEmptyLine(updated, makeEmptyLine);
@@ -383,8 +398,10 @@ const CreateQuote = () => {
       const statement_message = vals.statement_message || '';
       const number = vals.number || '';
       const vat = Number(vals.vat) || 0;
-      const quoteLines = lines.filter(l => l.description).map(l => ({
-        description: l.description,
+      // Only MEANINGFUL lines are saved — the blank convenience row (and any
+      // legacy blank row) is UI-only and must never become a document line.
+      const quoteLines = normalizeDocumentLines(lines).map(l => ({
+        description: l.description || '',
         quantity: Number(l.quantity) || 1,
         rate: Number(l.rate) || 0,
         amount: Number(l.amount) || 0,
@@ -582,7 +599,7 @@ const CreateQuote = () => {
         email: vals.customer_email || '',
         billingAddress: vals.billing_address || '',
       },
-      lines,
+      lines: normalizeDocumentLines(lines),
       subtotal,
       vatPercent: Number(vatPercent) || 0,
       vatAmount,
@@ -633,17 +650,17 @@ const CreateQuote = () => {
 
   return (
     <div style={PAGE_WRAPPER_STYLE}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-        <Space wrap>
-          <Button icon={<ArrowLeftOutlined />} onClick={handleBack} style={{ borderRadius: 8, color: '#595959', borderColor: '#d9d9d9', display: 'inline-flex', alignItems: 'center' }}>Back</Button>
-          <h2 style={{ margin: 0 }}>{isEdit ? `Edit Quote #${form.getFieldValue('number') || id}` : 'Create Quote'}</h2>
+      <div className="al-page-head" style={{ marginBottom: 16 }}>
+        <div className="al-page-head-left">
+          <Button icon={<ArrowLeftOutlined />} onClick={handleBack} style={{ borderRadius: 8, color: '#595959', borderColor: '#d9d9d9' }}>Back</Button>
+          <h2>{isEdit ? `Edit Quote #${form.getFieldValue('number') || id}` : 'Create Quote'}</h2>
           <QuoteStatusBadge status={isEdit ? canonicalQuoteStatus : 'Pending'} />
           {isEdit && (<>
             <Button icon={<CheckCircleOutlined />} disabled={!canAccept} loading={actionBusy} onClick={handleAccept}>Accept Quote</Button>
             <Button icon={<CloseCircleOutlined />} danger disabled={!canDecline} loading={actionBusy} onClick={handleDecline}>Decline Quote</Button>
             <Button type="primary" icon={<SwapOutlined />} disabled={!canConvert} loading={actionBusy} onClick={handleConvert}>Convert to Invoice</Button>
           </>)}
-        </Space>
+        </div>
         <Space wrap>
           <Button icon={<UserOutlined />} disabled={!selectedCustomerId} onClick={() => history.push(`/main/customers/details/${selectedCustomerId}`)}>View Customer</Button>
           {isEdit && (<>

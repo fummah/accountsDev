@@ -91,6 +91,13 @@ const filterOption = (input, option) => {
  * sorted, searchable by name/code/full path, and selectable for parents OR
  * children.
  *
+ * allowedTypes:
+ *   Optional array of account-type names (e.g. ['Bank'] or
+ *   ['Income', 'Other Income']). When supplied, only accounts whose real
+ *   `accountType`/`type` matches are offered — this is how the SAME component
+ *   serves both "Deposit To" (Bank only) and "Deposit Line" (Income only)
+ *   without duplicating a dropdown. Omit it to show every account passed in.
+ *
  * valueMode:
  *   'id'   (default) — value is the unique Account ID (never the name).
  *   'name'           — value is the account name (for legacy name-stored
@@ -99,6 +106,7 @@ const filterOption = (input, option) => {
  */
 const AccountSelect = ({
   accounts = [],
+  allowedTypes,
   value,
   onChange,
   placeholder = 'Select account',
@@ -110,8 +118,15 @@ const AccountSelect = ({
   dropdownRender,
   ...rest
 }) => {
-  const tree = useMemo(() => buildTree(accounts || []), [accounts]);
-  const labelMap = useMemo(() => buildAccountLabelMap(accounts || []), [accounts]);
+  const visibleAccounts = useMemo(() => {
+    const list = Array.isArray(accounts) ? accounts : [];
+    if (!Array.isArray(allowedTypes) || allowedTypes.length === 0) return list;
+    const allow = new Set(allowedTypes.map((t) => String(t).trim().toLowerCase()));
+    return list.filter((a) => allow.has(String(a.accountType || a.type || '').trim().toLowerCase()));
+  }, [accounts, allowedTypes]);
+
+  const tree = useMemo(() => buildTree(visibleAccounts), [visibleAccounts]);
+  const labelMap = useMemo(() => buildAccountLabelMap(visibleAccounts), [visibleAccounts]);
   const rows = useMemo(() => flatten(tree), [tree]);
 
   const toValue = (a) => (valueMode === 'name' ? a.name : a.id);

@@ -144,16 +144,44 @@ function registerAccountingHandlers() {
     }
   });
 
-  // Dashboard balance cards — pre-aggregated by account category
+  // Dashboard balance cards — live balances per account category.
+  //
+  // Computed with the SAME authoritative engine the Chart of Accounts / General
+  // Ledger use (`ChartOfAccounts.getAllAccounts` → `computedBalance`: Posted
+  // journal lines + opening balance, normal side taken from the account's real
+  // classification). No second balance formula lives here.
+  //
+  // Each account contributes its OWN (direct) balance, never a rolled-up parent
+  // balance, so a grouping parent + its children are never double counted while
+  // direct parent postings are still included.
   safeHandle('get-dashboard-balances', async () => {
-  try {
-    console.log('[ipcHandlers] get-budgets invoked');
-    return await Budgets.getBudgets();
-  } catch (error) {
-    console.error('Error fetching budgets:', error);
-    return { error: error.message };
-  }
-});
+    try {
+      // Active accounts only — the SAME population the Trial Balance and the
+      // original dashboard used (inactive accounts are retired from reporting).
+      const accounts = (ChartOfAccounts.getAllAccounts() || [])
+        .filter(a => String(a.status || 'Active').toLowerCase() === 'active');
+      const typeOf = (a) => String(a.accountType || a.type || '').toLowerCase();
+      const subOf  = (a) => String(a.accountSubType || a.subType || '').toLowerCase();
+      const ownBal = (a) => Number(a.ownBalance != null ? a.ownBalance : (a.balance || 0)) || 0;
+      const sum = (fn) => accounts.filter(fn).reduce((s, a) => s + ownBal(a), 0);
+
+      return {
+        bank:     sum(a => typeOf(a) === 'bank' || typeOf(a) === 'cash'),
+        ar:       sum(a => subOf(a) === 'accounts receivable' || typeOf(a) === 'accounts receivable'),
+        ap:       sum(a => subOf(a) === 'accounts payable'    || typeOf(a) === 'accounts payable'),
+        cc:       sum(a => typeOf(a) === 'credit card'),
+        loans:    sum(a => typeOf(a) === 'loan' || subOf(a).includes('loan') || subOf(a) === 'long-term liability' || subOf(a) === 'line of credit' || subOf(a) === 'mortgage'),
+        revenue:  sum(a => typeOf(a) === 'income' || typeOf(a) === 'other income'),
+        expenses: sum(a => typeOf(a) === 'expense' || typeOf(a) === 'other expense' || typeOf(a) === 'cost of goods sold'),
+        equity:   sum(a => typeOf(a) === 'equity'),
+      };
+    } catch (e) {
+      console.error('Error getting dashboard balances:', e);
+      // Signal a FAILURE (nulls), not a true zero, so the UI never renders a
+      // failed load as "$0.00".
+      return { error: e.message, bank: null, ar: null, ap: null, cc: null, loans: null, revenue: null, expenses: null, equity: null };
+    }
+  });
 // convert quote → invoice (lifecycle operation; status is backend controlled)
 safeHandle('convertquote', async (event,quote_id) => {
   try {

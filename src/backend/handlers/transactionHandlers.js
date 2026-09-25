@@ -8,6 +8,7 @@ const ChartOfAccounts = require('../models/chartOfAccounts');
 const db = require('../models/dbmgr');
 const { authorize } = require('../security/authz');
 const { validateTransaction, validateJournal } = require('../validation/validators');
+const { deriveSplitTotal, parseStoredSplits, MONEY_TOLERANCE } = require('../services/chargeSplits');
 
 // A check is always drawn on a real Bank-type account. Reject any Chart of
 // Accounts account that is NOT classified as 'Bank' (Credit Card, Expense,
@@ -71,6 +72,16 @@ const registerTransactionHandlers = () => {
       const ctx = authorize(event, { permissions: 'write:transactions' });
       validateTransaction(tx);
       if ((tx.type || '').toLowerCase() === 'check') assertBankAccount(tx.accountId);
+      // Split-driven total: when the payload carries expense split lines the
+      // charge total is DERIVED from them. A client-supplied `amount` is never
+      // trusted — it must equal the line sum or it is corrected to it.
+      const derivedAmount = deriveSplitTotal(tx.splitLines);
+      if (derivedAmount != null) {
+        if (Number(tx.amount) > 0 && Math.abs(Number(tx.amount) - derivedAmount) > MONEY_TOLERANCE) {
+          console.warn(`[insert-transaction] supplied amount ${tx.amount} != split total ${derivedAmount}; using split total`);
+        }
+        tx = { ...tx, amount: derivedAmount };
+      }
       // Infer proper debit/credit based on transaction type
       // For the bank register: deposits increase the bank (debit for Asset accounts),
       // checks/expenses decrease the bank (credit for Asset accounts).
@@ -137,6 +148,19 @@ const registerTransactionHandlers = () => {
       const existing = Transactions.getById(id);
       const txnType = String((data.type || existing?.type || '')).toLowerCase();
       if (txnType === 'check') assertBankAccount(data.accountId != null ? data.accountId : existing?.accountId);
+      // Split-driven total (same rule as insert). Prefer the incoming lines;
+      // fall back to the stored categories so an edit that only changes an
+      // account still keeps the total consistent with the lines.
+      const nextSplitLines = Array.isArray(data.splitLines)
+        ? data.splitLines
+        : parseStoredSplits(existing?.categories);
+      const derivedAmount = deriveSplitTotal(nextSplitLines);
+      if (derivedAmount != null) {
+        if (Number(data.amount) > 0 && Math.abs(Number(data.amount) - derivedAmount) > MONEY_TOLERANCE) {
+          console.warn(`[update-transaction] supplied amount ${data.amount} != split total ${derivedAmount}; using split total`);
+        }
+        data = { ...data, amount: derivedAmount };
+      }
       const res = Transactions.update(id, data);
       if (res?.changes > 0) {
         AuditLog.log({
@@ -155,7 +179,7 @@ const registerTransactionHandlers = () => {
               JournalEntries.reverse(oldEntry.id, data.date || existing?.date, ctx.userId);
             }
           }
-          const splitLines = Array.isArray(data.splitLines) ? data.splitLines : (existing ? [] : []);
+          const splitLines = nextSplitLines;
           if (splitLines.length > 0 || Number(data.amount || existing?.amount || 0) > 0) {
             JournalEntries.postTransaction({
               id,
@@ -181,13 +205,19 @@ const registerTransactionHandlers = () => {
   ipcMain.handle('delete-transaction', async (event, id) => {
     try {
       const ctx = authorize(event, { permissions: 'write:transactions' });
-      const res = Transactions.deleteTransaction(id);
-      if (res?.changes > 0) {
+      const existing = Transactions.getById(id);
+      // A check carries accounting (and possibly bill payment allocations);
+      // route it through the ONE reversal service so no screen can delete a
+      // check while leaving its payment / journal behind.
+      const isCheck = existing && String(existing.type || '').toLowerCase() === 'check';
+      const res = isCheck ? Transactions.deleteCheck(id) : Transactions.deleteTransaction(id);
+      if ((res?.changes > 0) || res?.success) {
         AuditLog.log({
           userId: ctx.userId,
           action: 'delete',
-          entityType: 'transaction',
-          entityId: id
+          entityType: isCheck ? 'check' : 'transaction',
+          entityId: id,
+          details: isCheck ? { reversedBills: res.reversedBills } : undefined
         });
       }
       return res;
@@ -232,6 +262,19 @@ const registerTransactionHandlers = () => {
       return res;
     } catch (error) {
       console.error('Error deleting check:', error);
+      return { error: error.message };
+    }
+  });
+
+  // Read-only: which bills (if any) does this check pay? Used by the Check
+  // Printing screen to show a meaningful "this will reopen bill X" confirmation
+  // before deletion. Never returns a payment for an unrelated write check.
+  ipcMain.handle('get-check-bill-applications', async (_e, id) => {
+    try {
+      const BillPayments = require('../models/billPayments');
+      return BillPayments.describeForCheck(id) || [];
+    } catch (error) {
+      console.error('Error fetching check bill applications:', error);
       return { error: error.message };
     }
   });

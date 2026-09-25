@@ -46,6 +46,28 @@ export const ensureTrailingEmptyLine = (lines, createEmptyLine) => {
   return [...arr, createEmptyLine()];
 };
 
+// A line is MEANINGFUL when it is not an empty convenience row. This is the
+// predicate every saved / printed document line must satisfy: a real free item
+// (product selected, rate 0) or a manual description line survives; a blank
+// convenience row (no product, no description, default qty 1 / amount 0) does
+// not. Use this — never `amount > 0` — to decide what is a document line.
+export const isMeaningfulDocumentLine = (line) => !isLineEmpty(line);
+
+// Drop every empty convenience row from a line list (renumbering is the
+// renderer's job). Safe to run on legacy database rows too, so old documents
+// with a stray blank line never print one.
+export const normalizeDocumentLines = (lines) =>
+  (Array.isArray(lines) ? lines : []).filter(isMeaningfulDocumentLine);
+
+// Remove a line and DO NOT force a trailing blank row back. If the list would
+// become empty, one clean row is returned so the editor always has a row. This
+// is what makes the Delete action on an auto-created blank line actually work.
+export const removeLineItem = (lines, predicate, createEmptyLine) => {
+  const next = (Array.isArray(lines) ? lines : []).filter(predicate);
+  if (next.length === 0) return [createEmptyLine()];
+  return next;
+};
+
 // Remove a line by key/index and guarantee a trailing empty convenience row
 // remains (but never more than one).
 export const removeLineAndEnsureEmpty = (lines, predicate, createEmptyLine) => {

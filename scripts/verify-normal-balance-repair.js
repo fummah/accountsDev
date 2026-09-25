@@ -420,6 +420,9 @@ section(`E. End-to-end: the real runner upgrades a live-file copy from v2 to v${
 
   fs.mkdirSync(path.join(sandboxBackend, 'db'), { recursive: true });
   fs.cpSync(path.join(ROOT, 'src', 'backend'), sandboxBackend, { recursive: true });
+  // The backend depends on the single shared canonical Item Type table, so the
+  // sandbox must mirror src/shared alongside the backend.
+  fs.cpSync(path.join(ROOT, 'src', 'shared'), path.join(SANDBOX, 'shared'), { recursive: true });
   fs.rmSync(sandboxDb, { force: true });
   fs.copyFileSync(LIVE_DB, sandboxDb);
 

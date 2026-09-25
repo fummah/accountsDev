@@ -15,9 +15,14 @@
  *        program opened" for a program that never opened.
  *     2. BROKEN FILE URLS — `fileUri()` left spaces raw, producing
  *        `file:///C:/Users/John Smith/...`.
- *     3. BROKEN ESCAPING — `escCompose()` percent-encoded apostrophes in
- *        Thunderbird's -compose string, but Thunderbird does not percent-decode
- *        -compose values, so `We're` arrived as `We%27re`.
+ *     3. BROKEN THUNDERBIRD COMPOSE — the body was handed over as
+ *        `message='file:///…'`, but Thunderbird reads `message=` with
+ *        `nsIFile.initWithPath()` (a NATIVE path, never a file: URI), so the
+ *        compose window opened with an empty body; and values were single-quoted
+ *        raw, so a comma in the body/recipients split the field. The fixed
+ *        builder sends every text field as a double-quoted, percent-encoded
+ *        value (which Thunderbird URI-decodes) and keeps `attachment=` as the
+ *        only single-quoted file: URI.
  *
  * HOW IT IS VERIFIED
  *   Nothing is re-implemented here. The suite loads the REAL module
@@ -35,8 +40,10 @@
  *     Outlook      /c ipm.note /m <addr?subject=&body=> /a <path>
  *                  support.microsoft.com — "Command-line switches for Microsoft
  *                  Office products" (/m example: user@contoso.com?subject=Test&body=Hello)
- *     Thunderbird  -compose "to='..',subject='..',message='file:///..',attachment='file:///..'"
- *                  kb.mozillazine.org/Command_line_arguments_(Thunderbird)
+ *     Thunderbird  -compose "to=..,cc=..,subject=..,format=text,body=..,attachment='file:///..'"
+ *                  Thunderbird's own GetArgs() parser (MsgComposeCommands.js):
+ *                  double-quoted values are URI-decoded, single-quoted are raw,
+ *                  and `message=` is a NATIVE path (never a file: URI).
  *     mailto:      RFC 6068 — no attachment field exists, so we never claim one.
  *
  *   ELECTRON_RUN_AS_NODE=1 ./node_modules/electron/dist/electron.exe scripts/verify-mail-client.js
@@ -166,36 +173,144 @@ function fileUris() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 2. Defect 3 — Thunderbird -compose values are NOT percent-decoded
+// 2. Thunderbird -compose — encoded, double-quoted values for every field
+//
+//    Pinned against Thunderbird's OWN parser. GetArgs() (below) is a verbatim
+//    copy of MsgComposeCommands.js, so the round-trip assertions prove the
+//    compose string this module builds is the one Thunderbird will read back.
 // ════════════════════════════════════════════════════════════════════════════
-function thunderbirdEscaping() {
-  const v = MailClient.tbValue("We're ready");
-  check('tbValue replaces the apostrophe, it does not percent-encode it', v, 'We\u2019re ready');
-  ok('  … and no percent sign survives', !v.includes('%'));
-  ok('  … and no raw apostrophe survives', !v.includes("'"));
-  check('tbValue flattens line breaks', MailClient.tbValue('a\r\nb\nc'), 'a b c');
+function getArgs(originalData) {
+  const args = {};
+  if (originalData === '') return null;
+  let data = '';
+  const separator = String.fromCharCode(1);
+  let quoteChar = '';
+  let prevChar = '';
+  let nextChar = '';
+  for (let i = 0; i < originalData.length; i++, prevChar = aChar) {
+    var aChar = originalData.charAt(i);
+    var aCharCode = originalData.charCodeAt(i);
+    if (i < originalData.length - 1) nextChar = originalData.charAt(i + 1);
+    else nextChar = '';
+    if (aChar === quoteChar && (nextChar === ',' || nextChar === '')) {
+      quoteChar = '';
+      data += aChar;
+    } else if ((aCharCode === 39 || aCharCode === 34) && prevChar === '=') {
+      if (quoteChar === '') quoteChar = aChar;
+      data += aChar;
+    } else if (aChar === ',') {
+      if (quoteChar === '') data += separator;
+      else data += aChar;
+    } else {
+      data += aChar;
+    }
+  }
+  const pairs = data.split(separator);
+  for (let i = pairs.length - 1; i >= 0; i--) {
+    const pos = pairs[i].indexOf('=');
+    if (pos === -1) continue;
+    const argname = pairs[i].substring(0, pos);
+    let argvalue = pairs[i].substring(pos + 1);
+    if (argvalue.startsWith("'") && argvalue.endsWith("'")) {
+      args[argname] = argvalue.substring(1, argvalue.length - 1);
+    } else {
+      if (argvalue.startsWith('"') && argvalue.endsWith('"')) {
+        argvalue = argvalue.substring(1, argvalue.length - 1);
+      }
+      try { args[argname] = decodeURIComponent(argvalue); }
+      catch { args[argname] = argvalue; }
+    }
+  }
+  return args;
+}
 
+function thunderbirdCompose() {
+  // Encoding is the documented mechanism: double-quoted values are decoded by
+  // Thunderbird, single-quoted values are taken raw.
+  check('tbEncoded percent-encodes the comma that would split the field',
+    MailClient.tbEncoded('a,b'), 'a%2Cb');
+  check('tbEncoded percent-encodes the ampersand', MailClient.tbEncoded('A & B'), 'A%20%26%20B');
+  check("tbEncoded leaves an apostrophe literal (safe inside double quotes)",
+    MailClient.tbEncoded("don't"), "don't");
+  check('tbEncoded encodes a newline as %0A, never a literal backslash-n',
+    MailClient.tbEncoded('a\nb'), 'a%0Ab');
+  check('tbEncoded encodes a double quote so it cannot end the value early',
+    MailClient.tbEncoded('a"b'), 'a%22b');
+  check('tbEncoded encodes Unicode as UTF-8 percent escapes',
+    MailClient.tbEncoded('Café'), 'Caf%C3%A9');
+
+  const subject = "Invoice 42 — We're ready";
+  const body = "Dear John,\n\nPlease don't hesitate to contact us.\nThank you for your business.\n";
+  const attachment = 'C:\\Users\\John Smith\\AppData\\Local\\Temp\\acculedger-mail-x\\Quote 08014 - Smith & Sons.pdf';
   const compose = MailClient.buildThunderbirdCompose(
-    { to: 'customer@example.com', subject: "Invoice 42 — We're ready", body: 'ignored' },
-    { bodyPath: 'C:\\Users\\John Smith\\AppData\\Local\\Temp\\acculedger-mail-x\\body.txt', attachmentPaths: ['C:\\Users\\John Smith\\AppData\\Local\\Temp\\acculedger-mail-x\\Invoice_42.pdf'] }
+    { to: 'customer@example.com', cc: 'accounts@example.com', subject, body },
+    { attachmentPaths: [attachment] }
   );
-  ok('buildThunderbirdCompose emits no %27', !compose.includes('%27'), compose);
-  ok('buildThunderbirdCompose emits no raw space in a file URL',
-    !/file:\/\/\/[^']* [^']*/.test(compose), compose);
-  contains('  … to comes first (bug 627999: attachment must not be first)', compose, "to='customer@example.com'");
-  contains('  … subject is single-quoted', compose, "subject='Invoice 42 \u2014 We\u2019re ready'");
-  contains('  … the body travels as a UTF-8 file, not an escaped field', compose, "message='file:///C:/Users/John%20Smith/AppData/Local/Temp/acculedger-mail-x/body.txt'");
-  contains('  … format is declared for the file body', compose, 'format=text');
-  contains('  … the attachment is a file URL', compose, "attachment='file:///C:/Users/John%20Smith/AppData/Local/Temp/acculedger-mail-x/Invoice_42.pdf'");
-  ok('  … attachment is last', compose.trim().endsWith('.pdf' + "'"), compose);
-  ok('  … field order matches the documented layout',
-    compose.startsWith("to='") && compose.indexOf('subject=') < compose.indexOf('attachment='));
+
+  ok('the compose spec is ONE comma-separated string with no raw newline',
+    !/[\r\n]/.test(compose), compose);
+  contains('  … to is double-quoted and encoded', compose, 'to="customer%40example.com"');
+  contains('  … cc is included when present', compose, 'cc="accounts%40example.com"');
+  ok('  … format=text so the body renders as plain-text paragraphs', compose.includes('format=text'), compose);
+  ok('  … the body travels as an encoded body= field, never message=file',
+    compose.includes('body="') && !compose.includes('message='), compose);
+  ok('  … no literal backslash-n leaks into the visible message',
+    !compose.includes('\\n'), compose);
+  contains('  … the attachment is a single-quoted file URL',
+    compose, "attachment='file:///C:/Users/John%20Smith/AppData/Local/Temp/acculedger-mail-x/Quote%2008014%20-%20Smith%20%26%20Sons.pdf'");
+
+  // ── THE DECISIVE TEST: Thunderbird's own parser reads it all back ──────────
+  const parsed = getArgs(compose);
+  check("Thunderbird's parser recovers `to` exactly", parsed.to, 'customer@example.com');
+  check('  … `cc` exactly', parsed.cc, 'accounts@example.com');
+  check('  … `subject` byte-for-byte, apostrophe and em dash intact', parsed.subject, subject);
+  check('  … `body` with paragraphs and apostrophe intact', parsed.body, body);
+  check('  … `format`', parsed.format, 'text');
+  check('  … `attachment` as a decodable file URI', parsed.attachment,
+    'file:///C:/Users/John%20Smith/AppData/Local/Temp/acculedger-mail-x/Quote%2008014%20-%20Smith%20%26%20Sons.pdf');
+
+  // Special-character matrix (the exact cases the brief calls out).
+  const specials = [
+    { to: 'jose@example.com', cc: '', subject: 'Quotation – Café Equipment', body: "Hi John's Team,\n\nPlease don't hesitate.\nThank you.", attachment: 'Quote – Café Equipment.pdf' },
+    { to: 'a@b.com', cc: 'c@d.com,e@f.com', subject: 'Quote from Smith & Sons', body: 'No newline, but a comma, an apostrophe and an ampersand & more.', attachment: 'Smith & Sons Quote.pdf' },
+  ];
+  for (const s of specials) {
+    const spec = MailClient.buildThunderbirdCompose(
+      { to: s.to, cc: s.cc, subject: s.subject, body: s.body },
+      { attachmentPaths: [path.join(os.tmpdir(), 'acculedger-mail-x', s.attachment)] }
+    );
+    const p = getArgs(spec);
+    check(`round-trip to (${s.subject})`, p.to, s.to);
+    if (s.cc) check(`  … cc (${s.subject})`, p.cc, s.cc);
+    else ok(`  … cc omitted when blank (${s.subject})`, !spec.includes('cc='), spec);
+    check(`  … subject (${s.subject})`, p.subject, s.subject);
+    check(`  … body (${s.subject})`, p.body, s.body);
+    ok(`  … attachment (${s.subject})`, String(p.attachment).endsWith(encodeURIComponent(s.attachment)), p.attachment);
+  }
+
+  const noCc = MailClient.buildThunderbirdCompose({ to: 'a@b.com', subject: 'S', body: '' }, { attachmentPaths: [] });
+  ok('cc is omitted when blank', !noCc.includes('cc='), noCc);
+  ok('no attachment field when there are none', !noCc.includes('attachment='), noCc);
 
   const multi = MailClient.buildThunderbirdCompose(
     { to: 'a@b.com', subject: 'S', body: '' },
     { attachmentPaths: ['C:\\t\\one.pdf', 'C:\\t\\two.pdf'] }
   );
   contains('multiple attachments are comma-joined inside one field', multi, "attachment='file:///C:/t/one.pdf,file:///C:/t/two.pdf'");
+  const multiParsed = getArgs(multi);
+  check('  … and the parser sees both URIs', multiParsed.attachment, 'file:///C:/t/one.pdf,file:///C:/t/two.pdf');
+
+  // A body too long for the Windows command line falls back to `message=` — but
+  // with a NATIVE path, which is what Thunderbird's parser reads with
+  // initWithPath (a file: URI here was the original blank-body bug).
+  const longSpec = MailClient.buildThunderbirdCompose(
+    { to: 'a@b.com', subject: 'S', body: 'x'.repeat(9000) },
+    { attachmentPaths: [], bodyPath: 'C:\\Temp\\acculedger-mail-x\\body.txt' }
+  );
+  ok('a long body falls back to message= with a native path',
+    longSpec.includes("message='C:\\Temp\\acculedger-mail-x\\body.txt'"), longSpec.slice(0, 160));
+  ok('  … and does NOT inline the body', !longSpec.includes('body="'), longSpec.slice(0, 160));
+  check('  … the parser sees the native path', getArgs(longSpec).message, 'C:\\Temp\\acculedger-mail-x\\body.txt');
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -660,6 +775,82 @@ async function entryPoint() {
   check('  … and nothing is published to Downloads', manualFiles(hManual).length, 0);
   check('  … account state is still reported as information', unconfigured.clientReady, false);
 
+  // (i) Thunderbird — the full hand-off. The compose spec must carry every
+  //     field, and Thunderbird's OWN parser must read them back intact.
+  const tb = { installed: true, exe: 'C:\\TB\\thunderbird.exe', mailProfilePresent: true, ready: true };
+  const tbClients = {
+    progId: 'Thunderbird.Url.mailto', progIdKind: 'thunderbird',
+    defaultClientName: 'Mozilla Thunderbird', defaultClientKind: 'thunderbird',
+    outlook: neither, thunderbird: tb,
+  };
+  let tbSeen = null;
+  const tbManual = manualDir();
+  const tbGood = await MailClient.sendViaDefaultMailClient(
+    {
+      to: 'customer@example.com', cc: 'accounts@example.com',
+      subject: 'Quote from Smith & Sons',
+      body: "Hi John's Team,\n\nPlease don't hesitate to contact us.\nThank you for your business.",
+      attachments: [{ filename: 'Quote 08014 - Smith & Sons.pdf', content: Buffer.from('%PDF-1.4').toString('base64') }],
+    },
+    { clients: tbClients, launch: async (exe, args) => { tbSeen = { exe, args }; return { ok: true, pid: 1 }; }, manualAttachDir: tbManual }
+  );
+  check('Thunderbird launch succeeds -> ok:true', tbGood.ok, true);
+  check('  … method names the Thunderbird adapter', tbGood.method, 'thunderbird-compose');
+  check('  … attached:true', tbGood.attached, true);
+  check('  … guarantee is the documented switch', tbGood.guarantee, 'documented-switch');
+  check('  … no warning', tbGood.warning, null);
+  check('  … the exe launched', tbSeen.exe, 'C:\\TB\\thunderbird.exe');
+  check('  … -compose is the flag', tbSeen.args[0], '-compose');
+  check('  … and the whole spec is ONE argument (never split per field)', tbSeen.args.length, 2);
+  {
+    const p = getArgs(tbSeen.args[1]);
+    check('  … to round-trips through Thunderbird\'s parser', p.to, 'customer@example.com');
+    check('  … cc round-trips', p.cc, 'accounts@example.com');
+    check('  … subject round-trips', p.subject, 'Quote from Smith & Sons');
+    check('  … body round-trips with apostrophes and paragraphs',
+      p.body, "Hi John's Team,\n\nPlease don't hesitate to contact us.\nThank you for your business.");
+    check('  … format is text', p.format, 'text');
+    ok('  … attachment is a file: URI', String(p.attachment).startsWith('file:///'), p.attachment);
+    ok('  … ending in the generated PDF name', String(p.attachment).endsWith('.pdf'), p.attachment);
+  }
+  ok('  … the reported attachment path is the real temp PDF', fs.existsSync(tbGood.attachmentPath), tbGood.attachmentPath);
+  check('  … and NOTHING was published to Downloads', manualFiles(tbManual).length, 0);
+
+  // (j) THE REGRESSION: Thunderbird hands a -compose request to an
+  //     already-running instance and quits with code 0. That is a success — the
+  //     old code called it "exited immediately without opening a window" and
+  //     dropped a manual-attach copy into Downloads.
+  const tbHandoffManual = manualDir();
+  const tbHandoff = await MailClient.sendViaDefaultMailClient(
+    { to: 'a@b.com', subject: 'S', body: 'B', attachments: [{ filename: 'Quote_1.pdf', content: Buffer.from('%PDF-1.4').toString('base64') }] },
+    { clients: tbClients, launch: async () => ({ ok: true, pid: 1, exitedImmediately: true, exitCode: 0, stderr: null }), manualAttachDir: tbHandoffManual }
+  );
+  check('Thunderbird quick clean exit (hand-off) -> ok:true', tbHandoff.ok, true);
+  check('  … attached:true — the hand-off is a success, not a failure', tbHandoff.attached, true);
+  check('  … guarantee is the documented switch', tbHandoff.guarantee, 'documented-switch');
+  check('  … and there is no false "exited immediately" warning', tbHandoff.warning, null);
+  check('  … so NOTHING is published for manual attach', manualFiles(tbHandoffManual).length, 0);
+
+  // (k) A genuinely malformed launch (non-zero exit) is still a failure, and
+  //     the client's own stderr is carried through so it can be diagnosed.
+  const tbFailManual = manualDir();
+  const tbFail = await MailClient.sendViaDefaultMailClient(
+    { to: 'a@b.com', subject: 'S', body: 'B', attachments: [{ filename: 'Quote_1.pdf', content: Buffer.from('%PDF-1.4').toString('base64') }] },
+    {
+      clients: tbClients,
+      launch: async () => ({
+        ok: false, exitCode: 1, stderr: 'Error: cannot create compose window',
+        error: 'thunderbird.exe started but exited immediately (code 1) without opening a window. Error: cannot create compose window',
+      }),
+      manualAttachDir: tbFailManual,
+    }
+  );
+  check('Thunderbird non-zero exit -> ok:false', tbFail.ok, false);
+  check('  … attached stays false', tbFail.attached, false);
+  contains('  … the error carries the client stderr', tbFail.error, 'cannot create compose window');
+  ok('  … and the PDF is still made findable for manual attach',
+    !!tbFail.attachmentPath && fs.existsSync(tbFail.attachmentPath), tbFail.attachmentPath);
+
   // ── the publish helper itself: never clobber an earlier copy ──────────────
   // Two invoices can share a number (a re-send, a corrected copy). Overwriting
   // would silently destroy the first file, so the second must get a suffix.
@@ -1048,7 +1239,7 @@ function wiring() {
 (async () => {
   try {
     fileUris();
-    thunderbirdEscaping();
+    thunderbirdCompose();
     mailtoUris();
     outlookArgs();
     filenames();

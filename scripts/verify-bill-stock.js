@@ -42,9 +42,9 @@ const near = (a, b) => Math.abs(Number(a) - Number(b)) < 1e-6;
 (async () => {
   // ── Fixtures ───────────────────────────────────────────────────────────
   const supplier = db.prepare('SELECT id FROM suppliers ORDER BY id LIMIT 1').get();
-  const product = db.prepare(
-    "SELECT id, name, sku FROM products WHERE LOWER(type) = 'product' ORDER BY id LIMIT 1"
-  ).get();
+const product = db.prepare(
+  "SELECT id, name, sku FROM products WHERE LOWER(type) IN ('product','inventory_part','inventory part','raw material','asset','bundle') ORDER BY id LIMIT 1"
+).get();
   const W1 = Warehouses.getOrCreateDefault();
   Warehouses.create({ code: 'VBS-W2', name: 'verify-bill-stock W2' });
   const W2 = db.prepare("SELECT * FROM warehouses WHERE code = 'VBS-W2'").get();

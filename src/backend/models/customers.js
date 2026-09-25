@@ -2,6 +2,45 @@
 const db = require('./dbmgr.js');
 const ContactIdentity = require('../services/contactIdentity.js');
 
+// Shared customer list/export query pieces — ONE definition so the paginated
+// list and the Export feature can never disagree on filters or ordering.
+const CUSTOMER_BALANCE_SUBQUERY = 'LEFT JOIN (SELECT net.customer, ROUND(SUM(net.inv_net), 2) AS balance FROM (SELECT i.customer, i.id, COALESCE(SUM(il.amount * (1 + COALESCE(i.vat, 0) / 100.0)), 0) - COALESCE(MAX(pt.totalPaid), 0) AS inv_net FROM invoices i INNER JOIN invoice_lines il ON il.invoice_id = i.id LEFT JOIN (SELECT invoiceId, SUM(amount) AS totalPaid FROM (SELECT a.invoiceId, a.amount FROM payment_allocations a UNION ALL SELECT p.invoiceId, p.amount FROM payments p WHERE p.invoiceId IS NOT NULL AND p.invoiceId != 0 AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)) GROUP BY invoiceId) pt ON pt.invoiceId = i.id WHERE LOWER(COALESCE(i.status, \'\')) NOT IN (\'paid\', \'cancelled\', \'void\', \'draft\') GROUP BY i.customer, i.id) net GROUP BY net.customer) bal ON bal.customer = c.id';
+const CUSTOMER_FIELDS = 'c.*, COALESCE(bal.balance, 0) AS balance';
+
+// The exact search + status predicate the list uses. Search matches every field
+// a user would realistically type; status matches the stored status (default
+// Active). Kept here so list and export share it.
+const buildCustomerFilters = (search = '', status = '') => {
+  const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
+  const statusParam = status && status.trim() ? status.trim() : null;
+  const whereParts = [];
+  const params = [];
+  if (searchParam) {
+    whereParts.push(
+      '(' +
+        'c.first_name || \' \' || COALESCE(c.last_name,\'\') LIKE ?' +
+        ' OR c.first_name LIKE ?' +
+        ' OR c.last_name LIKE ?' +
+        ' OR c.display_name LIKE ?' +
+        ' OR c.company_name LIKE ?' +
+        ' OR c.email LIKE ?' +
+        ' OR c.phone_number LIKE ?' +
+        ' OR c.mobile_number LIKE ?' +
+        ' OR CAST(c.id AS TEXT) LIKE ?' +
+      ')'
+    );
+    params.push(
+      searchParam, searchParam, searchParam, searchParam, searchParam,
+      searchParam, searchParam, searchParam, searchParam
+    );
+  }
+  if (statusParam) {
+    whereParts.push('COALESCE(c.status, \'Active\') = ?');
+    params.push(statusParam);
+  }
+  return { whereClause: whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '', params };
+};
+
 const Customers = {
   // Create the Customers table if it doesn't exist
   createTable: () => {
@@ -110,43 +149,18 @@ const Customers = {
   getPaginated: function (page = 1, pageSize = 25, search = '', status = '') {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
-    const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
-    const statusParam = status && status.trim() ? status.trim() : null;
-    const subquery = 'LEFT JOIN (SELECT net.customer, ROUND(SUM(net.inv_net), 2) AS balance FROM (SELECT i.customer, i.id, COALESCE(SUM(il.amount * (1 + COALESCE(i.vat, 0) / 100.0)), 0) - COALESCE(MAX(pt.totalPaid), 0) AS inv_net FROM invoices i INNER JOIN invoice_lines il ON il.invoice_id = i.id LEFT JOIN (SELECT invoiceId, SUM(amount) AS totalPaid FROM (SELECT a.invoiceId, a.amount FROM payment_allocations a UNION ALL SELECT p.invoiceId, p.amount FROM payments p WHERE p.invoiceId IS NOT NULL AND p.invoiceId != 0 AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)) GROUP BY invoiceId) pt ON pt.invoiceId = i.id WHERE LOWER(COALESCE(i.status, \'\')) NOT IN (\'paid\', \'cancelled\', \'void\', \'draft\') GROUP BY i.customer, i.id) net GROUP BY net.customer) bal ON bal.customer = c.id';
-    const fields = 'c.*, COALESCE(bal.balance, 0) AS balance';
-    const whereParts = [];
-    const params = [];
-    if (searchParam) {
-      // Search across every field a user would realistically type when picking a
-      // customer: full name, display name, company, email, phone, mobile and the
-      // numeric customer number (id). Added for the CRM lead customer selector,
-      // which cannot load all 60k+ customers into the DOM.
-      whereParts.push(
-        '(' +
-          'c.first_name || \' \' || COALESCE(c.last_name,\'\') LIKE ?' +
-          ' OR c.first_name LIKE ?' +
-          ' OR c.last_name LIKE ?' +
-          ' OR c.display_name LIKE ?' +
-          ' OR c.company_name LIKE ?' +
-          ' OR c.email LIKE ?' +
-          ' OR c.phone_number LIKE ?' +
-          ' OR c.mobile_number LIKE ?' +
-          ' OR CAST(c.id AS TEXT) LIKE ?' +
-        ')'
-      );
-      params.push(
-        searchParam, searchParam, searchParam, searchParam, searchParam,
-        searchParam, searchParam, searchParam, searchParam
-      );
-    }
-    if (statusParam) {
-      whereParts.push('COALESCE(c.status, \'Active\') = ?');
-      params.push(statusParam);
-    }
-    const whereClause = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const { whereClause, params } = buildCustomerFilters(search, status);
     const total = db.prepare(`SELECT COUNT(*) AS total FROM customers c ${whereClause}`).get(...params).total;
-    const data = db.prepare(`SELECT ${fields} FROM customers c ${subquery} ${whereClause} ORDER BY COALESCE(c.display_name, c.first_name) COLLATE NOCASE ASC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const data = db.prepare(`SELECT ${CUSTOMER_FIELDS} FROM customers c ${CUSTOMER_BALANCE_SUBQUERY} ${whereClause} ORDER BY COALESCE(c.display_name, c.first_name) COLLATE NOCASE ASC LIMIT ? OFFSET ?`).all(...params, limit, offset);
     return { data, total };
+  },
+
+  // EVERY customer matching the SAME search + status filters and ordering as
+  // getPaginated, but with NO pagination cap — used by Export so a filtered
+  // export contains all matching records, never only the visible page.
+  getExportRows: function (search = '', status = '') {
+    const { whereClause, params } = buildCustomerFilters(search, status);
+    return db.prepare(`SELECT ${CUSTOMER_FIELDS} FROM customers c ${CUSTOMER_BALANCE_SUBQUERY} ${whereClause} ORDER BY COALESCE(c.display_name, c.first_name) COLLATE NOCASE ASC`).all(...params);
   },
    // Retrieve single customer
    getSingleCustomer: (customer_id) => {

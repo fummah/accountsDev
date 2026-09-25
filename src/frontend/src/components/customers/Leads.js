@@ -11,6 +11,7 @@ import { ensureTrailingEmptyLine } from '../../utils/lineItems';
 import { Z } from '../../utils/layers';
 import CustomerContactFields, { CONTACT_FIELD_NAMES } from './shared/CustomerContactFields';
 import SendEmailModal from './shared/SendEmailModal';
+import FormSection, { FORM_ITEM_STYLE, MODAL_BODY_SCROLL_STYLE, MODAL_WIDTH } from '../shared/FormSection';
 import { QuoteStatusBadge, normalizeStatus } from '../StatusBadge';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, UserAddOutlined,
@@ -18,6 +19,7 @@ import {
   ClockCircleOutlined, CheckCircleOutlined, WarningOutlined,
   CalendarOutlined, BarChartOutlined, FunnelPlotOutlined, TeamOutlined,
   TrophyOutlined, ReloadOutlined, SearchOutlined, LinkOutlined, UserOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import {
   BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
@@ -148,6 +150,15 @@ const Leads = () => {
   const [selectedCustomer, setSelectedCustomer]   = useState(null);
   const [duplicateWarning, setDuplicateWarning]   = useState(null);
   const customerSearchTimer = useRef(null);
+  // The customer picker is a CONTROLLED dropdown so New Lead can auto-open it
+  // once. `autoOpenedCustomerRef` guarantees the auto-open is one-time per
+  // modal session — closing it never reopens it.
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const customerSelectRef = useRef(null);
+  const autoOpenedCustomerRef = useRef(false);
+  // "+ Add New Customer" (mirrors Invoice/Quote) — shared contact block + modal.
+  const [custModalOpen, setCustModalOpen] = useState(false);
+  const [custForm] = Form.useForm();
 
   // Server-side customer search (there are 60k+ customers — never load them all).
   const searchCustomers = useCallback((term) => {
@@ -161,6 +172,33 @@ const Leads = () => {
       finally { setCustomerSearching(false); }
     }, 300);
   }, []);
+
+  // Open + focus the customer picker. Both run on the next animation frame so
+  // the modal has mounted/painted first — opening a Select before its portal
+  // exists is the usual reason an "auto-open" silently does nothing.
+  const focusAndOpenCustomer = useCallback(() => {
+    requestAnimationFrame(() => {
+      setCustomerDropdownOpen(true);
+      requestAnimationFrame(() => { try { customerSelectRef.current?.focus?.(); } catch (_) { /* ignore */ } });
+    });
+  }, []);
+
+  // ONE-TIME auto-open: New Lead + Existing Customer + no customer chosen.
+  // Runs after the modal content mounts (leadModalOpen flips → effect runs), and
+  // never again for the same session — closing the dropdown keeps it closed.
+  useEffect(() => {
+    if (!leadModalOpen) {
+      // Reset so the next time the dialog opens is a fresh session.
+      autoOpenedCustomerRef.current = false;
+      setCustomerDropdownOpen(false);
+      return;
+    }
+    if (autoOpenedCustomerRef.current) return;
+    if (createMode !== MODE_EXISTING) return;
+    if (selectedCustomerId) return;
+    autoOpenedCustomerRef.current = true;
+    focusAndOpenCustomer();
+  }, [leadModalOpen, createMode, selectedCustomerId, focusAndOpenCustomer]);
 
   // ── Data ─────────────────────────────────────────────────────────────────────
   const fetchLeads = useCallback(async () => {
@@ -300,6 +338,8 @@ const Leads = () => {
         leadForm.setFieldsValue(cleared);
         setDuplicateWarning(null);
         searchCustomers('');
+        // The next required action is choosing a customer — allow ONE auto-open.
+        autoOpenedCustomerRef.current = false;
       } else {
         // Leaving "existing": drop the link so we never half-link a scratch lead.
         setSelectedCustomerId(null);
@@ -383,6 +423,43 @@ const Leads = () => {
     searchCustomers('');
     leadForm.setFieldsValue({ customer_id: id });
     await handleSelectCustomer(id);
+  };
+
+  /**
+   * "+ Add New Customer" from the customer dropdown — same shared contact block
+   * and payload as the Invoice/Quote "Add New Customer" modal. On success the
+   * new customer is linked to the lead (found via the SAME server-side search,
+   * so we never load the whole customer table).
+   */
+  const handleAddCustomer = async () => {
+    try {
+      const vals = await custForm.validateFields();
+      const display = vals.display_name
+        || `${vals.first_name || ''} ${vals.last_name || ''}`.trim()
+        || vals.company_name || '';
+      const res = await window.electronAPI.insertCustomer(
+        '', vals.first_name || '', '', vals.last_name || '', '', vals.email || '',
+        display, vals.company_name || '', vals.phone_number || '', vals.mobile_number || '',
+        '', '', vals.website || '', vals.address1 || '', vals.address2 || '', vals.city || '', vals.state || '',
+        vals.postal_code || '', vals.country || '', '', '', '', 'system', 0, null, 'Email', 'en', vals.notes || '',
+        vals.taxable != null ? vals.taxable : true, null, null
+      );
+      if (res?.error) throw new Error(res.error);
+      message.success('Customer added');
+      setCustModalOpen(false);
+      custForm.resetFields();
+      const term = vals.email || vals.display_name || vals.company_name
+        || `${vals.first_name || ''} ${vals.last_name || ''}`.trim();
+      const found = await window.electronAPI.getCustomersPaginated?.(1, 25, term || '', '');
+      const rows = Array.isArray(found?.data) ? found.data : [];
+      const email = String(vals.email || '').toLowerCase();
+      const exact = rows.find(r => email && String(r.email || '').toLowerCase() === email) || rows[0];
+      if (exact) {
+        setCreateMode(MODE_EXISTING);
+        leadForm.setFieldsValue({ customer_id: exact.id });
+        await handleSelectCustomer(exact.id);
+      }
+    } catch (e) { if (!e?.errorFields) message.error(e?.message || 'Failed to add customer'); }
   };
 
   const handleSaveLead = async () => {
@@ -1065,10 +1142,7 @@ const Leads = () => {
         bodyStyle={{ maxHeight: 'calc(100vh - 190px)', overflowY: 'auto', paddingRight: 12 }}>
         <Form form={leadForm} layout="vertical">
           {/* ── Section 1: Source ─────────────────────────────────────────── */}
-          <Divider orientation="left" plain style={{ marginTop: 0 }}>
-            <span style={{ fontSize: 12, color: '#8c8c8c' }}>Source</span>
-          </Divider>
-          <div style={{ marginBottom: 16 }}>
+          <FormSection title="Source" icon={<LinkOutlined />}>
             {/* Both creation modes on one line (wraps only on very small screens). */}
             <Radio.Group
               value={createMode}
@@ -1078,135 +1152,152 @@ const Leads = () => {
               <Radio value={MODE_EXISTING}><span><LinkOutlined /> Existing Customer</span></Radio>
               <Radio value={MODE_SCRATCH}><span><UserAddOutlined /> New / From Scratch</span></Radio>
             </Radio.Group>
-          </div>
 
-          {/* ── Section 2: Customer / Contact Information ─────────────────── */}
-          <Divider orientation="left" plain style={{ marginTop: 0 }}>
-            <span style={{ fontSize: 12, color: '#8c8c8c' }}>Customer-Contact Information</span>
-          </Divider>
+            {createMode === MODE_EXISTING ? (
+              <div style={{ marginTop: 12 }}>
+                <Form.Item name="customer_id" label="Customer" style={FORM_ITEM_STYLE}
+                  rules={[{ required: true, message: 'Select a customer' }]}
+                  extra={<span style={{ fontSize: 11 }}>Linked by Customer ID. Contact details copied to the Lead do not alter the Customer record.</span>}>
+                  <Select
+                    ref={customerSelectRef}
+                    open={customerDropdownOpen}
+                    onDropdownVisibleChange={(open) => setCustomerDropdownOpen(open)}
+                    showSearch allowClear
+                    placeholder="Search by name, display name, company, email, phone or customer #"
+                    filterOption={false}
+                    onSearch={searchCustomers}
+                    onChange={handleSelectCustomer}
+                    suffixIcon={<SearchOutlined />}
+                    notFoundContent={customerSearching ? <Spin size="small" /> : 'No customers found'}
+                    dropdownRender={(menu) => (
+                      <>
+                        {menu}
+                        <Divider style={{ margin: '4px 0' }} />
+                        <Button type="link" icon={<PlusOutlined />}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => setCustModalOpen(true)}
+                          style={{ width: '100%', textAlign: 'left' }}>
+                          Add New Customer
+                        </Button>
+                      </>
+                    )}>
+                    {customerOptions.map(c => (
+                      <Option key={c.id} value={c.id}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <span>
+                            {c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company_name || `Customer #${c.id}`}
+                          </span>
+                          <span style={{ color: '#8c8c8c', fontSize: 11 }}>
+                            {c.company_name ? `${c.company_name} · ` : ''}{c.email || ''} · #{c.id}
+                          </span>
+                        </div>
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+                {selectedCustomerId && (
+                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Tag color="blue" style={{ margin: 0 }}>
+                      <LinkOutlined /> Linked to {selectedCustomerName}
+                    </Tag>
+                    <Button size="small" icon={<UserOutlined />} onClick={() => goToCustomer(selectedCustomerId)}>
+                      View Customer
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </FormSection>
 
-          {createMode === MODE_EXISTING ? (
-            <>
-              <Form.Item name="customer_id" label="Customer"
-                rules={[{ required: true, message: 'Select a customer' }]}
-                extra="Linked by customer id — not by name or email. Contact details below are copied onto the lead and editing them here does not change the customer record.">
-                <Select
-                  showSearch allowClear
-                  placeholder="Search by name, display name, company, email, phone or customer #"
-                  filterOption={false}
-                  onSearch={searchCustomers}
-                  onChange={handleSelectCustomer}
-                  suffixIcon={<SearchOutlined />}
-                  notFoundContent={customerSearching ? <Spin size="small" /> : 'No customers found'}>
-                  {customerOptions.map(c => (
-                    <Option key={c.id} value={c.id}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                        <span>
-                          {c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company_name || `Customer #${c.id}`}
-                        </span>
-                        <span style={{ color: '#8c8c8c', fontSize: 11 }}>
-                          {c.company_name ? `${c.company_name} · ` : ''}{c.email || ''} · #{c.id}
-                        </span>
-                      </div>
-                    </Option>
-                  ))}
-                </Select>
-              </Form.Item>
-              {selectedCustomerId && (
-                <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <Tag color="blue" style={{ margin: 0 }}>
-                    <LinkOutlined /> Linked to {selectedCustomerName}
-                  </Tag>
-                  <Button size="small" icon={<UserOutlined />} onClick={() => goToCustomer(selectedCustomerId)}>
-                    View Customer
-                  </Button>
-                </div>
-              )}
-              <CustomerContactFields form={leadForm} sections={false} showNotes={false} gridColumns="1fr 1fr 1fr" />
-              <Row gutter={12}>
-                <Col span={8}><Form.Item name="website" label="Website"><Input /></Form.Item></Col>
-              </Row>
-            </>
-          ) : (
-            <>
-              {duplicateWarning && (
-                <Alert type="warning" showIcon style={{ marginBottom: 12 }}
-                  message="A customer with this email already exists"
-                  description={
-                    <span>
-                      <strong>{duplicateWarning.name}</strong> (Customer #{duplicateWarning.id}) —{' '}
-                      <Button type="link" size="small" style={{ padding: 0, height: 'auto' }}
-                        onClick={() => linkDuplicateCustomer(duplicateWarning.id)}>link to that customer instead</Button>
-                    </span>
-                  } />
-              )}
-              <CustomerContactFields form={leadForm} sections={false} showNotes={false} gridColumns="1fr 1fr 1fr"
-                onEmailChange={checkDuplicateCustomer} />
-              <Row gutter={12}>
-                <Col span={8}><Form.Item name="website" label="Website"><Input /></Form.Item></Col>
-              </Row>
-            </>
+          {/* ── Sections 2 & 3: Customer / Contact Information + Address ──── */}
+          {/* The shared contact block renders the two boxes (same fields, same
+              validation) used by Invoice / Quote / Customer / Vendor. */}
+          {createMode === MODE_SCRATCH && duplicateWarning && (
+            <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+              message="A customer with this email already exists"
+              description={
+                <span>
+                  <strong>{duplicateWarning.name}</strong> (Customer #{duplicateWarning.id}) —{' '}
+                  <Button type="link" size="small" style={{ padding: 0, height: 'auto' }}
+                    onClick={() => linkDuplicateCustomer(duplicateWarning.id)}>link to that customer instead</Button>
+                </span>
+              } />
           )}
+          <CustomerContactFields
+            form={leadForm}
+            layout="lead"
+            showNotes={false}
+            extraFields={<Form.Item name="website" label="Website" style={FORM_ITEM_STYLE}><Input /></Form.Item>}
+            onEmailChange={createMode === MODE_SCRATCH ? checkDuplicateCustomer : undefined}
+          />
 
-          {/* ── Section 3: Lead Details ───────────────────────────────────── */}
-          <Divider orientation="left" plain>
-            <span style={{ fontSize: 12, color: '#8c8c8c' }}>Lead Details</span>
-          </Divider>
-          <Row gutter={12}>
-            <Col span={8}>
-              <Form.Item name="pipeline_stage" label="Pipeline Stage" initialValue="new">
-                <Select>{STAGES.map(s => <Option key={s.key} value={s.key}><Tag color={s.color} style={{ marginRight:4 }}>{s.label}</Tag></Option>)}</Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="priority" label="Priority" initialValue="medium">
-                <Select>{PRIORITIES.map(p => <Option key={p.key} value={p.key}><Tag color={p.color}>{p.label}</Tag></Option>)}</Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="value" label="Deal Value" initialValue={0}>
-                <InputNumber min={0} style={{ width:'100%' }}
-                  formatter={v => `${cSym} ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  parser={v => v.replace(new RegExp(`${cSym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s?|(,*)`, 'g'), '')} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="source" label="Lead Source">
-                <Select allowClear>{SOURCES.map(s => <Option key={s} value={s}>{s}</Option>)}</Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="assigned_to" label="Assigned To">
-                <Select allowClear showSearch optionFilterProp="children" placeholder="Select employee"
-                  dropdownRender={menu => (
-                    <>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setEmpModalOpen(true)} block>Add New Employee</Button></>
-                  )}>
-                  {employees.map(e => <Option key={e.id} value={`${e.first_name || ''} ${e.last_name || ''}`.trim() || e.email || `Employee #${e.id}`}>{`${e.first_name || ''} ${e.last_name || ''}`.trim() || e.email || `Employee #${e.id}`}</Option>)}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="expected_close_date" label="Expected Close Date">
-                <DatePicker style={{ width:'100%' }} format="MM/DD/YYYY" />
-              </Form.Item>
-            </Col>
-            {(editingLead?.pipeline_stage === 'lost') && (
-              <Col span={24}><Form.Item name="lost_reason" label="Lost Reason"><Input /></Form.Item></Col>
-            )}
-          </Row>
+          {/* ── Section 4: Lead Details ───────────────────────────────────── */}
+          <FormSection title="Lead Details" icon={<FunnelPlotOutlined />}>
+            <Row gutter={12}>
+              <Col span={8}>
+                <Form.Item name="pipeline_stage" label="Pipeline Stage" style={FORM_ITEM_STYLE} initialValue="new">
+                  <Select>{STAGES.map(s => <Option key={s.key} value={s.key}><Tag color={s.color} style={{ marginRight:4 }}>{s.label}</Tag></Option>)}</Select>
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="priority" label="Priority" style={FORM_ITEM_STYLE} initialValue="medium">
+                  <Select>{PRIORITIES.map(p => <Option key={p.key} value={p.key}><Tag color={p.color}>{p.label}</Tag></Option>)}</Select>
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="value" label="Deal Value" style={FORM_ITEM_STYLE} initialValue={0}>
+                  <InputNumber min={0} style={{ width:'100%' }}
+                    formatter={v => `${cSym} ${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                    parser={v => v.replace(new RegExp(`${cSym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s?|(,*)`, 'g'), '')} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="source" label="Lead Source" style={FORM_ITEM_STYLE}>
+                  <Select allowClear>{SOURCES.map(s => <Option key={s} value={s}>{s}</Option>)}</Select>
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="assigned_to" label="Assigned To" style={FORM_ITEM_STYLE}>
+                  <Select allowClear showSearch optionFilterProp="children" placeholder="Select employee"
+                    dropdownRender={menu => (
+                      <>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setEmpModalOpen(true)} block>Add New Employee</Button></>
+                    )}>
+                    {employees.map(e => <Option key={e.id} value={`${e.first_name || ''} ${e.last_name || ''}`.trim() || e.email || `Employee #${e.id}`}>{`${e.first_name || ''} ${e.last_name || ''}`.trim() || e.email || `Employee #${e.id}`}</Option>)}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="expected_close_date" label="Expected Close Date" style={FORM_ITEM_STYLE}>
+                  <DatePicker style={{ width:'100%' }} format="MM/DD/YYYY" />
+                </Form.Item>
+              </Col>
+              {(editingLead?.pipeline_stage === 'lost') && (
+                <Col span={24}><Form.Item name="lost_reason" label="Lost Reason" style={FORM_ITEM_STYLE}><Input /></Form.Item></Col>
+              )}
+              <Col span={24}>
+                <Form.Item name="tags" label="Tags" style={FORM_ITEM_STYLE}>
+                  <Select mode="tags" placeholder="Type and press Enter to add tags…" style={{ width:'100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
 
-          {/* ── Section 4: Tags & Notes ───────────────────────────────────── */}
-          <Divider orientation="left" plain>
-            <span style={{ fontSize: 12, color: '#8c8c8c' }}>Tags &amp; Notes</span>
-          </Divider>
-          <Row gutter={12}>
-            <Col span={24}>
-              <Form.Item name="tags" label="Tags">
-                <Select mode="tags" placeholder="Type and press Enter to add tags…" style={{ width:'100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={24}><Form.Item name="notes" label="Notes"><TextArea rows={3} /></Form.Item></Col>
-          </Row>
+          {/* ── Section 5: Notes ──────────────────────────────────────────── */}
+          <FormSection title="Notes" icon={<FileTextOutlined />}>
+            <Row gutter={12}>
+              <Col span={24}><Form.Item name="notes" label="Notes" style={FORM_ITEM_STYLE}><TextArea rows={3} /></Form.Item></Col>
+            </Row>
+          </FormSection>
+        </Form>
+      </Modal>
+
+      {/* ── Add New Customer (from the customer dropdown) ─────────────────── */}
+      <Modal title="Add New Customer" visible={custModalOpen} zIndex={Z.NESTED_MODAL}
+        onOk={handleAddCustomer}
+        onCancel={() => { setCustModalOpen(false); custForm.resetFields(); }}
+        okText="Add" destroyOnClose width={MODAL_WIDTH} bodyStyle={MODAL_BODY_SCROLL_STYLE}>
+        <Form form={custForm} layout="vertical">
+          <CustomerContactFields form={custForm} />
         </Form>
       </Modal>
 

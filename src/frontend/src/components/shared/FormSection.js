@@ -62,7 +62,11 @@ export const PAGE_WRAPPER_STYLE = {
 export const FORM_GUTTER = 16;
 
 const sectionStyle = {
-  border: '1px solid #f0f0f0',
+  // Slightly stronger neutral outline than the old #f0f0f0 so every section is
+  // clearly defined without looking heavy. Defined as a CSS token (custom.css)
+  // so the whole app changes in one place; the fallback keeps the section
+  // bordered even if the stylesheet has not loaded.
+  border: '1px solid var(--al-form-section-border, #d9d9d9)',
   borderRadius: 8,
   padding: '12px 16px 2px',
   marginBottom: 12,
@@ -81,15 +85,16 @@ const headerStyle = {
   lineHeight: '18px',
   marginBottom: 12,
   paddingBottom: 8,
-  borderBottom: '1px solid #f5f5f5',
+  // Kept one step lighter than the outer outline (never heavier).
+  borderBottom: '1px solid var(--al-form-section-divider, #e8e8e8)',
 };
 
 const iconStyle = { fontSize: 13, color: '#8c8c8c', display: 'inline-flex', alignItems: 'center' };
 
 const FormSection = ({ title, icon, extra, children, style, bodyStyle }) => (
-  <div style={{ ...sectionStyle, ...(style || {}) }}>
+  <div className="al-form-section" style={{ ...sectionStyle, ...(style || {}) }}>
     {title ? (
-      <div style={headerStyle}>
+      <div className="al-form-section-header" style={headerStyle}>
         {icon ? <span style={iconStyle}>{icon}</span> : null}
         <span>{title}</span>
         {extra ? (
@@ -99,7 +104,7 @@ const FormSection = ({ title, icon, extra, children, style, bodyStyle }) => (
         ) : null}
       </div>
     ) : null}
-    <div style={bodyStyle}>{children}</div>
+    <div className="al-form-section-body" style={bodyStyle}>{children}</div>
   </div>
 );
 

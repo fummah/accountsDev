@@ -230,7 +230,7 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
   // When false, the user explicitly chose to open the draft without it.
   const sendExternal = async (vals, pdfData, { withAttachment }) => {
     const res = await window.electronAPI.emailSendExternal({
-      to: vals.to, subject: vals.subject, body: vals.body,
+      to: vals.to, cc: vals.cc || undefined, subject: vals.subject, body: vals.body,
       pdfFilename: pdfData ? pdfData.filename : undefined,
       pdfBase64: pdfData ? pdfData.base64 : undefined,
       document_type: documentType || 'Invoice', document_id: documentId,

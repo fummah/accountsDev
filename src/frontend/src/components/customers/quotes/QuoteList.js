@@ -370,7 +370,7 @@ const QuoteList = () => {
         style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0' }}
       >
         {/* Toolbar - search, status, dates, refresh on the left */}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: 16, borderBottom: '1px solid #f0f0f0' }}>
+        <div className="al-list-toolbar" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: 16, borderBottom: '1px solid #f0f0f0' }}>
           <Input
             placeholder="Search by customer or number..."
             prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}

@@ -201,3 +201,358 @@
 }
 
 
+
+/* ── Boxed form sections (shared FormSection component) ─────────────────────
+   ONE token for the section outline, so the border is defined in a single
+   place instead of being repeated across every form. Slightly stronger than the
+   previous #f0f0f0 so each form section is clearly defined against the page
+   without looking heavy. The section surface stays white in every theme (by
+   design), so the token is intentionally theme-stable; change it here only. */
+:root {
+    --al-form-section-border: #d9d9d9;
+    --al-form-section-divider: #e8e8e8;
+}
+
+/* ── List toolbars (shared ListToolbar + every list page) ───────────────────
+   ROOT CAUSE of the "All Statuses sits lower than the search / buttons" bug:
+   the vendored Jumbo theme ships default vertical margins on the very controls
+   used in a toolbar —
+       .ant-input-search { margin-bottom: 16px }
+       .ant-select       { margin-bottom: 8px; margin-left: 8px }
+       .ant-btn          { margin-bottom: 15px; margin-left/right: 8px }
+   Inside an `align-items:center` flex row those margins are part of each item's
+   margin box, so every control is centred at a different offset (the search is
+   pushed up ~8px, the Select ~4px, buttons ~7px) and the extra side margins make
+   the gaps uneven. Zeroing the theme margins inside `.al-list-toolbar` and using
+   the row's own `gap` is the real fix — no negative margins, no transforms.
+
+   The heights below are only a safety net: the theme already renders the search
+   box, the single Select and the buttons at the 36px control token, so they line
+   up once the stray margins are gone. */
+.al-list-toolbar {
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+/* The theme margins are the cause — remove them; `gap` is the only spacing. */
+.al-list-toolbar .ant-input-search,
+.al-list-toolbar .ant-select,
+.al-list-toolbar .ant-btn {
+    margin: 0 !important;
+}
+
+/* One control height for the search box, the status Select and every button. */
+.al-list-toolbar .ant-input-affix-wrapper,
+.al-list-toolbar .ant-input-search,
+.al-list-toolbar .ant-select-single:not(.ant-select-customize-input) .ant-select-selector,
+.al-list-toolbar .ant-btn {
+    height: 36px !important;
+}
+
+/* Let the search box fill its group and its inner input fill the box. */
+.al-list-toolbar .ant-input-search {
+    width: 100%;
+}
+
+.al-list-toolbar .ant-input-affix-wrapper > input.ant-input {
+    height: 100% !important;
+    padding: 0 !important;
+}
+
+/* Keep the selected value / placeholder optically centred in the 36px box. */
+.al-list-toolbar .ant-select-single:not(.ant-select-customize-input) .ant-select-selector .ant-select-selection-item,
+.al-list-toolbar .ant-select-single:not(.ant-select-customize-input) .ant-select-selector .ant-select-selection-placeholder {
+    line-height: 34px;
+}
+
+/* Consistent toolbar control corners across every list page. */
+.al-list-toolbar .ant-input-affix-wrapper,
+.al-list-toolbar .ant-select-single:not(.ant-select-customize-input) .ant-select-selector,
+.al-list-toolbar .ant-btn {
+    border-radius: 8px;
+}
+
+/* Responsive: keep one straight line on desktop; wrap gracefully when narrow. */
+.al-list-toolbar__actions {
+    flex-wrap: nowrap;
+}
+
+@media (max-width: 991px) {
+    .al-list-toolbar {
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 575px) {
+    .al-list-toolbar__actions {
+        flex-wrap: wrap;
+    }
+}
+
+/* ── Tabs: hide inactive tab panes ──────────────────────────────────────────
+   rc-tabs (antd 4.24) renders EVERY tab pane and hides the inactive ones with
+   `.ant-tabs-tabpane-hidden { display: none }`. The vendored theme omits that
+   rule, so all panes render at once and — because `.ant-tabs-content` is a
+   horizontal flex row with each pane `width:100%` — only the first pane is
+   visible. Clicking a tab then appears to do nothing. Restoring the rule fixes
+   tab switching everywhere (Purchase Order, View Item, and any other Tabs). */
+.ant-tabs-tabpane-hidden {
+    display: none !important;
+}
+
+/* ── General Ledger table ───────────────────────────────────────────────────
+   The ledger now carries 8 columns (Date · Journal · Payee/Description ·
+   Account(s) · Reference · Debit · Credit · Balance). The table uses
+   `tableLayout="fixed"` with compact explicit column widths, so the
+   descriptive columns shrink and clip with an ellipsis while the money columns
+   keep a readable fixed width. The table stretches to 100% of its card on
+   normal desktop widths (antd's scroll.x is only the narrow-screen floor), so
+   there is no horizontal scrollbar at desktop size. */
+.gl-ledger-table .ant-table {
+    width: 100%;
+}
+
+.gl-ledger-table .ant-table-tbody > tr > td {
+    overflow: hidden;
+}
+
+.gl-ledger-table .ant-table-cell-ellipsis {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Keep the Split badge compact so it can never widen its column. */
+.gl-ledger-table .ant-tag {
+    margin-right: 0;
+}
+
+/* ── Item master drawer (Products & Services → New / Edit Item) ─────────────
+   The accounting master form needs a wide working area for its 2/3-column
+   boxed sections. Desktop target ~1150px (≈70-80% of the viewport on a normal
+   laptop), tablet ~90vw, mobile full width. The `.ant-drawer` prefix lifts the
+   specificity above the compiled theme's `width: 50% !important`. The body
+   scrolls vertically; there is no horizontal scrollbar. */
+.ant-drawer.app-item-drawer .ant-drawer-content-wrapper {
+    width: 1150px !important;
+    max-width: 96vw;
+}
+
+@media (max-width: 991px) {
+    .ant-drawer.app-item-drawer .ant-drawer-content-wrapper {
+        width: 90vw !important;
+    }
+}
+
+@media (max-width: 575px) {
+    .ant-drawer.app-item-drawer .ant-drawer-content-wrapper {
+        width: 100vw !important;
+        max-width: 100vw;
+    }
+}
+
+/* Item detail (read-only) drawer — narrower than the edit drawer, still wide
+   enough for the descriptions and the movement / transaction tables. */
+.ant-drawer.app-item-detail-drawer .ant-drawer-content-wrapper {
+    width: 900px !important;
+    max-width: 96vw;
+}
+
+@media (max-width: 991px) {
+    .ant-drawer.app-item-detail-drawer .ant-drawer-content-wrapper {
+        width: 92vw !important;
+    }
+}
+
+@media (max-width: 575px) {
+    .ant-drawer.app-item-detail-drawer .ant-drawer-content-wrapper {
+        width: 100vw !important;
+        max-width: 100vw;
+    }
+}
+
+/* ── Purchase Order drawers (form + receive, and detail) ───────────────────── */
+.ant-drawer.app-po-drawer .ant-drawer-content-wrapper {
+    width: 1100px !important;
+    max-width: 96vw;
+}
+
+.ant-drawer.app-po-detail-drawer .ant-drawer-content-wrapper {
+    width: 1000px !important;
+    max-width: 96vw;
+}
+
+@media (max-width: 991px) {
+    .ant-drawer.app-po-drawer .ant-drawer-content-wrapper,
+    .ant-drawer.app-po-detail-drawer .ant-drawer-content-wrapper {
+        width: 92vw !important;
+    }
+}
+
+@media (max-width: 575px) {
+    .ant-drawer.app-po-drawer .ant-drawer-content-wrapper,
+    .ant-drawer.app-po-detail-drawer .ant-drawer-content-wrapper {
+        width: 100vw !important;
+        max-width: 100vw;
+    }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Modern list-page styling (Purchase Orders, Products & Services)
+   Scoped to `.al-modern-page` so nothing else in the app is affected.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.al-modern-page {
+    --al-border: #e6e9ef;
+    --al-border-soft: #eef1f5;
+    --al-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+    --al-shadow-md: 0 6px 16px rgba(16, 24, 40, 0.08);
+    --al-text: #1f2d3d;
+    --al-muted: #667085;
+}
+
+/* Cards */
+.al-modern-page .ant-card {
+    border-radius: 14px;
+    border: 1px solid var(--al-border);
+    box-shadow: var(--al-shadow-sm);
+}
+.al-modern-page .ant-card-head {
+    border-bottom: 1px solid var(--al-border-soft);
+}
+
+/* Stat cards with a lift on hover */
+.al-stat-card {
+    border-radius: 14px !important;
+    border: 1px solid var(--al-border) !important;
+    box-shadow: var(--al-shadow-sm) !important;
+    transition: transform .16s ease, box-shadow .16s ease;
+}
+.al-stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--al-shadow-md) !important;
+}
+
+/* Tables */
+.al-modern-page .ant-table {
+    border-radius: 12px;
+}
+.al-modern-page .ant-table-thead > tr > th {
+    background: #f9fafb !important;
+    color: #475467 !important;
+    font-weight: 600;
+    border-bottom: 1px solid var(--al-border-soft) !important;
+}
+.al-modern-page .ant-table-thead > tr > th::before { display: none !important; }
+.al-modern-page .ant-table-tbody > tr > td {
+    border-bottom: 1px solid #f2f4f7 !important;
+}
+.al-modern-page .ant-table-tbody > tr:hover > td {
+    background: #f9fafb !important;
+}
+.al-modern-page .ant-table-tbody > tr.ant-table-row:hover {
+    box-shadow: inset 3px 0 0 #1890ff;
+}
+
+/* Controls */
+.al-modern-page .ant-btn { border-radius: 8px; }
+.al-modern-page .ant-input,
+.al-modern-page .ant-input-affix-wrapper,
+.al-modern-page .ant-select:not(.ant-select-customize-input) .ant-select-selector,
+.al-modern-page .ant-picker {
+    border-radius: 8px !important;
+}
+.al-modern-page .ant-statistic-title {
+    color: var(--al-muted);
+    font-size: 12px;
+}
+
+/* Drawer headers (drawers portal outside the page wrapper) */
+.ant-drawer.app-po-drawer .ant-drawer-header,
+.ant-drawer.app-po-detail-drawer .ant-drawer-header,
+.ant-drawer.app-item-drawer .ant-drawer-header,
+.ant-drawer.app-item-detail-drawer .ant-drawer-header {
+    border-bottom: 1px solid var(--al-border-soft, #eef1f5);
+    padding: 16px 24px;
+}
+.ant-drawer.app-po-drawer .ant-drawer-title,
+.ant-drawer.app-po-detail-drawer .ant-drawer-title,
+.ant-drawer.app-item-drawer .ant-drawer-title,
+.ant-drawer.app-item-detail-drawer .ant-drawer-title {
+    font-weight: 700;
+    color: #1f2d3d;
+}
+.ant-drawer.app-po-drawer .ant-drawer-footer,
+.ant-drawer.app-item-drawer .ant-drawer-footer {
+    border-top: 1px solid var(--al-border-soft, #eef1f5);
+    padding: 12px 24px;
+}
+
+/* Modern page heading */
+.al-modern-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.al-modern-head .al-modern-badge {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 20px;
+    flex-shrink: 0;
+    box-shadow: 0 4px 10px rgba(24, 144, 255, 0.28);
+}
+.al-modern-head h3 { margin: 0; }
+
+/* Page header row (title + Back + right-hand actions). The vendored theme adds
+   default bottom margins to .ant-btn / .ant-input-search, which pushes controls
+   up inside a centre-aligned row; zero them and centre everything so the Back
+   button lines up with the page title. */
+.al-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.al-page-head .ant-btn,
+.al-page-head .ant-input-search,
+.al-page-head .ant-select,
+.al-page-head .ant-space,
+.al-page-head .ant-space-item {
+    margin-bottom: 0 !important;
+}
+.al-page-head h2,
+.al-page-head h3 {
+    margin: 0;
+    line-height: 1.25;
+    display: flex;
+    align-items: center;
+}
+.al-page-head .al-page-head-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* Modern form sections — scoped to `.al-modern-page` so other forms keep the
+   established section look. Overrides the shared FormSection inline styles. */
+.al-modern-page .al-form-section {
+    border-color: #e6e9ef !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04) !important;
+    padding: 14px 18px 4px !important;
+    margin-bottom: 14px !important;
+}
+.al-modern-page .al-form-section-header {
+    color: #344054 !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.05em !important;
+    margin-bottom: 14px !important;
+    padding-bottom: 10px !important;
+    border-bottom-color: #eef1f5 !important;
+}

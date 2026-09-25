@@ -611,6 +611,10 @@ const registerAllHandlers = async () => {
 app.whenReady().then(async () => {
   try {
     registerProtocols();
+    // Clear stale email-compose temp files from previous sessions. The files
+    // are deliberately NOT deleted right after a hand-off (the mail client may
+    // still be reading them), so old ones are swept here instead.
+    try { require('./services/mailClient').sweepOldTempDirs(); } catch { /* non-fatal */ }
     await registerAllHandlers();
     createWindow();
     buildApplicationMenu();

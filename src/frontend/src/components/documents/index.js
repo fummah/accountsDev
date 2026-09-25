@@ -1,112 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Card, Button, Table, Space, Select, Input, Upload, message } from 'antd';
+import { Card, Space, Select, Input, Typography } from 'antd';
+import AttachmentManager from '../shared/AttachmentManager';
 
 const { Option } = Select;
-const { Dragger } = Upload;
+const { Text } = Typography;
 
+/**
+ * Document Center — the application-wide attachment browser.
+ *
+ * It uses the SAME AttachmentManager as the record forms (Bill, Check, Credit
+ * Card Charge), so listing, opening and removing documents is one code path and
+ * one storage service. Uploads here are persisted immediately (autoUpload)
+ * against the selected category + linked record.
+ */
 const DocumentCenter = () => {
-  const [docs, setDocs] = useState([]);
   const [category, setCategory] = useState('receipt');
   const [linkedId, setLinkedId] = useState('');
   const [txs, setTxs] = useState([]);
-  const fileRef = useRef(null);
-
-  const load = async () => {
-    try {
-      const list = await window.electronAPI.getDocuments(category, linkedId);
-      if (Array.isArray(list)) setDocs(list);
-    } catch (e) {
-      message.error(String(e?.message || e));
-    }
-  };
-  useEffect(() => { load(); }, [category, linkedId]);
+  const attachmentRef = useRef(null);
 
   const loadTxs = async () => {
     try {
       const list = await window.electronAPI.getTransactions?.();
-      if (Array.isArray(list)) {
-        const recent = list.slice(-200).reverse();
-        setTxs(recent);
-      }
+      if (Array.isArray(list)) setTxs(list.slice(-200).reverse());
     } catch {}
   };
   useEffect(() => { loadTxs(); }, []);
-
-  const doUpload = async (file) => {
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64 = (reader.result || '').toString();
-        const res = await window.electronAPI.uploadDocument({
-          name: file.name,
-          mime: file.type,
-          data: base64,
-          category,
-          linkedId,
-        });
-        if (res?.success) {
-          message.success('Uploaded');
-          await load();
-        } else {
-          console.error('[attachments] document upload failed:', res?.error);
-          message.error('The file could not be stored. Please try attaching it again.');
-        }
-      } catch (e) {
-        console.error('[attachments] document upload threw:', e);
-        message.error('The file could not be stored. Please try attaching it again.');
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const beforeUpload = (file) => {
-    doUpload(file);
-    return false;
-  };
-
-  const dragProps = {
-    name: 'file',
-    multiple: true,
-    beforeUpload: (file) => beforeUpload(file),
-    fileList: [],
-    showUploadList: false,
-  };
-
-  const openDoc = async (id) => {
-    const res = await window.electronAPI.openDocument(id);
-    if (!res?.success) {
-      message.error(res?.error || res?.message || 'Unable to open file — it may have been moved or deleted');
-    }
-  };
-
-  const deleteDoc = async (id) => {
-    const res = await window.electronAPI.deleteDocument(id);
-    if (res?.success) {
-      message.success('Deleted');
-      await load();
-    } else {
-      message.error(res?.error || 'Delete failed');
-    }
-  };
-
-  const columns = [
-    { title: 'Name', dataIndex: 'document_name', key: 'name' },
-    { title: 'Type', dataIndex: 'document_type', key: 'type' },
-    { title: 'Size', dataIndex: 'document_size', key: 'size' },
-    { title: 'Category', dataIndex: 'category', key: 'category' },
-    { title: 'Linked ID', dataIndex: 'linked_id', key: 'linked' },
-    { title: 'Date', dataIndex: 'date_entered', key: 'date' },
-    {
-      title: 'Actions',
-      key: 'actions',
-      render: (_, r) => (
-        <Space>
-          <Button size="small" onClick={() => openDoc(r.id)}>Open</Button>
-          <Button size="small" danger onClick={() => deleteDoc(r.id)}>Delete</Button>
-        </Space>
-      )
-    }
-  ];
 
   return (
     <div className="gx-p-4">
@@ -137,28 +56,27 @@ const DocumentCenter = () => {
             optionFilterProp="label"
             options={txs.map(t => ({
               value: t.id,
-              label: `${t.id} | ${t.date || ''} | ${t.description || ''} | ${Number((t.debit||0)-(t.credit||0)).toFixed(2)}`
+              label: `${t.id} | ${t.date || ''} | ${t.description || ''} | ${Number((t.debit || 0) - (t.credit || 0)).toFixed(2)}`,
             }))}
           />
-          <Upload beforeUpload={beforeUpload} fileList={[]} showUploadList={false}>
-            <Button type="primary">Upload File</Button>
-          </Upload>
         </Space>
-        <Dragger {...dragProps}>
-          <p className="ant-upload-drag-icon">Drop files here to upload</p>
-          <p className="ant-upload-text">Drag & drop documents to attach them to the selected category and linked record.</p>
-        </Dragger>
-        <Table rowKey="id" dataSource={Array.isArray(docs) ? docs : []} columns={columns} size="small" style={{ marginTop: 12 }} pagination={{ defaultPageSize: 20, showSizeChanger: true }} />
+
+        <AttachmentManager
+          ref={attachmentRef}
+          entityType={category}
+          entityId={linkedId}
+          autoUpload
+          entityLabel={category}
+          emptyText="No documents for this category yet."
+          onChanged={() => {}}
+        />
+
+        <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+          Files are stored in AccuLedger's managed attachment folder and can be opened or removed at any time.
+        </Text>
       </Card>
     </div>
   );
 };
 
-function useMount(effect) {
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { effect(); }, []);
-}
-
 export default DocumentCenter;
-
-

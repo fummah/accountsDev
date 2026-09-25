@@ -133,10 +133,10 @@ eq('isServiceType(Product)', Classification.isServiceType('Product'), false);
 const liveTypes = many('SELECT DISTINCT type FROM products').map(r => r.type);
 const unclassified = liveTypes.filter(t => !Classification.isInventoryType(t) && !Classification.isServiceType(t));
 eq('every live product type is explicitly classified', unclassified, []);
-const inventoryRows = one(
-  `SELECT COUNT(*) c FROM products WHERE LOWER(TRIM(COALESCE(type,''))) IN ('product','raw material','asset','bundle')`
-).c;
-const serviceRows = one(`SELECT COUNT(*) c FROM products WHERE LOWER(TRIM(COALESCE(type,''))) = 'service'`).c;
+  const inventoryRows = one(
+  `SELECT COUNT(*) c FROM products WHERE LOWER(TRIM(COALESCE(type,''))) IN ('product','raw material','asset','bundle','inventory_part','inventory part')`
+  ).c;
+  const serviceRows = one(`SELECT COUNT(*) c FROM products WHERE LOWER(TRIM(COALESCE(type,''))) IN ('service')`).c;
 ok('live DB has inventory rows', inventoryRows > 0, `inventoryRows=${inventoryRows}`);
 console.log(`      (live: ${inventoryRows} inventory / ${serviceRows} service of ${one('SELECT COUNT(*) c FROM products').c})`);
 

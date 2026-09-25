@@ -85,10 +85,10 @@ const sizeOf = (sel) => {
 };
 const sizeWords = sizeOf('.words-text');
 const sizeAmount = sizeOf('.amount-box');
-const sizeName = sizeOf('.addr-name');
+const sizeName = sizeOf('.payee-name');
 check('.words-text (written amount) = 16px, up from 14px', sizeWords === 16, String(sizeWords));
 check('.amount-box (numeric amount) = 12px, down from 13px', sizeAmount === 12, String(sizeAmount));
-check('.addr-name (payee name) = 14px, up from 13px', sizeName === 14, String(sizeName));
+check('.payee-name (payee name) = 14px, up from 13px', sizeName === 14, String(sizeName));
 check('written amount is the LARGEST of the three', sizeWords > sizeName && sizeWords > sizeAmount,
   `${sizeWords}/${sizeName}/${sizeAmount}`);
 check('written amount is not dramatically larger than numeric (<= 6px spread)', sizeWords - sizeAmount <= 6,
@@ -98,15 +98,19 @@ check('all three sit within a 4px band (visually balanced)', (sizeWords - sizeAm
 
 console.log('\nPHYSICAL CALIBRATION — offsets centralised in :root');
 for (const v of ['--check-offset-x', '--check-offset-y', '--check-pad-left', '--check-pad-right',
-  '--check-date-top', '--check-amount-top', '--check-words-top', '--check-addr-top', '--check-memo-top']) {
+  '--check-date-top', '--check-amount-top', '--check-payee-top', '--check-words-top', '--check-addr-top', '--check-memo-top']) {
   check(`${v} declared in :root`, new RegExp(`${v}\\s*:`).test(styleBlock));
 }
 check('every row offset reads a var, none is hard-coded',
   /\.date-row\s*\{[^}]*margin-top:\s*var\(--check-date-top\)/.test(styleBlock) &&
   /\.amount-row\s*\{[^}]*margin-top:\s*var\(--check-amount-top\)/.test(styleBlock) &&
+  /\.payee-row\s*\{[^}]*margin-top:\s*var\(--check-payee-top\)/.test(styleBlock) &&
   /\.words-row\s*\{[^}]*margin-top:\s*var\(--check-words-top\)/.test(styleBlock) &&
   /\.addr-window\s*\{[^}]*margin-top:\s*var\(--check-addr-top\)/.test(styleBlock) &&
   /\.memo-sig-row\s*\{[^}]*margin-top:\s*var\(--check-memo-top\)/.test(styleBlock));
+check('payee name + address share the same left edge as the other sections (no extra indent)',
+  !/\.payee-row\s*\{[^}]*padding-left/.test(styleBlock) &&
+  !/\.addr-window\s*\{[^}]*padding-left/.test(styleBlock));
 check('the whole body is nudged by the offset vars',
   /\.check-inner\s*\{[^}]*margin-left:\s*var\(--check-offset-x\)/.test(styleBlock) &&
   /\.check-inner\s*\{[^}]*margin-top:\s*var\(--check-offset-y\)/.test(styleBlock));
@@ -146,17 +150,25 @@ console.log('\nCHECK NUMBER — suppressed from print, never from the data');
 check('check number 1042 does NOT appear anywhere in the printed HTML', !html.includes('1042'));
 check('the generator never interpolates vals.checkNumber', !/\$\{[^}]*checkNumber/.test(genSrc));
 
-console.log('\nVERTICAL ORDER — amount, then words, then payee name, then address, then memo');
+console.log('\nVERTICAL ORDER — amount, then payee name, then words, then address, then memo');
 const at = (s) => checkBody.indexOf(s);
-check('numeric amount before written amount', at('$1234.56') < at('One Thousand Two Hundred Thirty-Four'));
-check('written amount before payee name', at('One Thousand Two Hundred Thirty-Four') < at('Acme Industrial Supplies'));
-check('payee name before address line 1', at('Acme Industrial Supplies') < at('Unit 4, Riverbend Park'));
+check('numeric amount before payee name', at('$1234.56') < at('Acme Industrial Supplies'));
+check('payee name before written amount', at('Acme Industrial Supplies') < at('One Thousand Two Hundred Thirty-Four'));
+check('written amount before address line 1', at('One Thousand Two Hundred Thirty-Four') < at('Unit 4, Riverbend Park'));
 check('address line 1 before city/state/zip', at('Unit 4, Riverbend Park') < at('Cape Town, Western Cape 7441'));
 check('address before memo', at('Cape Town, Western Cape 7441') < at('Invoice INV-88213'));
 check('date is the first printed field', at('09/30/2026') < at('$1234.56'));
 check('payee name appears exactly ONCE in the check body',
   (checkBody.match(/Acme Industrial Supplies/g) || []).length === 1,
   String((checkBody.match(/Acme Industrial Supplies/g) || []).length));
+check('payee name is ABOVE the written amount in the main cheque area',
+  checkBody.indexOf('Acme Industrial Supplies') < checkBody.indexOf('One Thousand Two Hundred Thirty-Four'));
+check('address is BELOW the written amount in the main cheque area',
+  checkBody.indexOf('One Thousand Two Hundred Thirty-Four') < checkBody.indexOf('Unit 4, Riverbend Park'));
+const stubArea = html.slice(html.indexOf('STUB 1'));
+check('payee name ALSO appears in the lower remittance stub (printed in two areas)',
+  stubArea.includes('Acme Industrial Supplies'),
+  `stub occurrences: ${(stubArea.match(/Acme Industrial Supplies/g) || []).length}`);
 
 // ── Headless render: computed styles + rendered text ────────────────────────
 function findBrowser() {
@@ -191,7 +203,7 @@ window.addEventListener('load', function () {
   var out = {
     words: px(q('.words-text'), 'fontSize'),
     amount: px(q('.amount-box'), 'fontSize'),
-    name: px(q('.addr-name'), 'fontSize'),
+    name: px(q('.payee-name'), 'fontSize'),
     date: px(q('.date-val'), 'fontSize'),
     wrapBorder: wrap ? parseFloat(getComputedStyle(wrap).borderBottomWidth) : null,
     bordered: bordered,

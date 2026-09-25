@@ -1,6 +1,9 @@
 // src/backend/models/Expenses.js
 const db = require('./dbmgr.js');
 
+// Integer-cent rounding so printed totals never drift from floating point.
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 // ── bill-line shape ────────────────────────────────────────────────────────
 // A bill line is either an ACCOUNT line (an account plus a hand-typed amount —
 // the original behaviour) or an ITEM line (an inventory product plus quantity x
@@ -17,26 +20,77 @@ const normalizeLineType = (raw) =>
 // carried separate copies of this SQL, which is exactly how a newly added column
 // ends up written on create but silently dropped on edit.
 const LINE_INSERT_SQL = `INSERT INTO expense_lines
-  (expense_id, category, description, amount, account_id, line_type, product_id, quantity, rate, warehouse_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  (expense_id, category, description, amount, account_id, line_type, product_id, quantity, rate, warehouse_id, purchase_order_id, purchase_order_line_id, tax_rate_id, tax_rate, tax_amount)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 /**
  * Resolve the account an ITEM line must debit.
  *
- * An item line is inventory, so it debits Inventory Asset — never a fallback
- * expense account. The client may send the id, but the backend stays
- * authoritative: when it is missing we look up the seeded system account here,
- * so the accounting is still correct for a renderer that does not know about it.
- * Returns null only when no Inventory Asset account exists at all.
+ * Inventory Part  → the Inventory Asset account (the item's configured one, else
+ *                   the seeded system account). Stock is received separately.
+ * Non-Inventory / Service → the item's configured Expense / COGS account (a
+ *                   purchase that never touches inventory).
+ *
+ * The client may send the id, but the backend stays authoritative. Returns null
+ * only when no suitable account can be resolved.
  */
 const resolveItemLineAccountId = (line) => {
   if (line.accountId != null && Number.isFinite(Number(line.accountId))) return Number(line.accountId);
+  const COA = require('./chartOfAccounts');
+  let prod = null;
+  if (line.product_id != null) {
+    try {
+      prod = db.prepare('SELECT type, inventory_asset_account_id, purchase_expense_account_id FROM products WHERE id = ?').get(Number(line.product_id));
+    } catch { /* product lookup optional */ }
+  }
+  const Classification = require('../services/productClassification');
+  const isInventory = prod ? Classification.tracksInventory(prod.type) : true;
+
+  if (isInventory) {
+    if (prod && prod.inventory_asset_account_id) {
+      const byId = COA.getAccount(Number(prod.inventory_asset_account_id));
+      if (byId) return Number(prod.inventory_asset_account_id);
+    }
+    try {
+      const inv = COA.getSystemAccount('Inventory Asset');
+      if (inv && inv.id != null) return Number(inv.id);
+    } catch { /* fall through */ }
+    return null;
+  }
+
+  // Non-inventory part / service: debit the item's configured expense account.
+  if (prod && prod.purchase_expense_account_id) {
+    const byId = COA.getAccount(Number(prod.purchase_expense_account_id));
+    if (byId) return Number(prod.purchase_expense_account_id);
+  }
+  try {
+    const fallback = COA.getByName('General Expenses')
+      || db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) IN ('expense','cost of goods sold','other expense') AND status = 'Active' ORDER BY id LIMIT 1").get();
+    return fallback ? Number(fallback.id) : null;
+  } catch { return null; }
+};
+
+/**
+ * The account a PURCHASE tax amount is debited to (input tax / VAT receivable).
+ * Resolved from the Chart of Accounts — never hardcoded. Returns null when the
+ * company has no tax account configured, in which case the tax is left on the
+ * expense line rather than being lost.
+ */
+const resolveInputTaxAccountId = () => {
   try {
     const COA = require('./chartOfAccounts');
-    const inv = COA.getSystemAccount('Inventory Asset');
-    if (inv && inv.id != null) return Number(inv.id);
-  } catch { /* fall through — the caller resolves the account as usual */ }
-  return null;
+    for (const name of ['Input Tax', 'VAT Receivable', 'VAT Input', 'Tax Receivable']) {
+      const a = COA.getByName(name);
+      if (a && a.id != null) return Number(a.id);
+    }
+    const r = db.prepare(`
+      SELECT id FROM chart_of_accounts
+      WHERE LOWER(COALESCE(taxLine, '')) LIKE '%vat%'
+        AND LOWER(type) IN ('asset','other current asset','expense','other expense')
+        AND status = 'Active'
+      ORDER BY id LIMIT 1`).get();
+    return r ? Number(r.id) : null;
+  } catch { return null; }
 };
 
 const lineParams = (expenseId, line) => {
@@ -56,7 +110,29 @@ const lineParams = (expenseId, line) => {
     isItem && Number.isFinite(qty) ? qty : null,
     isItem && Number.isFinite(rate) ? rate : null,
     isItem && line.warehouse_id != null ? Number(line.warehouse_id) : null,
+    isItem && line.purchase_order_id != null ? Number(line.purchase_order_id) : null,
+    isItem && line.purchase_order_line_id != null ? Number(line.purchase_order_line_id) : null,
+    line.taxRateId != null && Number.isFinite(Number(line.taxRateId)) ? Number(line.taxRateId) : null,
+    Number.isFinite(Number(line.taxRate)) ? Number(line.taxRate) : 0,
+    Number.isFinite(Number(line.taxAmount)) ? Number(line.taxAmount) : 0,
   ];
+};
+
+/**
+ * Recompute the billed quantity of every PO line this bill references, across
+ * ALL bills, so editing/deleting a bill can never double-count billed qty.
+ * Non-posting bill states (draft/void/cancelled) are excluded.
+ */
+const syncPoBilling = (expenseId) => {
+  try {
+    const PurchaseOrders = require('./purchaseOrders');
+    const ids = db.prepare(
+      'SELECT DISTINCT purchase_order_line_id FROM expense_lines WHERE expense_id = ? AND purchase_order_line_id IS NOT NULL'
+    ).all(Number(expenseId)).map(r => Number(r.purchase_order_line_id));
+    if (ids.length) PurchaseOrders.syncBilled(ids);
+  } catch (e) {
+    console.error('[expenses] PO billing sync failed:', e.message);
+  }
 };
 
 /**
@@ -70,12 +146,24 @@ const readItemLines = (expenseId) => {
   let rows = [];
   try {
     rows = db.prepare(
-      `SELECT id, line_type, product_id, quantity, rate, warehouse_id
+      `SELECT id, line_type, product_id, quantity, rate, warehouse_id, purchase_order_line_id
          FROM expense_lines WHERE expense_id = ? ORDER BY id`
     ).all(Number(expenseId));
-  } catch { return []; }
+  } catch {
+    // Older databases without the PO-link column still work (no PO linkage).
+    try {
+      rows = db.prepare(
+        `SELECT id, line_type, product_id, quantity, rate, warehouse_id
+           FROM expense_lines WHERE expense_id = ? ORDER BY id`
+      ).all(Number(expenseId));
+    } catch { return []; }
+  }
   return rows
     .filter(r => normalizeLineType(r.line_type) === LINE_TYPE_ITEM)
+    // A bill line LINKED TO A PO LINE was already received by the goods receipt
+    // (the receipt owns the stock movement). Re-receiving it here would
+    // double-count inventory, so PO-linked lines never move stock from a bill.
+    .filter(r => r.purchase_order_line_id == null)
     .map(r => ({
       lineId: r.id,
       productId: r.product_id,
@@ -188,6 +276,18 @@ const Expenses = {
       add('quantity', 'REAL');
       add('rate', 'REAL');
       add('warehouse_id', 'INTEGER');               // warehouses.id, for item lines
+      // Purchase Order linkage. The module that WRITES these columns owns
+      // ensuring them, so expenses.js does not depend on purchaseOrders.js
+      // having been loaded first (the same rule inventory.js uses for
+      // products.item_id).
+      add('purchase_order_id', 'INTEGER');
+      add('purchase_order_line_id', 'INTEGER');
+      // Line-level purchase tax (snapshot). `amount` stays the line TOTAL
+      // (including tax), so every existing total/balance query is unchanged;
+      // these columns let the GL posting split the tax to a tax account.
+      add('tax_rate_id', 'INTEGER');
+      add('tax_rate', 'REAL DEFAULT 0');
+      add('tax_amount', 'REAL DEFAULT 0');
     } catch (e) {
       console.error('[expenses] expense_lines line-shape migration failed:', e);
     }
@@ -214,6 +314,7 @@ const Expenses = {
       for (const line of expenseLines) {
         expenseLineStmt.run(...lineParams(expenseId, line));
       }
+      syncPoBilling(expenseId);
 
       // Skip GL and vendor balance for Draft status
       const isDraft = (approval_status || '').toLowerCase() === 'draft';
@@ -270,6 +371,52 @@ const Expenses = {
       console.error('Error fetching single expense:', error);
       return null;
     }
+  },
+
+  /**
+   * Normalized, read-only model for the printed Vendor Bill. Everything the
+   * printout shows comes from the SAVED record (never React form state), so an
+   * edited-but-unsaved bill prints its persisted values. Read-only: it writes
+   * nothing and touches no accounting.
+   */
+  getBillPrintModel: (id) => {
+    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(Number(id));
+    if (!expense) return null;
+    const lines = db.prepare(`
+      SELECT el.*, p.name AS product_name, p.type AS product_type, p.sku AS product_sku
+      FROM expense_lines el
+      LEFT JOIN products p ON p.id = el.product_id
+      WHERE el.expense_id = ? ORDER BY el.id
+    `).all(Number(id));
+    const totalAmount = round2(lines.reduce((s, l) => s + (Number(l.amount) || 0), 0));
+    const paid = Number(expense.paid_amount) || 0;
+    const remaining = Math.max(0, round2(totalAmount - paid));
+
+    let vendor = null;
+    try { vendor = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(Number(expense.payee)); } catch { /* optional */ }
+
+    // Purchase Order / receipts via the stable line linkage (never text).
+    let po = null;
+    let receipts = [];
+    const poLine = lines.find(l => l.purchase_order_id != null);
+    const poId = poLine ? Number(poLine.purchase_order_id) : null;
+    if (poId) {
+      try {
+        po = db.prepare('SELECT id, po_number, po_date, expected_date, status FROM purchase_orders WHERE id = ?').get(poId);
+        receipts = db.prepare('SELECT receipt_number, receipt_date, reference FROM goods_receipts WHERE purchase_order_id = ? ORDER BY id').all(poId);
+      } catch { /* PO tables optional */ }
+    }
+
+    let attachments = [];
+    try { attachments = db.prepare("SELECT document_name FROM documents WHERE category = 'bill' AND linked_id = ?").all(Number(id)); } catch { /* optional */ }
+
+    const today = new Date().toISOString().slice(0, 10);
+    let status = 'Unpaid';
+    if (totalAmount > 0 && remaining <= 0.005) status = 'Paid';
+    else if (paid > 0) status = 'Partially Paid';
+    if (status !== 'Paid' && expense.due_date && String(expense.due_date).slice(0, 10) < today) status = 'Overdue';
+
+    return { expense, lines, vendor, po, receipts, attachments, totalAmount, paid, remaining, status };
   },
 
   // Retrieve all Expenses
@@ -378,6 +525,7 @@ const Expenses = {
       for (const line of lines) {
         db.prepare(LINE_INSERT_SQL).run(...lineParams(id, line));
       }
+      syncPoBilling(id);
 
       // Reconcile the stock against the NEW lines. Because the key is the
       // stable (sourceType, sourceId, itemId, warehouseId) tuple and the
@@ -437,6 +585,20 @@ const Expenses = {
         }
       } catch (glErr) {
         console.error('[expenses] GL re-post on update failed (non-fatal):', glErr);
+      }
+
+      // Bill status is DERIVED from active payment applications, not from the
+      // submitted form value. Reuse the central calculator so editing a bill can
+      // never resurrect a paid bill (or wipe a partial payment) — the same
+      // formula the payment/reversal lifecycle uses. Only bills have payments.
+      try {
+        const cat = String(expenseDetails.category || '').toLowerCase();
+        const method = String(expenseDetails.payment_method || '').toLowerCase();
+        if (cat === 'bill' || cat === 'supplier' || method === 'bill') {
+          require('./billPayments').recalcBill(Number(id));
+        }
+      } catch (recalcErr) {
+        console.error('[expenses] bill recalc on update failed (non-fatal):', recalcErr);
       }
 
       return { success: true, message: 'Expense updated successfully.' };

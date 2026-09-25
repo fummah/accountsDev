@@ -357,7 +357,7 @@ function registerEmailHandlers() {
   // strictly from what the OS told us — a client that fails to start is a
   // failure, not a success with a warning.
   ipcMain.handle('email-send-external', async (_e, payload) => {
-    const { to, subject, body, pdfFilename, pdfBase64, document_type, document_id, requireAttachment } = payload || {};
+    const { to, cc, subject, body, pdfFilename, pdfBase64, document_type, document_id, requireAttachment } = payload || {};
     try {
       if (!to) return { success: false, error: 'Recipient email required' };
       if (!pdfBase64) return { success: false, error: 'Missing PDF data — save the document first' };
@@ -367,7 +367,7 @@ function registerEmailHandlers() {
         : [];
 
       const result = await MailClient.sendViaDefaultMailClient({
-        to, subject: subject || 'Document', body: body || '', attachments,
+        to, cc, subject: subject || 'Document', body: body || '', attachments,
         // Save/Update & Email requires the document attachment: never open an
         // attachment-less draft, fall back to the built-in sender instead.
         requireAttachment: requireAttachment === true,

@@ -36,10 +36,17 @@ const CRM = require('./crm');
 const ParsedStatements = require('./parsedStatements');
 const Settings = require('./settings');
 const Email = require('./email');
+const BillPayments = require('./billPayments');
+const PurchaseOrders = require('./purchaseOrders');
+const CustomerRefunds = require('./customerRefunds');
 
 // Run database migrations after all models have created their tables
 const Migration = require('./migration');
 const migrationResult = Migration.runMigrations();
+
+// Adopt any historical bill-payment journal entries that predate the explicit
+// payment-application table, so derived bill balances see the full history.
+try { BillPayments.backfillFromLegacy(); } catch (e) { console.error('[models] bill payment backfill failed:', e.message); }
 
 module.exports = {
   Customers,
@@ -78,5 +85,8 @@ module.exports = {
   Email,
   Transactions,
   Journal,
-  Ledger
+  Ledger,
+  BillPayments,
+  PurchaseOrders,
+  CustomerRefunds
 };

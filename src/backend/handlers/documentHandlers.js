@@ -99,6 +99,25 @@ function registerDocumentHandlers() {
       return { success: false, error: e.message };
     }
   });
+
+  // Open a file the user picked in the CURRENT form session (pending attachment).
+  // The renderer passes the path Electron's own file picker produced (via
+  // webUtils.getPathForFile in the preload); we only ever open an EXISTING file,
+  // and never touch the managed store. This is the ONLY path-based open — saved
+  // attachments are always opened by id through `document-open`.
+  ipcMain.handle('attachment-open-local', async (_e, filePath) => {
+    try {
+      if (!filePath || typeof filePath !== 'string') return { success: false, error: 'No file path' };
+      const resolved = path.resolve(filePath);
+      let stat = null;
+      try { stat = fs.statSync(resolved); } catch (_) { stat = null; }
+      if (!stat || !stat.isFile()) return { success: false, error: 'File not found' };
+      const result = await shell.openPath(resolved);
+      return result === '' ? { success: true } : { success: false, error: result };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 module.exports = registerDocumentHandlers;

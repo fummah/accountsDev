@@ -20,6 +20,7 @@ const {
   Transactions,
   Journal,
   Ledger,
+  PurchaseOrders,
 } = require('./../models');
 
 const Tax = require('../models/tax');
@@ -310,6 +311,15 @@ safeHandle('get-single-expense', async (event, id) => {
   }
 });
 
+safeHandle('get-bill-print', async (event, id) => {
+  try {
+    return Expenses.getBillPrintModel(id);
+  } catch (error) {
+    console.error('Error building bill print model:', error);
+    return { error: error.message };
+  }
+});
+
 // ── Helper: detect Credit Card / Loan Reclassification Bill ─────────────
 // Returns true when ALL conditions are met:
 //   1. Vendor vendor_type is 'Credit Card' or 'Loan Lender'
@@ -398,134 +408,29 @@ safeHandle('mark-expense-paid', async (event, id) => {
   }
 });
 
-// Pay a bill: DR Accounts Payable / CR Bank account, then mark as Paid
-// Also creates a Check transaction record for printing
-safeHandle('bill-pay', async (event, { expenseId, amount, paymentDate, bankAccount, checkNumber }) => {
+// Pay a bill: DR Accounts Payable / CR Bank account, create a Check record for
+// printing and record the explicit bill payment application. All of the
+// lifecycle logic lives in models/billPayments.js (payBill) so creation and
+// reversal share one source of truth.
+safeHandle('bill-pay', async (event, payload = {}) => {
   try {
-    const db = require('../models/dbmgr');
-    const COA = require('../models/chartOfAccounts');
-    const JournalEntries = require('../models/journalEntries');
-    const Transactions = require('../models/transactions');
-
-    const ap = COA.getSystemAccount('Accounts Payable');
-    if (!ap) return { success: false, error: 'Accounts Payable account not in COA' };
-
-    // Resolve bank account by ID (preferred) or name. A check may only be drawn
-    // on a real Bank-type account — never silently fall back to the first bank
-    // or to a Cash account.
-    let bank = null;
-    if (bankAccount) {
-      const numericId = Number(bankAccount);
-      if (Number.isFinite(numericId) && numericId > 0) {
-        bank = db.prepare("SELECT * FROM chart_of_accounts WHERE id = ? AND status = 'Active'").get(numericId);
-      }
-      if (!bank) {
-        bank = db.prepare("SELECT * FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) AND status = 'Active' LIMIT 1").get(String(bankAccount));
-      }
-    }
-    if (!bank) return { success: false, error: `Bank account "${bankAccount || ''}" not found in COA` };
-    const bankType = String(bank.type || '').trim().toLowerCase();
-    if (bankType !== 'bank') {
-      return { success: false, error: `Selected account "${bank.name || ''}" (${bank.type || ''}) is not a Bank account. Checks must be drawn on a Bank account.` };
-    }
-
-    const billAmt = Number(amount) || 0;
-    if (billAmt <= 0) return { success: false, error: 'Invalid bill amount' };
-
-    // Get current expense to check total and already-paid amount
-    const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(expenseId);
-    if (!expense) return { success: false, error: 'Expense not found' };
-    const totalLines = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM expense_lines WHERE expense_id = ?').get(expenseId);
-    const totalAmount = Number(totalLines?.total || 0);
-    const currentPaid = Number(expense.paid_amount || 0);
-    const newPaid = currentPaid + billAmt;
-    const remaining = totalAmount - newPaid;
-
-    // Resolve vendor name
-    let vendorName = '';
-    try {
-      const vendor = db.prepare("SELECT display_name, first_name, last_name FROM suppliers WHERE id = ?").get(Number(expense.payee));
-      if (vendor) vendorName = vendor.display_name || `${vendor.first_name || ''} ${vendor.last_name || ''}`.trim();
-    } catch {}
-
-    // Determine check number: use provided or auto-generate
-    let checkNum = checkNumber || '';
-    if (!checkNum) {
-      try {
-        const lastCheck = db.prepare("SELECT reference FROM transactions WHERE type = 'Check' AND reference IS NOT NULL AND reference != '' ORDER BY id DESC LIMIT 1").get();
-        const lastNum = lastCheck ? parseInt(lastCheck.reference, 10) : 1000;
-        checkNum = String((isNaN(lastNum) ? 1000 : lastNum) + 1);
-      } catch { checkNum = '1001'; }
-    }
-
-    const pmtDate = paymentDate || new Date().toISOString().slice(0, 10);
-
-    // Create a Check transaction record for the bank register and printing.
-    // This runs BEFORE the journal post and expense update so a failure
-    // (e.g. duplicate check number) aborts the whole payment — the bill must
-    // never be marked paid without a check record.
-    let checkId = null;
-    try {
-      const txResult = Transactions.insert({
-        date: pmtDate,
-        type: 'Check',
-        amount: billAmt,
-        description: `Bill payment to ${vendorName} — Bill #${expenseId}`,
-        reference: checkNum,
-        accountId: bank.id,
-        debit: 0,
-        credit: billAmt,
-        entered_by: 'system',
-        payee_name: vendorName,
-      });
-      checkId = txResult?.lastInsertRowid || null;
-    } catch (txErr) {
-      console.warn('[bill-pay] check txn insert failed:', txErr.message);
-      return { success: false, error: `Bill payment NOT recorded: ${txErr.message}` };
-    }
-
-    // Post DR AP / CR Bank (payment amount only)
-    JournalEntries.post({
-      date: pmtDate,
-      description: `Bill payment — expense #${expenseId}`,
-      source_type: 'bill_payment',
-      source_id: expenseId,
-      lines: [
-        { account_id: ap.id,   debit: billAmt, credit: 0,       description: 'Accounts Payable cleared' },
-        { account_id: bank.id, debit: 0,       credit: billAmt, description: 'Bank / Cash payment' },
-      ],
-    });
-
-    // Determine new status
-    let newStatus = 'Partially Paid';
-    if (newPaid >= totalAmount - 0.005) newStatus = 'Paid';
-
-    db.prepare('UPDATE expenses SET paid_amount = ?, approval_status = ? WHERE id = ?')
-      .run(newPaid, newStatus, expenseId);
-
-    // Reduce vendor balance by payment amount
-    try {
-      const exp = db.prepare('SELECT payee FROM expenses WHERE id = ?').get(expenseId);
-      if (exp && exp.payee) {
-        db.prepare('UPDATE suppliers SET balance = COALESCE(balance,0) - ? WHERE id = ?').run(billAmt, Number(exp.payee));
-      }
-    } catch (balErr) { console.error('[bill-pay] vendor balance update failed:', balErr); }
-
-    return {
-      success: true,
-      remainingBalance: Math.max(0, remaining),
-      check: {
-        id: checkId,
-        checkNumber: checkNum,
-        date: pmtDate,
-        payee: vendorName,
-        amount: billAmt,
-        bankAccount: bank.name,
-        memo: `Bill payment — Bill #${expenseId}`,
-      },
-    };
+    const BillPayments = require('../models/billPayments');
+    const ctx = (() => { try { return require('../security/authz').authorize(event, { permissions: 'write:transactions' }); } catch { return null; } })();
+    return BillPayments.payBill({ ...payload, enteredBy: (ctx && ctx.userId) || 'system' });
   } catch (e) {
     console.error('Error paying bill:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// Apply vendor credits + pay the cash remainder in ONE atomic settlement.
+safeHandle('bill-settle-with-credits', async (event, payload = {}) => {
+  try {
+    const BillPayments = require('../models/billPayments');
+    const ctx = (() => { try { return require('../security/authz').authorize(event, { permissions: 'write:transactions' }); } catch { return null; } })();
+    return BillPayments.settleBillsWithCredits({ ...payload, enteredBy: (ctx && ctx.userId) || 'system' });
+  } catch (e) {
+    console.error('Error settling bills with credits:', e);
     return { success: false, error: e.message };
   }
 });
@@ -673,6 +578,74 @@ safeHandle('delete-product-type', async (event, id) => {
     console.error('Error deleting type:', error);
     return { error: error.message };
   }
+});
+
+// ── Item master (Products & Services redesign) ─────────────────────────────
+safeHandle('get-item-master', async (event, id) => {
+  try { return Products.getItemMaster(id); } catch (error) { return { error: error.message }; }
+});
+
+safeHandle('get-item-detail', async (event, id) => {
+  try { return Products.getItemDetail(id); } catch (error) { return { error: error.message }; }
+});
+
+safeHandle('get-item-history', async (event, id, filters) => {
+  try { return Products.getInventoryHistory(id, filters || {}); } catch (error) { return { error: error.message }; }
+});
+
+safeHandle('save-item-master', async (event, data) => {
+  try { return Products.saveItemMaster(data || {}, { userId: 'system' }); }
+  catch (error) { return { success: false, error: error.message }; }
+});
+
+safeHandle('get-item-type-counts', async () => {
+  try { return Products.getItemTypeCounts(); } catch (error) { return { error: error.message }; }
+});
+
+safeHandle('get-item-subcategories', async (event, category) => {
+  try { return Products.getItemSubcategories(category); } catch (error) { return { error: error.message }; }
+});
+
+safeHandle('insert-item-subcategory', async (event, category, name) => {
+  try { return Products.insertItemSubcategory(category, name); }
+  catch (error) { return { success: false, error: error.message }; }
+});
+
+safeHandle('get-units-of-measure', async () => {
+  try { return Products.getUnitsOfMeasure(); } catch (error) { return { error: error.message }; }
+});
+
+safeHandle('insert-unit-of-measure', async (event, name) => {
+  try { return Products.insertUnitOfMeasure(name); }
+  catch (error) { return { success: false, error: error.message }; }
+});
+
+// ── Purchase Orders + Goods Receipts ───────────────────────────────────────
+safeHandle('get-purchase-orders', async (event, filters) => {
+  try { return PurchaseOrders.getAll(filters || {}); } catch (error) { return { error: error.message }; }
+});
+safeHandle('get-purchase-order', async (event, id) => {
+  try { return PurchaseOrders.getById(id); } catch (error) { return { error: error.message }; }
+});
+safeHandle('save-purchase-order', async (event, data) => {
+  try { return PurchaseOrders.save(data || {}, { userId: 'system' }); }
+  catch (error) { return { success: false, error: error.message }; }
+});
+safeHandle('set-purchase-order-status', async (event, id, status) => {
+  try { return PurchaseOrders.setStatus(id, status); } catch (error) { return { success: false, error: error.message }; }
+});
+safeHandle('get-open-purchase-orders', async (event, vendorId) => {
+  try { return PurchaseOrders.getOpenForVendor(vendorId); } catch (error) { return { error: error.message }; }
+});
+safeHandle('receive-purchase-order', async (event, poId, payload) => {
+  try { return PurchaseOrders.receive(poId, payload || {}, { userId: 'system' }); }
+  catch (error) { return { success: false, error: error.message }; }
+});
+safeHandle('get-goods-receipt', async (event, id) => {
+  try { return PurchaseOrders.getReceipt(id); } catch (error) { return { error: error.message }; }
+});
+safeHandle('get-vendor-activity', async (event, vendorId) => {
+  try { return PurchaseOrders.getVendorActivity(vendorId); } catch (error) { return { error: error.message }; }
 });
 
 // Handler to get all Vat

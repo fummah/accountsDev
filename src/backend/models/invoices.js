@@ -1,6 +1,7 @@
 // src/backend/models/Invoices.js
 const db = require('./dbmgr.js');
 const { getInvoiceFinancials, recalcInvoiceFinancials } = require('../services/invoiceFinancials');
+const { filterDocumentLines } = require('../services/documentLines');
 const { INVOICE_STATUS, isInvoiceDocumentState, isFinanciallyEffective } = require('../services/documentStatus');
 const { getExpectedNormalBalance, normalizeNormalBalance } = require('../services/normalBalance');
 
@@ -51,6 +52,32 @@ const readInvoiceItemLines = (invoiceId) => {
     });
   }
   return lines;
+};
+
+/**
+ * The accounting snapshot written onto an invoice line when it is created:
+ * the item's type and its COGS / Inventory Asset accounts AT THAT MOMENT.
+ * Posting reads these back, never today's Item Master (Phase 12).
+ */
+const productSnapshot = (productId) => {
+  const empty = { item_type: null, cogs_account_id: null, inventory_asset_account_id: null, tax_rate_id: null, tax_rate: 0 };
+  const pid = Number(productId);
+  if (!pid) return empty;
+  try {
+    const p = db.prepare(`
+      SELECT p.type, p.cogs_account_id, p.inventory_asset_account_id,
+             p.sales_tax_rate_id, v.vat_percentage
+      FROM products p LEFT JOIN vat v ON v.id = p.sales_tax_rate_id
+      WHERE p.id = ?`).get(pid);
+    if (!p) return empty;
+    return {
+      item_type: p.type || null,
+      cogs_account_id: p.cogs_account_id != null ? Number(p.cogs_account_id) : null,
+      inventory_asset_account_id: p.inventory_asset_account_id != null ? Number(p.inventory_asset_account_id) : null,
+      tax_rate_id: p.sales_tax_rate_id != null ? Number(p.sales_tax_rate_id) : null,
+      tax_rate: Number(p.vat_percentage) || 0,
+    };
+  } catch { return empty; }
 };
 
 const Invoices = {
@@ -141,6 +168,22 @@ const Invoices = {
     FOREIGN KEY (invoice_id) REFERENCES invoices(id)
   )`;
     db.prepare(stmt).run();
+    // ── Accounting snapshot columns (migration) ──────────────────────────────
+    // The Item Master supplies DEFAULTS; each line stores the configuration that
+    // applied WHEN IT WAS CREATED, so editing an old invoice never silently
+    // moves historical revenue/COGS to a newly-configured account.
+    try {
+      const cols = new Set(db.prepare("PRAGMA table_info('invoice_lines')").all().map(r => r.name));
+      const add = (c, ddl) => { if (!cols.has(c)) db.prepare(`ALTER TABLE invoice_lines ADD COLUMN ${c} ${ddl}`).run(); };
+      add('item_type', 'TEXT');
+      add('cogs_account_id', 'INTEGER');
+      add('inventory_asset_account_id', 'INTEGER');
+      add('unit_cost', 'REAL');
+      // Line-level sales-tax snapshot (defaults from the Item's Sales Tax Code).
+      add('tax_rate_id', 'INTEGER');
+      add('tax_rate', 'REAL DEFAULT 0');
+      add('tax_amount', 'REAL DEFAULT 0');
+    } catch (e) { console.error('[invoices] invoice_lines snapshot migration failed:', e); }
   }, 
   
   // Insert a new Invoices
@@ -201,17 +244,25 @@ const Invoices = {
       if (!(result.changes > 0)) return { success: false };
 
       const invoiceId = result.lastInsertRowid;
-      const linesArr = Array.isArray(invoiceLines) ? invoiceLines : [];
+      // Never persist the empty convenience row (or a legacy blank row).
+      const linesArr = filterDocumentLines(invoiceLines);
       if (linesArr.length > 0) {
-        const invoiceLineStmt = db.prepare('INSERT INTO invoice_lines (invoice_id, product, description,quantity,rate, amount) VALUES (?, ?, ?, ?, ?, ?)');
+        const invoiceLineStmt = db.prepare('INSERT INTO invoice_lines (invoice_id, product, description,quantity,rate, amount, item_type, cogs_account_id, inventory_asset_account_id, tax_rate_id, tax_rate, tax_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         for (const line of linesArr) {
+          const snap = productSnapshot(line.product_id || line.product);
           invoiceLineStmt.run(
             invoiceId,
             line.product_id || line.product || null,
             String(line.description || ''),
             Number(line.quantity) || 1,
             Number(line.rate) || 0,
-            Number(line.amount) || 0
+            Number(line.amount) || 0,
+            snap.item_type,
+            snap.cogs_account_id,
+            snap.inventory_asset_account_id,
+            line.taxRateId != null ? Number(line.taxRateId) : snap.tax_rate_id,
+            Number.isFinite(Number(line.taxRate)) && Number(line.taxRate) !== 0 ? Number(line.taxRate) : snap.tax_rate,
+            Number(line.taxAmount) || 0
           );
         }
       }
@@ -917,7 +968,8 @@ const Invoices = {
 
   updateInvoice : async (invoiceData) => {
     const { id, lines, invoiceLines, ...invoiceDetails } = invoiceData;
-    const lineItems = lines || invoiceLines || [];
+    // Drop empty convenience rows before they are re-inserted.
+    const lineItems = filterDocumentLines(lines || invoiceLines || []);
 
     // Capture the prior financial state so the caller can audit the impact.
     const previous = getInvoiceFinancials(Number(id));
@@ -967,16 +1019,23 @@ const Invoices = {
   
       // Insert updated lines
       const insertLine = db.prepare(
-        `INSERT INTO invoice_lines (invoice_id, product, description, quantity, rate, amount)
-         VALUES (?, ?, ?, ?, ?, ?)`);
+        `INSERT INTO invoice_lines (invoice_id, product, description, quantity, rate, amount, item_type, cogs_account_id, inventory_asset_account_id, tax_rate_id, tax_rate, tax_amount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const line of lineItems) {
+        const snap = productSnapshot(line.product_id || line.product);
         insertLine.run(
           Number(id),
           line.product_id || line.product || null,
           String(line.description || ''),
           Number(line.quantity) || 1,
           Number(line.rate) || 0,
-          Number(line.amount) || 0
+          Number(line.amount) || 0,
+          snap.item_type,
+          snap.cogs_account_id,
+          snap.inventory_asset_account_id,
+          line.taxRateId != null ? Number(line.taxRateId) : snap.tax_rate_id,
+          Number.isFinite(Number(line.taxRate)) && Number(line.taxRate) !== 0 ? Number(line.taxRate) : snap.tax_rate,
+          Number(line.taxAmount) || 0
         );
       }
   

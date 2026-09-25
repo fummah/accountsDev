@@ -56,6 +56,7 @@ const db = require('../models/dbmgr');
 const Inventory = require('../models/inventory');
 const Warehouses = require('../models/warehouses');
 const Classification = require('./productClassification');
+const Valuation = require('./inventoryValuation');
 
 /** The `stock_movements.sourceType` values this module owns. */
 const SOURCE_TYPE_BILL = 'bill';
@@ -121,15 +122,19 @@ const applyReconciliation = (sourceType, sourceId, itemLines) => {
       continue;
     }
 
-    // Defence in depth: the renderers already filter to inventory products, but
-    // the backend stays authoritative. A service line must never move stock.
-    const prod = db.prepare('SELECT id, type, name FROM products WHERE id = ?').get(Number(line.productId));
+    // A line that does not represent physical stock is NOT an error: a
+    // Non-Inventory Part or a Service is a legitimate bill/invoice line that
+    // simply never moves stock. Skip it from the DESIRED set. Because the
+    // reconciliation key set is the union of desired + posted, any stock this
+    // line moved while it WAS an inventory item (e.g. the product was later
+    // retyped) is still reversed by the loop below — we only stop ADDING stock
+    // for it.
+    const prod = db.prepare('SELECT id, type, name, valuation_method, purchase_cost FROM products WHERE id = ?').get(Number(line.productId));
     if (!prod) {
       errors.push(`line ${line.lineId}: product #${line.productId} does not exist`);
       continue;
     }
     if (!Classification.tracksInventory(prod.type)) {
-      errors.push(`line ${line.lineId}: "${prod.name}" is a ${prod.type || 'blank-type'} product and does not track inventory`);
       continue;
     }
 
@@ -150,11 +155,14 @@ const applyReconciliation = (sourceType, sourceId, itemLines) => {
       warehouseId,
       quantity: 0,
       costTotal: 0,
+      method: prod.valuation_method || 'FIFO',
+      standardCost: Number(prod.purchase_cost) || 0,
       lineId: line.lineId,
     };
     prev.quantity += qty;
-    // Weighted average of the line rates — informational only (D1 defers
-    // valuation; the GL uses the line amount, not this number).
+    // Cost carried by the line (a bill's rate is a purchase cost). For an
+    // invoice the rate is a SELLING price, so unitCost is null and the removal
+    // is valued from receipt layers instead (see the move loop).
     prev.costTotal += qty * (Number(line.unitCost) || 0);
     desired.set(key, prev);
   }
@@ -167,10 +175,30 @@ const applyReconciliation = (sourceType, sourceId, itemLines) => {
       itemId: Number(m.itemId),
       warehouseId: Number(m.warehouseId),
       quantity: 0,
+      costTotal: 0,
+      method: null,
     };
     prev.quantity += Number(m.quantityChange || 0);
+    // Signed cost already posted — lets a reversal restore the ORIGINAL cost
+    // instead of re-valuing at today's layers.
+    prev.costTotal += Number(m.quantityChange || 0) * (Number(m.unitCost) || 0);
     posted.set(key, prev);
   }
+
+  // Resolve the valuation method for a tuple whose desired line is gone
+  // (a reversal), by mapping the stock item back to its product.
+  const methodForItem = (itemId) => {
+    try {
+      const p = db.prepare('SELECT valuation_method FROM products WHERE item_id = ? LIMIT 1').get(Number(itemId));
+      return p && p.valuation_method ? p.valuation_method : 'FIFO';
+    } catch { return 'FIFO'; }
+  };
+  const standardCostForItem = (itemId) => {
+    try {
+      const p = db.prepare('SELECT purchase_cost FROM products WHERE item_id = ? LIMIT 1').get(Number(itemId));
+      return p ? Number(p.purchase_cost) || 0 : 0;
+    } catch { return 0; }
+  };
 
   // ── 3. Move only the difference, across the UNION of both key sets ───────
   for (const key of new Set([...desired.keys(), ...posted.keys()])) {
@@ -190,11 +218,27 @@ const applyReconciliation = (sourceType, sourceId, itemLines) => {
       // Informational only — never the reconciliation key (§7.4).
       sourceLineId: want ? want.lineId : null,
     };
-    // A zero cost is not a cost: an issue with no known cost (valuation is
-    // deferred, D1) records nothing rather than a misleading 0.
-    const unitCost = want && want.quantity > 0 && want.costTotal > 0
-      ? want.costTotal / want.quantity
-      : null;
+
+    // ── Cost basis ───────────────────────────────────────────────────────────
+    // ADDING stock (delta > 0): use the line's own cost (a bill rate), else the
+    // original posted cost so a reversal restores exactly what it took.
+    // REMOVING stock (delta < 0): value it from receipt layers. A bill return
+    // carries a purchase cost on the line; an invoice issue does not (its rate
+    // is a selling price) so the valuation engine supplies the COGS unit cost.
+    let unitCost = null;
+    if (delta > 0) {
+      if (want && want.quantity > 0 && want.costTotal > 0) {
+        unitCost = want.costTotal / want.quantity;
+      } else if (have && Math.abs(have.quantity) > 1e-9 && Math.abs(have.costTotal) > 1e-9) {
+        unitCost = Math.abs(have.costTotal) / Math.abs(have.quantity);
+      }
+    } else {
+      const method = (want && want.method) || (have && have.method) || methodForItem(target.itemId);
+      const standardCost = (want && want.standardCost) || standardCostForItem(target.itemId);
+      const v = Valuation.costOfRemoval(target.itemId, -delta, method, { standardCost });
+      if (v.unitCost > 0) unitCost = v.unitCost;
+      else if (want && want.quantity > 0 && want.costTotal > 0) unitCost = want.costTotal / want.quantity;
+    }
 
     // The sign of the DELTA decides the primitive, not the document type:
     // a bill cut from 60 to 40 gives goods back, and an invoice raised from

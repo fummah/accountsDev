@@ -4,7 +4,7 @@ import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutli
 import moment from 'moment';
 import { useLocation } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
-import { getBankAccounts } from '../../utils/accounts';
+import { getBankAccounts, getIncomeAccounts } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
 import JournalEntryDetailModal from '../accountant/JournalEntryDetailModal';
 
@@ -243,14 +243,14 @@ const MakeDeposits = () => {
     return accounts.find(a => String(a.id) === String(selectedAccountId));
   }, [accounts, selectedAccountId]);
 
-  // Accounts available as deposit "Category" — Income, Asset, Equity, Other Income
-  const categoryAccounts = useMemo(() => {
-    return accounts.filter(a => {
-      const t = (a.accountType || a.type || '').toLowerCase();
-      return t.includes('income') || t.includes('revenue') || t.includes('asset') ||
-        t.includes('equity') || t.includes('liabilit');
-    });
-  }, [accounts]);
+  // Deposit lines credit the account that represents WHAT the money is: a
+  // revenue account. Only the Income family (Type 'Income' / 'Other Income')
+  // is valid — never bank, asset, equity or liability accounts, and never by
+  // matching on the account name.
+  const categoryAccounts = useMemo(
+    () => getIncomeAccounts(accounts).filter(a => String(a.status || 'Active').toLowerCase() === 'active'),
+    [accounts]
+  );
 
   const getAccName = (id) => {
     if (!id) return '-';

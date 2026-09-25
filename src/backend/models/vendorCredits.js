@@ -93,6 +93,32 @@ const VendorCredits = {
     ).all(Number(supplierId));
   },
 
+  /** Bills a vendor credit has been applied to (traceability from the credit). */
+  getApplications(creditId) {
+    try {
+      return db.prepare(`
+        SELECT ca.id, ca.expense_id, ca.amount, ca.applied_date, e.ref_no AS bill_ref, e.payment_date AS bill_date
+        FROM credit_applications ca
+        LEFT JOIN expenses e ON e.id = ca.expense_id
+        WHERE ca.credit_id = ?
+        ORDER BY ca.id
+      `).all(Number(creditId));
+    } catch { return []; }
+  },
+
+  /** Vendor credits applied to a bill (traceability from the bill). */
+  getBillApplications(expenseId) {
+    try {
+      return db.prepare(`
+        SELECT ca.id, ca.credit_id, ca.amount, ca.applied_date, vc.reference, vc.date
+        FROM credit_applications ca
+        LEFT JOIN vendor_credits vc ON vc.id = ca.credit_id
+        WHERE ca.expense_id = ?
+        ORDER BY ca.id
+      `).all(Number(expenseId));
+    } catch { return []; }
+  },
+
   applyCredit(creditId, expenseId, amount) {
     const amt = Number(amount) || 0;
     if (amt <= 0) return { error: 'Amount must be positive' };

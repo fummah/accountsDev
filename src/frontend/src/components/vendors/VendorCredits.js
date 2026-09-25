@@ -23,6 +23,15 @@ const VendorCredits = ({ history }) => {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form] = Form.useForm();
+  const [appsByCredit, setAppsByCredit] = useState({});
+
+  const loadApps = async (creditId) => {
+    if (appsByCredit[creditId]) return;
+    try {
+      const a = await window.electronAPI.vendorCreditApplications?.(creditId);
+      setAppsByCredit(prev => ({ ...prev, [creditId]: Array.isArray(a) ? a : [] }));
+    } catch { setAppsByCredit(prev => ({ ...prev, [creditId]: [] })); }
+  };
 
   useEffect(() => { loadCredits(); loadSuppliers(); }, []);
 
@@ -135,6 +144,25 @@ const VendorCredits = ({ history }) => {
     },
   ];
 
+  const expandedRowRender = (record) => {
+    const apps = appsByCredit[record.id];
+    if (!apps) return <Text type="secondary">Loading applications...</Text>;
+    if (!apps.length) return <Text type="secondary">Not applied to any bill yet.</Text>;
+    return (
+      <Table
+        size="small"
+        rowKey="id"
+        pagination={false}
+        dataSource={apps}
+        columns={[
+          { title: 'Bill', dataIndex: 'bill_ref', key: 'bill_ref', render: (v, r) => <a onClick={() => history?.push(`/main/vendors/bills/edit/${r.expense_id}`)}>{v || `#${r.expense_id}`}</a> },
+          { title: 'Date', dataIndex: 'applied_date', key: 'applied_date', render: d => d ? moment(d).format('MM/DD/YYYY') : '-' },
+          { title: 'Amount Applied', dataIndex: 'amount', key: 'amount', align: 'right', render: a => `${cSym} ${Number(a || 0).toFixed(2)}` },
+        ]}
+      />
+    );
+  };
+
   return (
     <div style={{ padding: 24 }}>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -154,6 +182,7 @@ const VendorCredits = ({ history }) => {
           <Empty description="No vendor credits yet. Create one to get started." />
         ) : (
           <Table dataSource={credits} columns={columns} rowKey="id" loading={loading} size="small"
+            expandable={{ expandedRowRender, onExpand: (expanded, record) => { if (expanded) loadApps(record.id); } }}
             pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `${t} credits` }} />
         )}
       </Card>

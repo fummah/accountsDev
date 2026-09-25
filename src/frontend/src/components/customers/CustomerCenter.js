@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Row, Col, Table, Button, Space, Tabs, message, Input, Modal, Form, Select, Tooltip, Avatar, Typography, Popconfirm } from 'antd';
+import { Card, Row, Col, Table, Button, Space, Tabs, message, Input, Modal, Form, Tooltip, Avatar, Typography, Popconfirm } from 'antd';
 import { DollarOutlined, FileDoneOutlined, ClockCircleOutlined, PlusOutlined, SearchOutlined, ReloadOutlined, TeamOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, StopOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { formatPhone } from '../../utils/phone';
 import CustomerContactFields from './shared/CustomerContactFields';
-import { resolveTaxRateFields } from '../../utils/taxRate';
+import { resolveTaxRateFields, describeTaxRate } from '../../utils/taxRate';
 import { MODAL_BODY_SCROLL_STYLE, MODAL_WIDTH } from '../shared/FormSection';
+import ListToolbar from '../shared/ListToolbar';
+import { toCsv, downloadCsv, csvDate } from '../../utils/csv';
 import { normalizeStatus } from '../StatusBadge';
 
 const { TabPane } = Tabs;
@@ -24,8 +26,6 @@ const statusDot = {
   Accepted: { color: '#52c41a', bg: '#f6ffed' },
   Converted: { color: '#722ed1', bg: '#f9f0ff' },
   Declined: { color: '#f5222d', bg: '#fff1f0' },
-  Draft: { color: '#8c8c8c', bg: '#fafafa' },
-  Cancelled: { color: '#8c8c8c', bg: '#fafafa' },
   Active: { color: '#52c41a', bg: '#f6ffed' },
   Inactive: { color: '#8c8c8c', bg: '#fafafa' },
 };
@@ -72,6 +72,7 @@ const CustomerCenter = () => {
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [custForm] = Form.useForm();
   const [vatRates, setVatRates] = useState([]);
+  const [exporting, setExporting] = useState(false);
   const [stats, setStats] = useState({
     totalCustomers: 0,
     totalReceivables: 0,
@@ -100,6 +101,42 @@ const CustomerCenter = () => {
       }
     } catch { }
   }, [custPage, custSize, custSearch, custStatus]);
+
+  // Export every customer matching the current search + status (not just the
+  // visible page). Shares the backend filter with the list.
+  const handleExportCustomers = async () => {
+    setExporting(true);
+    try {
+      const res = await window.electronAPI.getCustomersForExport?.(custSearch || '', custStatus || '');
+      if (res && res.error) throw new Error(res.error);
+      const rows = Array.isArray(res) ? res : (res?.data || []);
+      if (!rows.length) { message.info('No customers match the current filters.'); return; }
+      const headers = [
+        'Customer Number', 'Display Name', 'First Name', 'Last Name', 'Company',
+        'Email', 'Phone', 'Mobile', 'Website',
+        'Street Address', 'Address Line 2', 'City', 'State', 'Postal Code', 'Country',
+        'Tax Status', 'Default Tax Rate', 'Status', 'Outstanding Balance', 'Created Date', 'Notes',
+      ];
+      const csv = toCsv(headers, rows.map(c => ([
+        c.id != null ? c.id : '',
+        c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company_name || '',
+        c.first_name || '', c.last_name || '', c.company_name || '',
+        c.email || '', c.phone_number || '', c.mobile_number || '', c.website || '',
+        c.address1 || '', c.address2 || '', c.city || '', c.state || '', c.postal_code || '', c.country || '',
+        (c.taxable === 0 || c.taxable === false || String(c.taxable) === '0') ? 'Non-Taxable' : 'Taxable',
+        describeTaxRate(c, vatRates),
+        c.status || 'Active',
+        Number(c.balance || 0).toFixed(2),
+        csvDate(c.date_entered),
+        c.notes || '',
+      ])));
+      downloadCsv(`Customers${custStatus ? '_' + custStatus : ''}_${new Date().toISOString().slice(0, 10)}.csv`, csv);
+      message.success(`Customer export completed (${rows.length} customers).`);
+    } catch (e) {
+      console.error('[customers] export failed:', e);
+      message.error('Customer export could not be completed. Please try again.');
+    } finally { setExporting(false); }
+  };
 
   const loadInvoicesPage = useCallback(async (page = invPage, size = invSize, search = invSearch) => {
     try {
@@ -302,7 +339,7 @@ const CustomerCenter = () => {
   const statTile = (grad, Icon) => ({ width: 48, height: 48, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: grad, color: '#fff', fontSize: 22, flexShrink: 0, children: <Icon /> });
 
   const toolbar = (placeholder, value, onValue, onSearch, onClear, onRefresh, extra) => (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: 16, borderBottom: '1px solid #f0f0f0' }}>
+    <div className="al-list-toolbar" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: 16, borderBottom: '1px solid #f0f0f0' }}>
       <Input
         placeholder={placeholder}
         prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
@@ -385,25 +422,17 @@ const CustomerCenter = () => {
       <Card bodyStyle={{ padding: 0 }} style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0' }}>
         <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ padding: '0 16px' }}>
           <TabPane tab={`Customers (${custTotal})`} key="customers">
-            {toolbar(
-              'Search customers by name, email or company...',
-              custSearch,
-              setCustSearch,
-              () => loadCustomersPage(1, custSize, custSearch, custStatus),
-              () => { setCustSearch(''); loadCustomersPage(1, custSize, '', custStatus); },
-              () => loadCustomersPage(custPage, custSize, custSearch, custStatus),
-              <Select
-                allowClear
-                placeholder="All statuses"
-                style={{ width: 170, borderRadius: 8 }}
-                value={custStatus || undefined}
-                onChange={(v) => { setCustStatus(v || ''); loadCustomersPage(1, custSize, custSearch, v || ''); }}
-                options={[
-                  { value: 'Active', label: 'Active' },
-                  { value: 'Inactive', label: 'Inactive' },
-                ]}
-              />
-            )}
+            <ListToolbar
+              searchPlaceholder="Search customers by name, email or company..."
+              searchValue={custSearch}
+              onSearchChange={setCustSearch}
+              onSearch={() => loadCustomersPage(1, custSize, custSearch, custStatus)}
+              statusValue={custStatus || 'all'}
+              onStatusChange={(v) => { const s = v === 'all' ? '' : v; setCustStatus(s); loadCustomersPage(1, custSize, custSearch, s); }}
+              onExport={handleExportCustomers}
+              exportLoading={exporting}
+              onRefresh={() => loadCustomersPage(custPage, custSize, custSearch, custStatus)}
+            />
             <Table columns={customerColumns} dataSource={customers} rowKey="id" loading={loading} size="middle"
               pagination={{ current: custPage, pageSize: custSize, total: custTotal, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: t => `${t} customers`, style: { margin: 16 },
                 onChange: (p, s) => loadCustomersPage(p, s, custSearch, custStatus) }} />

@@ -1,22 +1,24 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   Card, Form, Input, Button, DatePicker, Select, message, Divider, Modal,
-  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Collapse, Statistic, Badge, Table
+  Row, Col, InputNumber, Typography, Space, Tag, Tooltip, Collapse, Statistic, Badge, Table, Alert
 } from 'antd';
 import {
   PlusOutlined, MinusCircleOutlined, SaveOutlined,
   FileTextOutlined, DollarOutlined, SwapOutlined,
-  PaperClipOutlined, UploadOutlined, ReloadOutlined, DownloadOutlined,
-  PrinterOutlined, EyeOutlined, BookOutlined
+  PaperClipOutlined, ReloadOutlined, DownloadOutlined,
+  PrinterOutlined, BookOutlined, ShoppingCartOutlined, ExclamationCircleOutlined
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
 import COUNTRIES from '../../../utils/countries';
 import { phoneInputHandler } from '../../../utils/phone';
 import { dedupeAccounts, getBillLineAccounts, BILL_LINE_ACCOUNT_TYPES } from '../../../utils/accounts';
-import { getInventoryProducts } from '../../../utils/products';
+import { isPurchasable, itemTypeLabel, tracksInventory } from '../../../utils/itemTypes';
+import { printHtml, PRINT_BASE_CSS } from '../../../utils/printDocument';
 import AccountSelect from '../../shared/AccountSelect';
 import ContactIdentityNote from '../../shared/ContactIdentityNote';
+import AttachmentManager from '../../shared/AttachmentManager';
 import { deriveDisplayName, identityRule } from '../../../utils/contactIdentity';
 import JournalEntryDetailModal from '../../accountant/JournalEntryDetailModal';
 import {
@@ -95,6 +97,13 @@ const makeBillLine = (overrides = {}) => ({
   rate: undefined,
   amount: 0,
   warehouseId: undefined,
+  // Line-level purchase tax (defaults from the Item Master's Purchase Tax Code).
+  taxRateId: undefined,
+  taxRate: 0,
+  taxAmount: 0,
+  // Purchase Order linkage (set when the line came from a PO).
+  purchaseOrderId: undefined,
+  purchaseOrderLineId: undefined,
   ...overrides,
 });
 
@@ -115,9 +124,16 @@ const EnterBill = ({ history, location, match }) => {
   const [selectedAccType, setSelectedAccType] = useState(null);
   const [accountLineKey, setAccountLineKey] = useState(null);
   const [lines, setLines] = useState([makeBillLine()]);
+  const [printing, setPrinting] = useState(false);
+  const [billCredits, setBillCredits] = useState([]);
+  // Open Purchase Orders for the selected vendor (Add from PO).
+  const [openPOs, setOpenPOs] = useState([]);
+  const [poPickerOpen, setPoPickerOpen] = useState(false);
+  const [loadingPOs, setLoadingPOs] = useState(false);
   // Warehouses back the per-line Warehouse select on inventory item lines.
   const [warehouses, setWarehouses] = useState([]);
   const [defaultWarehouseId, setDefaultWarehouseId] = useState(null);
+  const [vatRates, setVatRates] = useState([]);
   // Inline "Add New Inventory Item" modal — the same pattern CreateInvoice and
   // CreateQuote already use, so a new item can be created without leaving the
   // bill (and without a second product form existing anywhere).
@@ -134,6 +150,12 @@ const EnterBill = ({ history, location, match }) => {
     const vid = params.get('vendor');
     return vid ? Number(vid) : null;
   }, [location.search]);
+  // Deep link from a Purchase Order: ?po=<id> pre-fills the vendor + billable lines.
+  const preSelectedPoId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const pid = params.get('po');
+    return pid ? Number(pid) : null;
+  }, [location.search]);
 
   // Payment & credit state
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -146,9 +168,8 @@ const EnterBill = ({ history, location, match }) => {
   const [paying, setPaying] = useState(false);
   const [paidCheck, setPaidCheck] = useState(null);
   const [printModalVisible, setPrintModalVisible] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [billDocuments, setBillDocuments] = useState([]);
-  const fileInputRef = useRef(null);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const attachmentRef = useRef(null);
   // Vendor id whose default terms have already been applied, so a vendor-list
   // refresh cannot overwrite terms the user picked by hand afterwards.
   const vendorTermsAppliedRef = useRef(null);
@@ -213,6 +234,7 @@ const EnterBill = ({ history, location, match }) => {
     loadProducts();
     loadBankAccounts();
     loadWarehouses();
+    loadVat();
     if (editId) loadBill(editId);
   }, [editId]);
 
@@ -263,6 +285,10 @@ const EnterBill = ({ history, location, match }) => {
       const data = await window.electronAPI.getSingleExpense?.(id);
       if (data) {
         setBillData(data);
+        try {
+          const ca = await window.electronAPI.billCreditApplications?.(Number(id));
+          setBillCredits(Array.isArray(ca) ? ca : []);
+        } catch { setBillCredits([]); }
         // NOTE: the stored Due Date is authoritative when editing — it is
         // loaded as-is and never recalculated on mount, so opening a bill can
         // never silently move its due date. Changing Bill Date or Terms later
@@ -291,13 +317,12 @@ const EnterBill = ({ history, location, match }) => {
             quantity: l.quantity != null ? Number(l.quantity) : undefined,
             rate: l.rate != null ? Number(l.rate) : undefined,
             warehouseId: l.warehouse_id != null ? Number(l.warehouse_id) : undefined,
+            taxRateId: l.tax_rate_id != null ? Number(l.tax_rate_id) : undefined,
+            taxRate: l.tax_rate != null ? Number(l.tax_rate) : 0,
+            taxAmount: l.tax_amount != null ? Number(l.tax_amount) : 0,
           })));
         }
-        // Load attached documents
-        try {
-          const docs = await window.electronAPI.getDocuments('bill', id);
-          setBillDocuments(Array.isArray(docs) ? docs : []);
-        } catch { setBillDocuments([]); }
+        // Attachments are loaded and managed by the shared AttachmentManager.
       }
     } catch (e) {
       console.error('Failed to load bill for editing:', e);
@@ -338,6 +363,13 @@ const EnterBill = ({ history, location, match }) => {
     try {
       const data = await window.electronAPI.getAllProducts?.();
       setProducts(Array.isArray(data) ? data : (data?.all || []));
+    } catch {}
+  };
+
+  const loadVat = async () => {
+    try {
+      const data = await window.electronAPI.getAllVat?.();
+      setVatRates(Array.isArray(data) ? data : (data?.all || data?.data || []));
     } catch {}
   };
 
@@ -409,29 +441,29 @@ const EnterBill = ({ history, location, match }) => {
     }
   };
 
-  const handleOpenDocument = async (doc) => {
-    if (!doc) return;
-    try {
-      await window.electronAPI.openDocument(doc.id);
-    } catch (e) {
-      console.error('Failed to open document:', e);
-      message.error('Could not open file');
-    }
-  };
-
   const addLine = () => setLines(prev => [...prev, makeBillLine()]);
   const removeLine = (key) => { if (lines.length > 1) setLines(prev => prev.filter(l => l.key !== key)); };
 
+  // Line-level purchase tax for an item line (percent of qty × rate).
+  const computeTax = (line) => {
+    if (line.line_type !== LINE_ITEM) return 0;
+    const base = (Number(line.quantity) || 0) * (Number(line.rate) || 0);
+    return Math.round(base * ((Number(line.taxRate) || 0) / 100) * 100) / 100;
+  };
+
   // One place recomputes a line's amount, so an item line's total can never
-  // drift from its quantity x rate.
+  // drift from its quantity x rate. `amount` is the line TOTAL including tax,
+  // so every existing bill total / balance query stays correct; taxAmount is
+  // kept separately for the GL split.
   const recomputeAmount = (line) =>
     line.line_type === LINE_ITEM
-      ? (Number(line.quantity) || 0) * (Number(line.rate) || 0)
+      ? Math.round((((Number(line.quantity) || 0) * (Number(line.rate) || 0)) + computeTax(line)) * 100) / 100
       : (Number(line.amount) || 0);
 
   const updateLine = (key, field, value) => setLines(prev => prev.map(l => {
     if (l.key !== key) return l;
     const next = { ...l, [field]: value };
+    next.taxAmount = computeTax(next);
     next.amount = recomputeAmount(next);
     return next;
   }));
@@ -468,30 +500,139 @@ const EnterBill = ({ history, location, match }) => {
 
   // Pick the inventory product for an item line.
   //
-  // The Rate is deliberately NOT prefilled from products.price: that column is
-  // the SELLING price, and this is a purchase. Prefilling it would silently
-  // overstate both the inventory value and the AP balance with a number the
-  // user never chose, so the rate starts empty and must be typed.
+  // The Rate defaults from the Item master's PURCHASE COST (not its selling
+  // price), so the Bill starts at the normal cost while remaining fully
+  // overridable for this transaction. The Item master cost is never rewritten
+  // by a bill.
   const selectLineItem = (key, productId) => setLines(prev => prev.map(l => {
     if (l.key !== key) return l;
     if (productId == null) {
       return { ...l, productId: undefined, description: '', amount: recomputeAmount({ ...l, productId: undefined, description: '' }) };
     }
     const prod = products.find(p => Number(p.id) === Number(productId));
+    const vat = prod && prod.purchase_tax_rate_id != null
+      ? vatRates.find(r => Number(r.id) === Number(prod.purchase_tax_rate_id))
+      : null;
     const next = {
       ...l,
       productId: Number(productId),
-      description: prod ? (prod.description || prod.name || '') : l.description,
+      description: prod ? (prod.purchase_description || prod.description || prod.name || '') : l.description,
       quantity: l.quantity != null ? l.quantity : 1,
       warehouseId: l.warehouseId != null ? l.warehouseId : (defaultWarehouseId ?? undefined),
+      rate: (l.rate != null && Number(l.rate) > 0) ? l.rate : (prod && Number(prod.purchase_cost) > 0 ? Number(prod.purchase_cost) : l.rate),
+      // Purchase tax defaults from the Item Master's Purchase Tax Code.
+      taxRateId: vat ? Number(vat.id) : (l.taxRateId ?? undefined),
+      taxRate: vat ? (Number(vat.vat_percentage) || 0) : (Number(l.taxRate) || 0),
     };
+    next.taxAmount = computeTax(next);
     next.amount = recomputeAmount(next);
     return next;
   }));
 
   const totalAmount = lines.reduce((s, l) => s + recomputeAmount(l), 0);
+  const taxTotal = lines.reduce((s, l) => s + computeTax(l), 0);
+  const netTotal = totalAmount - taxTotal;
   const paidAmount = Number(billData?.paid_amount) || 0;
   const remaining = totalAmount - paidAmount;
+
+  // ── Purchase Order integration ────────────────────────────────────────────
+  const loadOpenPOs = async (vendorId) => {
+    if (!vendorId) { setOpenPOs([]); return; }
+    setLoadingPOs(true);
+    try {
+      const pos = await window.electronAPI.getOpenPurchaseOrders?.(Number(vendorId));
+      setOpenPOs(Array.isArray(pos) ? pos : []);
+    } catch { setOpenPOs([]); }
+    finally { setLoadingPOs(false); }
+  };
+
+  // Append a PO's still-billable lines onto the bill. Every default the Item
+  // master already knows (description, cost, unit, item type) comes across; the
+  // line keeps the PO + PO-line ids for traceability and matching.
+  const addFromPO = (po) => {
+    const newLines = (po.lines || [])
+      .map(l => {
+        const remainingToBill = Math.max(0, (Number(l.qty_ordered) || 0) - (Number(l.qty_billed) || 0));
+        if (remainingToBill <= 0) return null;
+        return makeBillLine({
+          line_type: LINE_ITEM,
+          productId: l.item_id != null ? Number(l.item_id) : undefined,
+          description: l.description || '',
+          quantity: remainingToBill,
+          rate: Number(l.unit_cost) || 0,
+          amount: (Number(l.unit_cost) || 0) * remainingToBill,
+          warehouseId: defaultWarehouseId ?? undefined,
+          purchaseOrderId: po.id,
+          purchaseOrderLineId: l.id,
+        });
+      })
+      .filter(Boolean);
+    if (!newLines.length) { message.info('This Purchase Order has no remaining quantity to bill.'); return; }
+    setLines(prev => {
+      const kept = prev.filter(l => Number(l.amount) > 0 || l.productId != null || l.accountId != null);
+      return [...kept, ...newLines];
+    });
+    if (!form.getFieldValue('vendorId')) form.setFieldsValue({ vendorId: po.vendor_id });
+    setPoPickerOpen(false);
+    message.success(`Added ${newLines.length} line(s) from ${po.po_number}`);
+  };
+
+  // Deep link from a Purchase Order (?po=<id>): pre-fill the vendor and append
+  // the PO's billable lines, reusing the exact same Add-from-PO logic.
+  const poLinkAppliedRef = useRef(null);
+  useEffect(() => {
+    if (!preSelectedPoId || editId) return;
+    if (poLinkAppliedRef.current === preSelectedPoId) return;
+    poLinkAppliedRef.current = preSelectedPoId;
+    (async () => {
+      try {
+        const po = await window.electronAPI.getPurchaseOrder?.(preSelectedPoId);
+        if (!po || po.error) { message.error('Unable to create bill from this PO.'); return; }
+        form.setFieldsValue({ vendorId: Number(po.vendor_id) });
+        loadOpenPOs(po.vendor_id);
+        addFromPO(po);
+      } catch { message.error('Unable to create bill from this PO.'); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preSelectedPoId, editId, vendors]);
+
+  // Three-way match: warn (never silently block) when an inventory line is billed
+  // for more than has been received.
+  const threeWayIssues = () => {
+    const issues = [];
+    lines.forEach(l => {
+      if (l.line_type !== LINE_ITEM || l.purchaseOrderLineId == null) return;
+      const po = openPOs.find(p => p.id === l.purchaseOrderId);
+      const pol = po && (po.lines || []).find(x => x.id === l.purchaseOrderLineId);
+      if (!pol) return;
+      const billQty = Number(l.quantity) || 0;
+      const received = Number(pol.qty_received) || 0;
+      const previouslyBilled = Math.max(0, (Number(pol.qty_billed) || 0));
+      if (billQty > received - previouslyBilled + 1e-9) {
+        issues.push(`${l.description || 'line'}: billing ${billQty}, but only ${Math.max(0, received - previouslyBilled)} received and not yet billed.`);
+      }
+    });
+    return issues;
+  };
+
+  const confirmThreeWay = () => new Promise((resolve) => {
+    const issues = threeWayIssues();
+    if (!issues.length) { resolve(true); return; }
+    Modal.confirm({
+      title: 'Bill quantity exceeds quantity received',
+      content: (
+        <div>
+          <p>The following lines are billed for more than has been received:</p>
+          <ul style={{ paddingLeft: 18 }}>{issues.map((m, i) => <li key={i}>{m}</li>)}</ul>
+          <p style={{ marginBottom: 0 }}>You can still save the bill (an override is recorded), or receive the remaining items first.</p>
+        </div>
+      ),
+      okText: 'Save Bill Anyway',
+      cancelText: 'Cancel',
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  });
 
   const handleSubmit = async (values) => {
     if (totalAmount <= 0) return message.warning('Bill must have at least one line with an amount');
@@ -503,6 +644,8 @@ const EnterBill = ({ history, location, match }) => {
     if (itemLineMissingItem) return message.warning('Select an item for the inventory line');
     const itemLineMissingRate = lines.find(l => l.line_type === LINE_ITEM && (Number(l.quantity) || 0) > 0 && !(Number(l.rate) > 0));
     if (itemLineMissingRate) return message.warning('An inventory item line needs a quantity and a rate');
+    const ok = await confirmThreeWay();
+    if (!ok) return;
     try {
       setLoading(true);
       const payee = values.vendorId;
@@ -532,6 +675,11 @@ const EnterBill = ({ history, location, match }) => {
           warehouse_id: isItem
             ? (l.warehouseId != null ? Number(l.warehouseId) : (defaultWarehouseId ?? null))
             : null,
+          purchase_order_id: isItem && l.purchaseOrderId != null ? Number(l.purchaseOrderId) : null,
+          purchase_order_line_id: isItem && l.purchaseOrderLineId != null ? Number(l.purchaseOrderLineId) : null,
+          taxRateId: l.taxRateId != null ? Number(l.taxRateId) : null,
+          taxRate: Number(l.taxRate) || 0,
+          taxAmount: computeTax(l),
         };
       });
 
@@ -542,38 +690,20 @@ const EnterBill = ({ history, location, match }) => {
         res = await window.electronAPI.insertExpense(payee, payment_account, payment_date, payment_method, ref_no, category, entered_by, approval_status, expenseLines, due_date, memo, terms);
       }
       if (res && res.success) {
-        // Upload file attachment if present
+        // Flush any pending attachments through the shared AttachmentManager
+        // (it stores a managed COPY; the user's original file is never touched).
         const expenseId = Number(res.expenseId || res.id || editId || (res.result && res.result.lastInsertRowid) || 0);
-        if (selectedFile && expenseId > 0) {
-          try {
-            const reader = new FileReader();
-            const base64 = await new Promise((resolve, reject) => {
-              reader.onload = () => resolve(reader.result);
-              reader.onerror = () => reject(new Error('FileReader failed'));
-              reader.readAsDataURL(selectedFile);
-            });
-            const uploadRes = await window.electronAPI.uploadDocument({
-              name: selectedFile.name,
-              mime: selectedFile.type || 'application/octet-stream',
-              data: base64,
-              category: 'bill',
-              linkedId: expenseId,
-              enteredBy: 'system',
-            });
-            if (!uploadRes?.success) {
-              console.error('[attachments] bill attachment upload failed:', uploadRes?.error);
-              message.error('The bill was saved, but the attachment could not be stored. Please try attaching the file again.');
-            }
-          } catch (uploadErr) {
-            console.error('[attachments] bill attachment upload threw:', uploadErr);
-            message.error('The bill was saved, but the attachment could not be stored. Please try attaching the file again.');
+        if (expenseId > 0) {
+          try { await attachmentRef.current?.uploadPending(expenseId); }
+          catch (uploadErr) {
+            console.error('[attachments] bill attachment upload failed:', uploadErr);
+            message.error('The bill was saved, but an attachment could not be stored. Please try attaching it again.');
           }
         }
         message.success(isEdit ? 'Bill updated' : 'Bill saved — recorded as Accounts Payable');
         if (!isEdit) {
           resetForm();
-          setSelectedFile(null);
-          setBillDocuments([]);
+          setPendingFiles([]);
         }
         if (history && history.push) history.push('/main/vendors/bills/tracker');
       } else {
@@ -726,10 +856,12 @@ const EnterBill = ({ history, location, match }) => {
   // stays in. The client-side guard keeps the guarantee even if the backend
   // response arrives unfiltered (e.g. an older main process).
   const allAccounts = getBillLineAccounts(billAccounts.length ? billAccounts : accounts);
-  // Only inventory-tracking products may appear on an item line. A Service is
-  // never offered, and an unclassified product fails safe to "not inventory"
-  // (see utils/products.js), so a service can never move stock from a bill.
-  const inventoryItems = getInventoryProducts(products);
+  // Purchasable items: Inventory Parts (receive stock), Non-Inventory Parts and
+  // Services (post to their configured expense account). Stock only moves for
+  // inventory-tracked items — the backend enforces that from the item type.
+  const itemOptions = (Array.isArray(products) ? products : []).filter(p =>
+    (p.is_active == null || Number(p.is_active)) && isPurchasable(p.type));
+  const inventoryItems = itemOptions; // legacy alias used below
   const isPaid = billData && (billData.approval_status || '').toLowerCase() === 'paid';
 
   const openPaidJournal = async () => {
@@ -766,6 +898,25 @@ const EnterBill = ({ history, location, match }) => {
   // the quantity it claims. On an account line the shape is exactly what it was
   // before: an account picker and a typed amount.
   const dash = <span style={{ color: '#bfbfbf' }}>—</span>;
+
+  // Read-only accounting preview: which account this line will post to. Item
+  // lines resolve from the Item Master (Inventory Asset for inventory parts,
+  // the configured Expense/COGS account otherwise); account lines show their
+  // own account. The backend remains authoritative.
+  const previewAccount = (line) => {
+    if (line.line_type !== LINE_ITEM) {
+      const a = accounts.find(x => Number(x.id) === Number(line.accountId));
+      return a ? (a.accountName || a.name) : (line.category || '—');
+    }
+    const p = products.find(x => Number(x.id) === Number(line.productId));
+    if (!p) return '—';
+    const inv = tracksInventory(p.type);
+    const id = inv ? p.inventory_asset_account_id : p.purchase_expense_account_id;
+    const a = id != null ? accounts.find(x => Number(x.id) === Number(id)) : null;
+    if (a) return a.accountName || a.name;
+    return inv ? 'Inventory Asset' : 'Expense';
+  };
+
   const lineColumns = [
     {
       title: 'Type', key: 'type', width: 130,
@@ -823,6 +974,13 @@ const EnterBill = ({ history, location, match }) => {
         : dash),
     },
     {
+      title: 'Tax %', key: 'tax', width: 90,
+      render: (_, r) => (r.line_type === LINE_ITEM
+        ? <InputNumber size="small" min={0} step={0.01} style={{ width: '100%' }} value={r.taxRate}
+            onChange={v => updateLine(r.key, 'taxRate', v || 0)} />
+        : dash),
+    },
+    {
       title: `Amount (${cSym})`, key: 'amount', width: 130,
       render: (_, r) => (r.line_type === LINE_ITEM
         // Computed — never typed, so it cannot disagree with qty × rate.
@@ -831,6 +989,34 @@ const EnterBill = ({ history, location, match }) => {
             onChange={v => updateLine(r.key, 'amount', v || 0)}
             formatter={v => v ? `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
             parser={v => v.replace(/,/g, '')} />),
+    },
+    {
+      title: 'Accounting', key: 'accounting', width: 150,
+      render: (_, r) => (
+        <Tooltip title={`Posts to: ${previewAccount(r)}`}>
+          <span style={{ color: '#595959', fontSize: 12 }}>{previewAccount(r)}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: 'PO / Match', key: 'poMatch', width: 190,
+      render: (_, r) => {
+        if (r.purchaseOrderLineId == null) return dash;
+        const po = openPOs.find(p => p.id === r.purchaseOrderId);
+        const pol = po && (po.lines || []).find(x => x.id === r.purchaseOrderLineId);
+        if (!pol) return <Tag color="blue">{po?.po_number || 'PO'}</Tag>;
+        const received = Number(pol.qty_received) || 0;
+        const billed = Math.max(0, Number(pol.qty_billed) || 0);
+        const billQty = Number(r.quantity) || 0;
+        const over = billQty > received - billed + 1e-9;
+        return (
+          <div style={{ fontSize: 11 }}>
+            <div><Tag color="blue" style={{ fontSize: 10 }}>{po?.po_number}</Tag></div>
+            <div>Ordered {pol.qty_ordered} · Rcvd {received} · Billed {billed}</div>
+            {over && <span style={{ color: '#fa8c16' }}><ExclamationCircleOutlined /> exceeds received</span>}
+          </div>
+        );
+      },
     },
     {
       title: 'Warehouse', key: 'warehouse', width: 150,
@@ -854,10 +1040,116 @@ const EnterBill = ({ history, location, match }) => {
     },
   ];
 
+  // ── Print the SAVED bill (never the visible React form state) ────────────
+  const accountNameById = (id) => {
+    if (id == null) return '';
+    const a = (accounts || []).find(x => Number(x.id) === Number(id));
+    return a ? (a.accountName || a.name || '') : '';
+  };
+
+  const buildBillHtml = (model, company) => {
+    const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+    const money = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const d = (v) => (v ? moment(v).format('MM/DD/YYYY') : '-');
+    const co = company || {};
+    const coAddr = [co.address || co.address1, co.city, co.state, co.postal_code].filter(Boolean).join(', ');
+    const exp = model.expense || {};
+    const vendor = model.vendor || {};
+
+    const lineType = (l) => (l.line_type === 'item' ? (itemTypeLabel(l.product_type) || 'Inventory / Non-Inventory Item') : 'Expense Account');
+    const lineName = (l) => l.line_type === 'item'
+      ? (l.product_name || l.description || '-')
+      : (accountNameById(l.account_id) || l.category || '-');
+
+    const rows = (model.lines || []).map(l => `
+      <tr>
+        <td>${esc(lineType(l))}</td>
+        <td>${esc(lineName(l))}</td>
+        <td>${esc(l.description || '')}</td>
+        <td class="num">${l.line_type === 'item' ? (l.quantity == null ? '' : Number(l.quantity)) : ''}</td>
+        <td class="num">${l.line_type === 'item' ? money(l.rate) : ''}</td>
+        <td class="num">${money(l.amount)}</td>
+      </tr>`).join('');
+
+    const poSection = model.po ? `
+      <div class="meta"><strong>Source Purchase Order:</strong> ${esc(model.po.po_number)}</div>
+      ${(model.receipts || []).map(r => `<div class="meta"><strong>Receipt:</strong> ${esc(r.receipt_number)}${r.reference ? ` (${esc(r.reference)})` : ''} — ${d(r.receipt_date)}</div>`).join('')}` : '';
+
+    const attachSection = (model.attachments || []).length
+      ? `<div class="section-title">Attachments</div><div class="meta">${(model.attachments || []).map(a => esc(a.document_name)).join(', ')}</div>` : '';
+
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Bill ${esc(exp.ref_no || exp.id)}</title>
+      <style>${PRINT_BASE_CSS}</style></head><body><div class="doc">
+        <div class="header">
+          <div>
+            <h1>${esc(co.name || co.companyName || '')}</h1>
+            <div class="muted">${esc(coAddr)}</div>
+            <div class="muted">${esc(co.phone || co.phone_number || '')}</div>
+          </div>
+          <div style="text-align:right">
+            <h2>VENDOR BILL</h2>
+            <div class="meta"><strong>Bill #:</strong> ${esc(exp.ref_no || exp.id)}</div>
+            <div class="meta"><span class="badge ${model.status === 'Paid' ? 'ok' : ''}">${esc(model.status)}</span></div>
+          </div>
+        </div>
+
+        <div class="header" style="border-bottom:none;padding-bottom:0;margin-bottom:0">
+          <div>
+            <div class="meta"><strong>Vendor:</strong> ${esc(vendor.display_name || [vendor.first_name, vendor.last_name].filter(Boolean).join(' ') || vendor.company_name || '')}</div>
+            <div class="meta muted">${esc([vendor.address1, vendor.city, vendor.state, vendor.postal_code].filter(Boolean).join(', '))}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="meta"><strong>Bill Date:</strong> ${d(exp.payment_date)}</div>
+            <div class="meta"><strong>Due Date:</strong> ${d(exp.due_date)}</div>
+            <div class="meta"><strong>Terms:</strong> ${esc(exp.terms || '')}</div>
+          </div>
+        </div>
+        ${poSection}
+        ${exp.memo ? `<div class="meta"><strong>Memo:</strong> ${esc(exp.memo)}</div>` : ''}
+
+        <table>
+          <thead><tr><th>Type</th><th>Item / Account</th><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+
+        <div class="summary">
+          <div class="row"><span>Subtotal</span><span>${money(model.totalAmount)}</span></div>
+          <div class="row total"><span>Total</span><span>${money(model.totalAmount)}</span></div>
+          <div class="row"><span>Paid</span><span>${money(model.paid)}</span></div>
+          <div class="row"><span>Balance Due</span><span>${money(model.remaining)}</span></div>
+        </div>
+
+        ${attachSection}
+      </div></body></html>`;
+  };
+
+  const handlePrintBill = async () => {
+    if (!isEdit || !editId) { message.warning('Save the bill before printing.'); return; }
+    setPrinting(true);
+    try {
+      const [model, company] = await Promise.all([
+        window.electronAPI.getBillPrint?.(Number(editId)),
+        window.electronAPI.getCompany?.().catch(() => null),
+      ]);
+      if (!model || model.error || !model.expense) {
+        message.error('Unable to prepare this document for printing.');
+        return;
+      }
+      if (!printHtml(buildBillHtml(model, company || {}))) {
+        message.error('Printing was blocked. Please allow pop-ups and try again.');
+      }
+    } catch (e) {
+      console.error('[bill] print failed:', e);
+      message.error('Unable to prepare this document for printing.');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   return (
     <div style={PAGE_WRAPPER_STYLE}>
       <Card title={<span style={{ fontSize: 18, fontWeight: 600 }}><FileTextOutlined style={{ marginRight: 8 }} />{isEdit ? 'Edit Bill' : 'Enter Bill'}</span>}
-        extra={<Space><Button icon={<DownloadOutlined />} onClick={() => {}}>Export</Button><Button icon={<ReloadOutlined />} onClick={loadVendors}>Refresh</Button></Space>}>
+        extra={<Space><Button icon={<PrinterOutlined />} loading={printing} onClick={handlePrintBill}>Print</Button><Button icon={<DownloadOutlined />} onClick={() => {}}>Export</Button><Button icon={<ReloadOutlined />} onClick={loadVendors}>Refresh</Button></Space>}>
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #1890ff' }}><Statistic title="Total Lines" value={lines.length} valueStyle={{ color: '#1890ff', fontSize: 18 }} /></Card></Col>
           <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #52c41a' }}><Statistic title="Total Amount" value={totalAmount} prefix={cSym} precision={2} valueStyle={{ color: '#52c41a', fontSize: 18 }} /></Card></Col>
@@ -881,6 +1173,8 @@ const EnterBill = ({ history, location, match }) => {
                     // The vendor's default terms (suppliers.supplier_terms) set
                     // Terms and recompute Due Date.
                     applyVendorDefaultTerms(selected);
+                    // Offer this vendor's open Purchase Orders for Add-from-PO.
+                    loadOpenPOs(v);
                   }}>
                   {vendors.map(v => (
                     <Option key={v.id} value={v.id}>{v.display_name || `${v.first_name} ${v.last_name}`}</Option>
@@ -921,27 +1215,54 @@ const EnterBill = ({ history, location, match }) => {
         </FormSection>
 
         <FormSection title="Attachments" icon={<PaperClipOutlined />}>
-          <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={(e) => {
-            const file = e.target.files && e.target.files[0];
-            setSelectedFile(file || null);
-          }} />
-          <Space wrap style={{ marginBottom: 8 }}>
-            <Button icon={<UploadOutlined />} onClick={() => fileInputRef.current?.click()}>Select File</Button>
-            <Text type="secondary" style={{ fontSize: 12 }}>Vendor invoice file</Text>
-            {selectedFile && <Tag closable onClose={() => setSelectedFile(null)}>{selectedFile.name}</Tag>}
-          </Space>
-          {billDocuments.length > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              {billDocuments.map(doc => (
-                <Tag key={doc.id} style={{ cursor: 'pointer' }} onClick={() => handleOpenDocument(doc)}>
-                  <EyeOutlined style={{ marginRight: 4 }} />{doc.document_name || doc.file_path || doc.random_number || 'View File'}
-                </Tag>
-              ))}
-            </div>
-          )}
+          <AttachmentManager
+            ref={attachmentRef}
+            entityType="bill"
+            entityId={isEdit ? editId : null}
+            pendingFiles={pendingFiles}
+            onPendingChange={setPendingFiles}
+            entityLabel="Bill"
+            emptyText="No attachments yet — attach the vendor invoice or receipt."
+          />
         </FormSection>
 
-        <FormSection title="Line Items" icon={<DollarOutlined />}>
+        {isEdit && billCredits.length > 0 && (
+          <FormSection title="Vendor Credits Applied" icon={<ShoppingCartOutlined />}>
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              {billCredits.map(ca => (
+                <div key={ca.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text>VC-{String(ca.credit_id).padStart(5, '0')}{ca.reference ? ` — ${ca.reference}` : ''} ({ca.applied_date ? moment(ca.applied_date).format('MM/DD/YYYY') : '-'})</Text>
+                  <Text strong>{cSym} {Number(ca.amount || 0).toFixed(2)}</Text>
+                </div>
+              ))}
+            </Space>
+          </FormSection>
+        )}
+
+        <FormSection title="Line Items" icon={<DollarOutlined />}
+          extra={
+            <Button size="small" icon={<ShoppingCartOutlined />} loading={loadingPOs}
+              onClick={() => {
+                const v = form.getFieldValue('vendorId');
+                if (!v) { message.warning('Select a vendor first'); return; }
+                loadOpenPOs(v); setPoPickerOpen(true);
+              }}>
+              Add from PO
+            </Button>
+          }>
+          {/* Linked-PO match strip: shows the three-way state at a glance. */}
+          {lines.some(l => l.purchaseOrderLineId != null) && (() => {
+            const issues = threeWayIssues();
+            return (
+              <Alert
+                type={issues.length ? 'warning' : 'success'}
+                showIcon
+                style={{ marginBottom: 10, borderRadius: 8 }}
+                message={issues.length ? 'Three-way match: bill exceeds quantity received' : 'Three-way match: lines match the Purchase Order / receipts'}
+                description={issues.length ? issues.join(' ') : undefined}
+              />
+            );
+          })()}
           <div style={{ marginBottom: 12 }}>
             {/* Type | Item/Account | Description | Qty | Rate | Amount | Warehouse | Actions.
                 Driven by React state rather than Form.Item, so it can sit inside
@@ -952,7 +1273,7 @@ const EnterBill = ({ history, location, match }) => {
               columns={lineColumns}
               dataSource={lines}
               pagination={false}
-              scroll={{ x: 1080 }}
+              scroll={{ x: 1270 }}
               style={{ marginBottom: 8 }}
             />
             <Button type="dashed" onClick={addLine} block icon={<PlusOutlined />} style={{ borderRadius: 6 }}>
@@ -983,6 +1304,8 @@ const EnterBill = ({ history, location, match }) => {
             </div>
             <TotalsBlock
               rows={[
+                taxTotal > 0 ? { label: 'Subtotal', value: `${cSym} ${netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` } : null,
+                taxTotal > 0 ? { label: 'Tax', value: `${cSym} ${taxTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` } : null,
                 { label: 'Total', value: `${cSym} ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, strong: true },
                 isEdit && paidAmount > 0 ? { label: 'Paid', value: `${cSym} ${paidAmount.toFixed(2)}`, color: '#52c41a' } : null,
                 isEdit && paidAmount > 0 && remaining > 0.005 ? { label: 'Remaining', value: `${cSym} ${remaining.toFixed(2)}`, color: '#fa8c16' } : null,
@@ -1023,6 +1346,37 @@ const EnterBill = ({ history, location, match }) => {
           </Panel>
         </Collapse>
       )}
+
+      {/* ── Add from Purchase Order ─────────────────────────────────────── */}
+      <Modal
+        title={<span><ShoppingCartOutlined style={{ marginRight: 8 }} />Open Purchase Orders</span>}
+        visible={poPickerOpen}
+        onCancel={() => setPoPickerOpen(false)}
+        footer={<Button onClick={() => setPoPickerOpen(false)}>Close</Button>}
+        width={900}
+        destroyOnClose
+      >
+        <Table
+          size="small"
+          rowKey="id"
+          loading={loadingPOs}
+          dataSource={openPOs}
+          pagination={false}
+          locale={{ emptyText: 'No open Purchase Orders for this vendor.' }}
+          columns={[
+            { title: 'PO #', dataIndex: 'po_number', width: 110, render: v => <Text strong>{v}</Text> },
+            { title: 'PO Date', dataIndex: 'po_date', width: 110, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
+            { title: 'Total', dataIndex: 'total', width: 110, align: 'right', render: v => `${cSym} ${Number(v || 0).toFixed(2)}` },
+            { title: 'Received', key: 'recv', width: 100, align: 'right', render: (_, r) => `${r.totalReceived || 0}/${r.totalOrdered || 0}` },
+            { title: 'Billed', key: 'bill', width: 100, align: 'right', render: (_, r) => `${r.totalBilled || 0}/${r.totalOrdered || 0}` },
+            { title: 'Available to Bill', key: 'avail', width: 130, align: 'right', render: (_, r) => Math.max(0, (r.totalOrdered || 0) - (r.totalBilled || 0)) },
+            {
+              title: '', key: 'act', width: 90,
+              render: (_, r) => <Button type="primary" size="small" onClick={() => addFromPO(r)}>Add</Button>,
+            },
+          ]}
+        />
+      </Modal>
 
       <Modal title="Add New Vendor" visible={supplierModalOpen} onOk={handleAddSupplier} onCancel={() => { setSupplierModalOpen(false); supplierForm.resetFields(); }} okText="Add" destroyOnClose width={520}>
         <Form form={supplierForm} layout="vertical" preserve={false}>

@@ -93,7 +93,7 @@ const near = (a, b) => Math.abs(Number(a) - Number(b)) < 1e-6;
   const customerId = Number(cust.lastInsertRowid);
 
   const invProduct = db.prepare(
-    "SELECT id, name, sku FROM products WHERE LOWER(type) = 'product' ORDER BY id LIMIT 1"
+    "SELECT id, name, sku FROM products WHERE LOWER(type) IN ('product','inventory_part','inventory part','raw material','asset','bundle') ORDER BY id LIMIT 1"
   ).get();
   const svcProduct = db.prepare(
     "SELECT id, name, type FROM products WHERE LOWER(type) = 'service' ORDER BY id LIMIT 1"

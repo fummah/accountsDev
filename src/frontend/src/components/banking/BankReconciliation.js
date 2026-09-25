@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Table, Button, DatePicker, Select, Card, Checkbox, Input, message, Row, Col, Typography, Tag, Space, Alert, Tooltip, Divider, Modal, Spin, Empty } from 'antd';
-import { SaveOutlined, ReloadOutlined, BankOutlined, CheckCircleOutlined, ExclamationCircleOutlined, DownloadOutlined, HistoryOutlined, SearchOutlined, EyeOutlined, WarningOutlined } from '@ant-design/icons';
+import { SaveOutlined, ReloadOutlined, BankOutlined, CheckCircleOutlined, ExclamationCircleOutlined, DownloadOutlined, HistoryOutlined, SearchOutlined, EyeOutlined, WarningOutlined, PrinterOutlined } from '@ant-design/icons';
 import moment from 'moment';
-import { useHistory } from 'react-router-dom';
+import { useHistory, useLocation } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
 import { dedupeAccounts, getBankAccounts } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
+import { printHtml, PRINT_BASE_CSS } from '../../utils/printDocument';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
@@ -55,6 +56,7 @@ const SOURCE_ROUTES = {
 const BankReconciliation = () => {
   const { symbol: cSym } = useCurrency();
   const history = useHistory();
+  const location = useLocation();
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [reconciliationHistory, setReconciliationHistory] = useState([]);
@@ -64,6 +66,7 @@ const BankReconciliation = () => {
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [reconciling, setReconciling] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
 
   // Starting (book) balance, resolved by the backend through the SAME
@@ -87,6 +90,14 @@ const BankReconciliation = () => {
   const [histLoading, setHistLoading] = useState(false);
 
   useEffect(() => { loadAccounts(); }, []);
+
+  // Deep-link support: ?accountId=<id> preselects the exact bank account to
+  // reconcile (never by name). Also accepts the legacy ?account=<id>.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const id = params.get('accountId') || params.get('account');
+    if (id) setSelectedAccount(Number(id));
+  }, [location.search]);
 
   useEffect(() => {
     if (selectedAccount) {
@@ -351,6 +362,91 @@ const BankReconciliation = () => {
   const isBalanced = Math.abs(difference) < 0.005;
   const selectedCount = filteredTransactions.filter(tx => selectedIds.has(tx.id)).length;
 
+  // ── Print the reconciliation report from the SAME live calculations ───────
+  // Nothing is recalculated here: startingBalance / clearedBalance / difference
+  // are the exact values the screen shows.
+  const buildReconciliationHtml = (company) => {
+    const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+    const money = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const d = (v) => (v ? moment(v).format('MM/DD/YYYY') : '-');
+    const co = company || {};
+    const acct = selectedAccountInfo || {};
+    const isDraft = !isBalanced;
+    const stmtDateStr = statementDate ? statementDate.format('MM/DD/YYYY') : '-';
+
+    const clearedTx = transactions.filter(tx => selectedIds.has(tx.id));
+    const unclearedTx = transactions.filter(tx => !selectedIds.has(tx.id));
+    const rowsFor = (arr) => arr.map(tx => {
+      const amt = Number(tx.amount) || 0;
+      return `<tr>
+        <td>${d(tx.date)}</td>
+        <td>${esc(tx.type || '')}</td>
+        <td>${esc(tx.reference || `TX-${tx.id}`)}</td>
+        <td>${esc(tx.description || '')}</td>
+        <td class="num">${amt < 0 ? money(Math.abs(amt)) : ''}</td>
+        <td class="num">${amt >= 0 ? money(amt) : ''}</td>
+      </tr>`;
+    }).join('');
+    const sumPos = (arr) => arr.reduce((s, tx) => s + (Number(tx.amount) > 0 ? Number(tx.amount) : 0), 0);
+    const sumNeg = (arr) => arr.reduce((s, tx) => s + (Number(tx.amount) < 0 ? Math.abs(Number(tx.amount)) : 0), 0);
+
+    const table = (arr, emptyLabel) => arr.length
+      ? `<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th class="num">Money Out</th><th class="num">Money In</th></tr></thead><tbody>${rowsFor(arr)}</tbody></table>`
+      : `<div class="muted" style="margin-top:8px">${emptyLabel}</div>`;
+
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Bank Reconciliation — ${esc(acct.accountName || acct.name || '')}</title>
+      <style>${PRINT_BASE_CSS}</style></head><body><div class="doc">
+        <div class="header">
+          <div>
+            <h1>${esc(co.name || co.companyName || '')}</h1>
+            <div class="muted">${esc([co.address || co.address1, co.city, co.state].filter(Boolean).join(', '))}</div>
+          </div>
+          <div style="text-align:right">
+            <h2>BANK RECONCILIATION</h2>
+            <div class="meta"><span class="badge ${isDraft ? 'draft' : 'ok'}">${isDraft ? 'Reconciliation In Progress (Draft)' : 'Reconciled'}</span></div>
+          </div>
+        </div>
+
+        <div class="meta"><strong>Bank Account:</strong> ${esc(acct.accountName || acct.name || '-')}${acct.accountNumber ? ` (${esc(acct.accountNumber)})` : ''}</div>
+        <div class="meta"><strong>Statement Ending Date:</strong> ${stmtDateStr}</div>
+        <div class="meta"><strong>Statement Ending Balance:</strong> ${statementBalance === '' || statementBalance == null ? '—' : money(stmtBal)}</div>
+        <div class="meta muted">Printed: ${moment().format('MM/DD/YYYY HH:mm')}</div>
+
+        <div class="section-title">Reconciliation Summary</div>
+        <div class="summary">
+          <div class="row"><span>Starting / Opening Balance</span><span>${money(startingBalance)}</span></div>
+          <div class="row"><span>Cleared Deposits / Money In</span><span>${money(sumPos(clearedTx))}</span></div>
+          <div class="row"><span>Cleared Payments / Money Out</span><span>${money(sumNeg(clearedTx))}</span></div>
+          <div class="row"><span>Cleared Balance</span><span>${money(clearedBalance)}</span></div>
+          <div class="row"><span>Statement Ending Balance</span><span>${statementBalance === '' || statementBalance == null ? '—' : money(stmtBal)}</span></div>
+          <div class="row total"><span>Difference</span><span>${statementBalance === '' || statementBalance == null ? '—' : money(difference)}</span></div>
+          <div class="row"><span>Outstanding Items</span><span>${unclearedTx.length}</span></div>
+        </div>
+
+        <div class="section-title">Cleared Transactions (${clearedTx.length})</div>
+        ${table(clearedTx, 'No cleared transactions.')}
+
+        <div class="section-title">Outstanding / Uncleared Transactions (${unclearedTx.length})</div>
+        ${table(unclearedTx, 'No outstanding transactions.')}
+      </div></body></html>`;
+  };
+
+  const handlePrintReconciliation = async () => {
+    if (!selectedAccount) { message.warning('Select a bank account first.'); return; }
+    setPrinting(true);
+    try {
+      const company = await window.electronAPI.getCompany?.().catch(() => null);
+      if (!printHtml(buildReconciliationHtml(company || {}))) {
+        message.error('Printing was blocked. Please allow pop-ups and try again.');
+      }
+    } catch (e) {
+      console.error('[reconciliation] print failed:', e);
+      message.error('Unable to prepare this report for printing.');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const columns = [
     {
       title: 'Date',
@@ -481,6 +577,15 @@ const BankReconciliation = () => {
                 style={{ borderRadius: 8 }}
               >
                 Reconcile
+              </Button>
+              <Button
+                icon={<PrinterOutlined />}
+                onClick={handlePrintReconciliation}
+                loading={printing}
+                disabled={!selectedAccount}
+                style={{ borderRadius: 8 }}
+              >
+                Print
               </Button>
               <Button
                 icon={<ReloadOutlined />}

@@ -25,6 +25,7 @@ const PaymentDetailsModal = ({ payment, visible, onClose, onPrint }) => {
   const [loadingAlloc, setLoadingAlloc] = useState(false);
   const [loadingJournal, setLoadingJournal] = useState(false);
   const [journalDetailId, setJournalDetailId] = useState(null);
+  const [refunds, setRefunds] = useState([]);
 
   useEffect(() => {
     if (!visible || !payment) return;
@@ -36,11 +37,19 @@ const PaymentDetailsModal = ({ payment, visible, onClose, onPrint }) => {
         setAllocations(Array.isArray(res) ? res : []);
       } catch (e) { setAllocations([]); }
       setLoadingAlloc(false);
+      try {
+        const rf = await window.electronAPI?.customerRefundsByPayment?.(payment.id) || [];
+        setRefunds(Array.isArray(rf) ? rf.filter(r => String(r.status || '').toLowerCase() !== 'reversed') : []);
+      } catch { setRefunds([]); }
     })();
   }, [visible, payment]);
 
   const applied = Number(payment?.applied != null ? payment.applied : (payment?.amount || 0));
   const unapplied = Number(payment?.unapplied || 0);
+  const refundedTotal = refunds.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const netAmount = Math.max(0, Number(payment?.amount || 0) - refundedTotal);
+  const refundStatus = refundedTotal <= 0.005 ? 'Applied'
+    : netAmount <= 0.005 ? 'Refunded' : 'Partially Refunded';
 
   const handleGl = async () => {
     if (journalDetailId) { setJournalDetailId(null); return; }
@@ -100,14 +109,34 @@ const PaymentDetailsModal = ({ payment, visible, onClose, onPrint }) => {
               <Descriptions.Item label="Date">{payment.date ? moment(payment.date).format('MM/DD/YYYY') : '—'}</Descriptions.Item>
               <Descriptions.Item label="Method">{payment.paymentMethod || '—'}</Descriptions.Item>
               <Descriptions.Item label="Amount"><Text strong>{fmt(payment.amount, cSym)}</Text></Descriptions.Item>
-              <Descriptions.Item label="Status">{payment.status || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Status"><Tag color={refundStatus === 'Refunded' ? 'red' : refundStatus === 'Partially Refunded' ? 'orange' : 'green'}>{refundStatus}</Tag></Descriptions.Item>
               <Descriptions.Item label="Applied">{fmt(applied, cSym)}</Descriptions.Item>
               <Descriptions.Item label="Unapplied">
                 <Text strong style={{ color: unapplied > 0 ? '#faad14' : '#52c41a' }}>{fmt(unapplied, cSym)}</Text>
               </Descriptions.Item>
+              <Descriptions.Item label="Refunded"><Text strong style={{ color: refundedTotal > 0 ? '#cf1322' : undefined }}>{fmt(refundedTotal, cSym)}</Text></Descriptions.Item>
+              <Descriptions.Item label="Net Amount"><Text strong>{fmt(netAmount, cSym)}</Text></Descriptions.Item>
               <Descriptions.Item label="Reference">{payment.reference || '—'}</Descriptions.Item>
               <Descriptions.Item label="Deposit To">{payment.deposit_to || payment.depositTo || 'Undeposited Funds'}</Descriptions.Item>
             </Descriptions>
+
+            {refunds.length > 0 && (
+              <>
+                <Divider style={{ margin: '16px 0 12px' }}>Refund History</Divider>
+                <Table
+                  size="small"
+                  rowKey="id"
+                  pagination={false}
+                  dataSource={refunds}
+                  columns={[
+                    { title: 'Refund #', dataIndex: 'refund_number', key: 'refund_number', render: v => v || '—' },
+                    { title: 'Date', dataIndex: 'date', key: 'date', render: d => d ? moment(d).format('MM/DD/YYYY') : '—' },
+                    { title: 'Amount', dataIndex: 'amount', key: 'amount', align: 'right', render: v => <Text strong style={{ color: '#cf1322' }}>-{fmt(v, cSym)}</Text> },
+                    { title: 'Reason', dataIndex: 'reason', key: 'reason', render: v => v || '—' },
+                  ]}
+                />
+              </>
+            )}
 
             {payment.memo && (
               <div style={{ marginTop: 12 }}>

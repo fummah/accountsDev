@@ -1,25 +1,37 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Button, Input, Card, Space, Tag, message, Popconfirm, Modal, Form, Row, Col, Avatar, Typography, Tooltip } from 'antd';
-import { PlusOutlined, ReloadOutlined, SearchOutlined, DeleteOutlined, EditOutlined, ImportOutlined, EyeOutlined, TeamOutlined, FileTextOutlined, FileDoneOutlined } from '@ant-design/icons';
+import { Table, Button, Card, Space, Tag, message, Popconfirm, Modal, Form, Row, Col, Avatar, Typography, Tooltip } from 'antd';
+import { PlusOutlined, DeleteOutlined, EditOutlined, EyeOutlined, TeamOutlined, FileTextOutlined, FileDoneOutlined } from '@ant-design/icons';
 import { Link, useHistory } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
 import { formatPhone } from '../../utils/phone';
 import CustomerContactFields from './shared/CustomerContactFields';
-import { resolveTaxRateFields } from '../../utils/taxRate';
+import { resolveTaxRateFields, describeTaxRate } from '../../utils/taxRate';
 import { MODAL_BODY_SCROLL_STYLE, MODAL_WIDTH } from '../shared/FormSection';
-import CsvImportModal from '../common/CsvImportModal';
+import ListToolbar from '../shared/ListToolbar';
+import { toCsv, downloadCsv, csvDate } from '../../utils/csv';
 
 const { Title, Text } = Typography;
+
+// Human-readable export columns. No internal/secret fields (no password hashes,
+// tokens, etc.); "Customer Number" is the user-facing customer number (the id
+// the app shows and searches by).
+const EXPORT_HEADERS = [
+  'Customer Number', 'Display Name', 'First Name', 'Last Name', 'Company',
+  'Email', 'Phone', 'Mobile', 'Website',
+  'Street Address', 'Address Line 2', 'City', 'State', 'Postal Code', 'Country',
+  'Tax Status', 'Default Tax Rate', 'Status', 'Outstanding Balance', 'Created Date', 'Notes',
+];
 
 const CustomerList = () => {
   const { symbol: cSym } = useCurrency();
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [pagination, setPagination] = useState({ current: 1, pageSize: 25, total: 0 });
   const history = useHistory();
   const [addModalVisible, setAddModalVisible] = useState(false);
-  const [importVisible, setImportVisible] = useState(false);
   const [vatRates, setVatRates] = useState([]);
   const [addForm] = Form.useForm();
 
@@ -27,10 +39,13 @@ const CustomerList = () => {
     window.electronAPI.getAllVat?.().then(v => setVatRates(Array.isArray(v) ? v : [])).catch(() => {});
   }, []);
 
-  const load = useCallback(async (page, pageSize, searchTerm) => {
+  // '' means "All Statuses" to the backend filter.
+  const statusParam = statusFilter && statusFilter !== 'all' ? statusFilter : '';
+
+  const load = useCallback(async (page, pageSize, searchTerm, status) => {
     setLoading(true);
     try {
-      const res = await window.electronAPI.getCustomersPaginated?.(page || 1, pageSize || 25, searchTerm || '');
+      const res = await window.electronAPI.getCustomersPaginated?.(page || 1, pageSize || 25, searchTerm || '', status || '');
       if (res && Array.isArray(res.data)) {
         setCustomers(res.data);
         setPagination(p => ({ ...p, current: page || 1, total: res.total || res.data.length }));
@@ -39,8 +54,9 @@ const CustomerList = () => {
         setPagination(p => ({ ...p, current: 1, total: res.length }));
       } else {
         const all = await window.electronAPI.getAllCustomers?.();
-        setCustomers(Array.isArray(all) ? all : []);
-        setPagination(p => ({ ...p, current: 1, total: (all || []).length }));
+        const list = Array.isArray(all) ? all : (all?.all || []);
+        setCustomers(list);
+        setPagination(p => ({ ...p, current: 1, total: list.length }));
       }
     } catch {
       message.error('Failed to load customers');
@@ -48,16 +64,17 @@ const CustomerList = () => {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(1, pagination.pageSize, search); }, []);
+  // Reload when the status filter changes.
+  useEffect(() => { load(1, pagination.pageSize, search, statusParam); }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTableChange = (pag) => {
     setPagination(p => ({ ...p, current: pag.current, pageSize: pag.pageSize }));
-    load(pag.current, pag.pageSize, search);
+    load(pag.current, pag.pageSize, search, statusParam);
   };
 
-  const handleSearch = () => {
-    load(1, pagination.pageSize, search);
-  };
+  const handleSearch = () => load(1, pagination.pageSize, search, statusParam);
+
+  const handleRefresh = () => load(pagination.current, pagination.pageSize, search, statusParam);
 
   const handleAddCustomer = async (values) => {
     try {
@@ -98,25 +115,59 @@ const CustomerList = () => {
       message.success('Customer added');
       setAddModalVisible(false);
       addForm.resetFields();
-      load(1, pagination.pageSize, search);
+      load(1, pagination.pageSize, search, statusParam);
     } catch (e) { if (!e?.errorFields) message.error('Failed to add customer'); }
   };
 
-const handleDelete = async (id) => {
+  const handleDelete = async (id) => {
     try {
       const res = await window.electronAPI.deleteRecord?.(id, 'customers');
-      if (res && res.error) {
-        message.error(res.error, 6);
-        return;
-      }
+      if (res && res.error) { message.error(res.error, 6); return; }
       if (res && res.success === false) {
         message.error(res.error || 'Delete failed — customer may have linked transactions', 6);
         return;
       }
       message.success('Customer deleted');
-      load(pagination.current, pagination.pageSize, search);
+      load(pagination.current, pagination.pageSize, search, statusParam);
     } catch {
       message.error('Delete failed');
+    }
+  };
+
+  // Export EVERY customer matching the current search + status filter (not just
+  // the visible page). The backend query is unpaged and uses the SAME filter
+  // logic as the list.
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await window.electronAPI.getCustomersForExport?.(search || '', statusParam);
+      if (res && res.error) throw new Error(res.error);
+      const rows = Array.isArray(res) ? res : (res?.data || []);
+      if (!rows.length) {
+        message.info('No customers match the current filters.');
+        return;
+      }
+      const csv = toCsv(EXPORT_HEADERS, rows.map(c => ([
+        c.id != null ? c.id : '',
+        c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company_name || '',
+        c.first_name || '', c.last_name || '', c.company_name || '',
+        c.email || '', c.phone_number || '', c.mobile_number || '', c.website || '',
+        c.address1 || '', c.address2 || '', c.city || '', c.state || '', c.postal_code || '', c.country || '',
+        (c.taxable === 0 || c.taxable === false || String(c.taxable) === '0') ? 'Non-Taxable' : 'Taxable',
+        describeTaxRate(c, vatRates),
+        c.status || 'Active',
+        Number(c.balance || 0).toFixed(2),
+        csvDate(c.date_entered),
+        c.notes || '',
+      ])));
+      const suffix = statusFilter && statusFilter !== 'all' ? `_${statusFilter}` : '';
+      downloadCsv(`Customers${suffix}_${new Date().toISOString().slice(0, 10)}.csv`, csv);
+      message.success(`Customer export completed (${rows.length} customers).`);
+    } catch (e) {
+      console.error('[customers] export failed:', e);
+      message.error('Customer export could not be completed. Please try again.');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -189,12 +240,6 @@ const handleDelete = async (id) => {
           <Title level={3} style={{ margin: 0 }}><TeamOutlined style={{ marginRight: 8, color: '#1890ff' }} />Customers</Title>
           <Text type="secondary">Manage your customers, contacts and receivables</Text>
         </div>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => load(1, pagination.pageSize, search)}>Refresh</Button>
-          <Button icon={<ImportOutlined />} onClick={() => setImportVisible(true)}>Import CSV</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalVisible(true)}
-            style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(24,144,255,0.35)', fontWeight: 600 }}>Add Customer</Button>
-        </Space>
       </div>
 
       {/* Stat tiles */}
@@ -211,17 +256,22 @@ const handleDelete = async (id) => {
 
       {/* Table card */}
       <Card size="small" style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0' }} bodyStyle={{ padding: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap' }}>
-          <Input.Search
-            placeholder="Search customers, email, company..."
-            prefix={<SearchOutlined />}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            onSearch={handleSearch}
-            style={{ width: 300, marginRight: 'auto' }}
-            allowClear
-          />
-        </div>
+        <ListToolbar
+          searchPlaceholder="Search by name, company, email, phone..."
+          searchValue={search}
+          onSearchChange={setSearch}
+          onSearch={handleSearch}
+          statusValue={statusFilter}
+          onStatusChange={setStatusFilter}
+          onExport={handleExport}
+          exportLoading={exporting}
+          onRefresh={handleRefresh}
+          refreshLoading={loading}
+          primaryAction={
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalVisible(true)}
+              style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(24,144,255,0.35)', fontWeight: 600 }}>Add Customer</Button>
+          }
+        />
         <Table
           dataSource={customers}
           columns={columns}
@@ -258,15 +308,6 @@ const handleDelete = async (id) => {
           />
         </Form>
       </Modal>
-
-      <CsvImportModal
-        visible={importVisible}
-        onClose={() => setImportVisible(false)}
-        title="Import Customers"
-        description="Paste a QuickBooks customer CSV export. Recognizes 'Customer', 'Company', 'Main Phone', 'Main Email', 'Bill to 1..5', 'First/M.I./Last Name', 'Alt. Phone', 'Active Status' and 'Balance / Balance Total' columns."
-        importFn={(csv, opts) => window.electronAPI.importCustomersCsv(csv, opts)}
-        onImported={() => load(1, pagination.pageSize, search)}
-      />
     </div>
   );
 };

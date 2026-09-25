@@ -6,13 +6,15 @@ import {
 import {
   DollarOutlined, PrinterOutlined, EditOutlined, DeleteOutlined,
   ReloadOutlined, SearchOutlined, WalletOutlined, FileTextOutlined,
-  PlusOutlined, LinkOutlined
+  PlusOutlined, LinkOutlined, RollbackOutlined
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
 import ReceivePaymentModal from './ReceivePaymentModal';
 import PaymentDetailsModal from './PaymentDetailsModal';
 import ApplyCreditModal from './ApplyCreditModal';
+import RefundPaymentModal from './RefundPaymentModal';
+import RefundInvoiceModal from './RefundInvoiceModal';
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -55,6 +57,11 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
   const [applyRecord, setApplyRecord] = useState(null);
   const [customerName, setCustomerName] = useState('');
   const [subTab, setSubTab] = useState('all');
+  const [refunds, setRefunds] = useState([]);
+  const [refundPayment, setRefundPayment] = useState(null);
+  const [refundPaymentModal, setRefundPaymentModal] = useState(false);
+  const [refundInvoiceModal, setRefundInvoiceModal] = useState(false);
+  const [refundChooser, setRefundChooser] = useState(false);
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
@@ -67,6 +74,10 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
         data = await window.electronAPI?.customerPaymentsList?.(customerId) || [];
         const bal = await window.electronAPI?.customerPaymentsBalance?.(customerId);
         setBalance(bal);
+        try {
+          const rfs = await window.electronAPI?.customerRefundsByCustomer?.(customerId);
+          setRefunds(Array.isArray(rfs) ? rfs.filter(r => String(r.status || '').toLowerCase() !== 'reversed') : []);
+        } catch { setRefunds([]); }
         if (customerName === '') {
           const cust = await window.electronAPI?.getSingleCustomer?.(customerId);
           if (cust) {
@@ -176,6 +187,19 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
 
   const unappliedList = payments.filter(p => Number(p.unapplied || 0) > 0.005);
 
+  // Refunded total per payment (non-reversed) → drives the Refunded/Net/Status columns.
+  const refundedByPayment = {};
+  refunds.forEach(r => {
+    const pid = Number(r.payment_id);
+    if (pid) refundedByPayment[pid] = (refundedByPayment[pid] || 0) + Number(r.amount || 0);
+  });
+  const refundStatusOf = (p) => {
+    const ref = refundedByPayment[Number(p.id)] || 0;
+    if (ref <= 0.005) return 'Applied';
+    return Number(p.amount || 0) - ref <= 0.005 ? 'Refunded' : 'Partially Refunded';
+  };
+  const openRefundForPayment = (record) => { setRefundPayment(record); setRefundPaymentModal(true); };
+
   const columns = [
     {
       title: 'Date', dataIndex: 'date', key: 'date', width: 100,
@@ -210,6 +234,20 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
       render: (v) => v ? <Tag color={methodColor[v] || 'default'}>{v}</Tag> : <Text type="secondary">—</Text>,
     },
     {
+      title: 'Refunded', key: 'refunded', width: 110, align: 'right',
+      render: (_, r) => {
+        const ref = refundedByPayment[Number(r.id)] || 0;
+        return ref > 0.005 ? <Text strong style={{ color: '#cf1322' }}>-{fmt(ref, cSym)}</Text> : <Text type="secondary">{fmt(0, cSym)}</Text>;
+      },
+    },
+    {
+      title: 'Status', key: 'refundStatus', width: 140,
+      render: (_, r) => {
+        const s = refundStatusOf(r);
+        return <Tag color={s === 'Refunded' ? 'red' : s === 'Partially Refunded' ? 'orange' : 'green'}>{s}</Tag>;
+      },
+    },
+    {
       title: 'Reference', dataIndex: 'reference', key: 'reference',
       render: (v) => v || <Text type="secondary">—</Text>,
     },
@@ -222,6 +260,9 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
             <Button size="small" type="primary" title="Apply credit to an invoice" icon={<LinkOutlined />} onClick={() => { setApplyRecord(record); setApplyModal(true); }} />
           )}
           <Button size="small" icon={<PrinterOutlined />} onClick={() => handlePrint(record)} />
+          {Number(record.amount || 0) - (refundedByPayment[Number(record.id)] || 0) > 0.005 && (
+            <Button size="small" title="Refund this payment" icon={<RollbackOutlined />} onClick={() => openRefundForPayment(record)} />
+          )}
           <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
           <Popconfirm title="Delete this payment?" onConfirm={() => handleDelete(record.id)} okText="Delete" okType="danger">
             <Button size="small" danger icon={<DeleteOutlined />} />
@@ -241,10 +282,12 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
           {[
             { title: 'Total Invoiced',    value: balance.invoicedTotal,    icon: <FileTextOutlined />, color: '#1890ff' },
             { title: 'Total Paid',        value: balance.paidTotal,        icon: <DollarOutlined />,  color: '#52c41a' },
+            { title: 'Refunded',          value: balance.refundedTotal,    icon: <RollbackOutlined />, color: '#cf1322' },
+            { title: 'Net Payments',      value: balance.netPaidTotal != null ? balance.netPaidTotal : balance.paidTotal, icon: <DollarOutlined />, color: '#13c2c2' },
             { title: 'Remaining Balance', value: balance.remainingBalance, icon: <WalletOutlined />,  color: balance.remainingBalance > 0 ? '#fa541c' : '#52c41a' },
             { title: 'Unapplied Credits', value: balance.unappliedCredits, icon: <DollarOutlined />,  color: '#faad14' },
           ].map((s, i) => (
-            <Col xl={6} lg={12} md={12} sm={12} xs={24} key={i}>
+            <Col xl={4} lg={8} md={8} sm={12} xs={24} key={i}>
               <Card size="small" bodyStyle={{ padding: '12px 16px' }} style={{ borderTop: `3px solid ${s.color}` }}>
                 <Statistic
                   title={s.title} prefix={s.icon}
@@ -274,6 +317,9 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
           <Space>
             <Text type="secondary">{filtered.length} records · {fmt(totalPaid, cSym)} total</Text>
             <Button icon={<ReloadOutlined />} onClick={load}>Refresh</Button>
+            {customerId && (
+              <Button icon={<RollbackOutlined />} onClick={() => setRefundChooser(true)}>Refund</Button>
+            )}
             {customerId && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setReceiveModal(true)}>Add Payment</Button>
             )}
@@ -363,6 +409,60 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
         onClose={() => setDetailModal(false)}
         onPrint={handlePrint}
       />
+
+      {/* Refund chooser */}
+      <Modal
+        title={<span><RollbackOutlined style={{ marginRight: 8 }} />Refund Customer</span>}
+        visible={refundChooser}
+        onCancel={() => setRefundChooser(false)}
+        footer={null}
+        width={460}
+        destroyOnClose
+      >
+        <Text type="secondary">Choose what to refund. A refund creates a NEW transaction — the original payment/invoice is preserved.</Text>
+        <div style={{ marginTop: 12 }}>
+          <Select
+            style={{ width: '100%', marginBottom: 8 }}
+            placeholder={payments.length ? 'Select a payment to refund' : 'No payments to refund'}
+            value={refundPayment?.id}
+            onChange={(id) => setRefundPayment(payments.find(p => Number(p.id) === Number(id)) || null)}
+            showSearch optionFilterProp="children"
+          >
+            {payments.map(p => (
+              <Option key={p.id} value={p.id}>{`${pmtNo(p.id)} · ${p.date ? moment(p.date).format('MM/DD/YYYY') : ''} · ${fmt(p.amount, cSym)}`}</Option>
+            ))}
+          </Select>
+          <Button block type="primary" disabled={!refundPayment} onClick={() => { setRefundChooser(false); setRefundPaymentModal(true); }}>
+            Refund Selected Payment
+          </Button>
+          <Button block style={{ marginTop: 8 }} onClick={() => { setRefundChooser(false); setRefundInvoiceModal(true); }}>
+            Refund / Credit an Invoice
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Refund Payment modal */}
+      {customerId && (
+        <RefundPaymentModal
+          payment={refundPayment}
+          customerId={customerId}
+          customerName={customerName || payments[0]?.customerName}
+          visible={refundPaymentModal}
+          onClose={() => setRefundPaymentModal(false)}
+          onSuccess={refreshAll}
+        />
+      )}
+
+      {/* Refund Invoice modal */}
+      {customerId && (
+        <RefundInvoiceModal
+          customerId={customerId}
+          customerName={customerName || payments[0]?.customerName}
+          visible={refundInvoiceModal}
+          onClose={() => setRefundInvoiceModal(false)}
+          onSuccess={refreshAll}
+        />
+      )}
 
       {/* Edit Modal */}
       <Modal

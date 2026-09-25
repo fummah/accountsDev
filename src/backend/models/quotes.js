@@ -1,6 +1,7 @@
 // src/backend/models/Quotes.js
 const db = require('./dbmgr.js');
 const { recalcInvoiceFinancials } = require('../services/invoiceFinancials');
+const { filterDocumentLines } = require('../services/documentLines');
 const {
   QUOTE_STATUS,
   INVOICE_STATUS,
@@ -79,6 +80,34 @@ const Quotes = {
     FOREIGN KEY (quote_id) REFERENCES quotes(id)
   )`;
     db.prepare(stmt).run();
+    // Line-level sales-tax snapshot (defaults from the Item's Sales Tax Code).
+    try {
+      const cols = new Set(db.prepare("PRAGMA table_info('quote_lines')").all().map(r => r.name));
+      const add = (c, ddl) => { if (!cols.has(c)) db.prepare(`ALTER TABLE quote_lines ADD COLUMN ${c} ${ddl}`).run(); };
+      add('item_type', 'TEXT');
+      add('tax_rate_id', 'INTEGER');
+      add('tax_rate', 'REAL DEFAULT 0');
+      add('tax_amount', 'REAL DEFAULT 0');
+    } catch (e) { console.error('[quotes] quote_lines tax migration failed:', e); }
+  },
+
+  /** The item accounting/tax snapshot written onto a quote line at creation. */
+  productSnapshot: (productId) => {
+    const empty = { item_type: null, tax_rate_id: null, tax_rate: 0 };
+    const pid = Number(productId);
+    if (!pid) return empty;
+    try {
+      const p = db.prepare(`
+        SELECT p.type, p.sales_tax_rate_id, v.vat_percentage
+        FROM products p LEFT JOIN vat v ON v.id = p.sales_tax_rate_id
+        WHERE p.id = ?`).get(pid);
+      if (!p) return empty;
+      return {
+        item_type: p.type || null,
+        tax_rate_id: p.sales_tax_rate_id != null ? Number(p.sales_tax_rate_id) : null,
+        tax_rate: Number(p.vat_percentage) || 0,
+      };
+    } catch { return empty; }
   },
   
   // Insert a new Quote.
@@ -112,17 +141,22 @@ const Quotes = {
 
     if (result.changes > 0) {
       const quoteId = result.lastInsertRowid;
-      const linesArr = Array.isArray(quoteLines) ? quoteLines : [];
+      // Never persist the empty convenience row (or a legacy blank row).
+      const linesArr = filterDocumentLines(quoteLines);
       if (linesArr.length > 0) {
-        const quoteLineStmt = db.prepare('INSERT INTO quote_lines (quote_id, product, description,quantity,rate, amount) VALUES (?, ?, ?, ?, ?, ?)');
+        const quoteLineStmt = db.prepare('INSERT INTO quote_lines (quote_id, product, description,quantity,rate, amount, item_type, tax_rate_id, tax_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         for (const line of linesArr) {
+          const snap = Quotes.productSnapshot(line.product_id || line.product);
           quoteLineStmt.run(
             quoteId,
             line.product_id || line.product || null,
             String(line.description || ''),
             Number(line.quantity) || 1,
             Number(line.rate) || 0,
-            Number(line.amount) || 0
+            Number(line.amount) || 0,
+            snap.item_type,
+            line.taxRateId != null ? Number(line.taxRateId) : snap.tax_rate_id,
+            Number.isFinite(Number(line.taxRate)) && Number(line.taxRate) !== 0 ? Number(line.taxRate) : snap.tax_rate
           );
         }
       }
@@ -296,7 +330,8 @@ const Quotes = {
   // discarded, and the stored lifecycle value is preserved untouched.
   updateQuote : async (quoteData) => {
     const { id, lines, quoteLines, ...quoteDetails } = quoteData;
-    const lineItems = lines || quoteLines || [];
+    // Drop empty convenience rows before they are re-inserted.
+    const lineItems = filterDocumentLines(lines || quoteLines || []);
 
     try {
       db.prepare(
@@ -323,16 +358,20 @@ const Quotes = {
   
       // Insert updated lines
       const insertLine = db.prepare(
-        `INSERT INTO quote_lines (quote_id, product, description, quantity, rate, amount)
-         VALUES (?, ?, ?, ?, ?, ?)`);
+        `INSERT INTO quote_lines (quote_id, product, description, quantity, rate, amount, item_type, tax_rate_id, tax_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const line of lineItems) {
+        const snap = Quotes.productSnapshot(line.product_id || line.product);
         insertLine.run(
           Number(id),
           line.product_id || line.product || null,
           String(line.description || ''),
           Number(line.quantity) || 1,
           Number(line.rate) || 0,
-          Number(line.amount) || 0
+          Number(line.amount) || 0,
+          snap.item_type,
+          line.taxRateId != null ? Number(line.taxRateId) : snap.tax_rate_id,
+          Number.isFinite(Number(line.taxRate)) && Number(line.taxRate) !== 0 ? Number(line.taxRate) : snap.tax_rate
         );
       }
   

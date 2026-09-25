@@ -1,5 +1,5 @@
 // /backend/preload.js
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   //Users
   getAllUsers: () => ipcRenderer.invoke('get-users'),
@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   //Customers
   getAllCustomers: () => ipcRenderer.invoke('get-customers'),
   getCustomersPaginated: (page, pageSize, search, status) => ipcRenderer.invoke('get-customers-paginated', page, pageSize, search, status),
+  getCustomersForExport: (search, status) => ipcRenderer.invoke('get-customers-for-export', search, status),
   getCustomerReport: () => ipcRenderer.invoke('get-customer-report'),
   getSingleCustomer: (customer_id) => ipcRenderer.invoke('get-singleCustomer',customer_id),
   updateCustomer: (customerData) => ipcRenderer.invoke('updatecustomer',customerData),
@@ -46,13 +47,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAllExpenses: () => ipcRenderer.invoke('get-expenses'),
   getExpensesPaginated: (page, pageSize, search) => ipcRenderer.invoke('get-expenses-paginated', page, pageSize, search),
   getSingleExpense: (id) => ipcRenderer.invoke('get-single-expense', id),
+getBillPrint: (id) => ipcRenderer.invoke('get-bill-print', id),
   getOpenBills: (payeeId) => ipcRenderer.invoke('get-open-bills', payeeId),
   updateExpense: (expenseData) => ipcRenderer.invoke('updateexpense',expenseData),
   insertExpense: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines,due_date,memo,terms) => ipcRenderer.invoke('insert-expense', payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines,due_date,memo,terms),
   createExpenseWithApproval: (payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines) => 
     ipcRenderer.invoke('expense-create-with-approval', payee,payment_account,payment_date, payment_method, ref_no,category,entered_by,approval_status,expenseLines),
-  markExpensePaid: (id) => ipcRenderer.invoke('mark-expense-paid', id),
-//Quotes
+  markExpensePaid: (id) => ipcRenderer.invoke('mark-expense-paid', id),//Quotes
 getAllQuotes: () => ipcRenderer.invoke('get-quotes'),
 getQuotesPaginated: (page, pageSize, search, status, dateFrom, dateTo, expFrom, expTo) => ipcRenderer.invoke('get-quotes-paginated', page, pageSize, search, status, dateFrom, dateTo, expFrom, expTo),
 getSingleQuote: (quote_id) => ipcRenderer.invoke('get-singleQuote',quote_id),
@@ -92,6 +93,25 @@ deleteProductCategory: (id) => ipcRenderer.invoke('delete-product-category', id)
 getProductTypes: () => ipcRenderer.invoke('get-product-types'),
 insertProductType: (name) => ipcRenderer.invoke('insert-product-type', name),
 deleteProductType: (id) => ipcRenderer.invoke('delete-product-type', id),
+//Item master (Products & Services redesign)
+getItemMaster: (id) => ipcRenderer.invoke('get-item-master', id),
+getItemDetail: (id) => ipcRenderer.invoke('get-item-detail', id),
+getItemHistory: (id, filters) => ipcRenderer.invoke('get-item-history', id, filters),
+saveItemMaster: (data) => ipcRenderer.invoke('save-item-master', data),
+getItemTypeCounts: () => ipcRenderer.invoke('get-item-type-counts'),
+getItemSubcategories: (category) => ipcRenderer.invoke('get-item-subcategories', category),
+insertItemSubcategory: (category, name) => ipcRenderer.invoke('insert-item-subcategory', category, name),
+getUnitsOfMeasure: () => ipcRenderer.invoke('get-units-of-measure'),
+insertUnitOfMeasure: (name) => ipcRenderer.invoke('insert-unit-of-measure', name),
+//Purchase Orders + Goods Receipts
+getPurchaseOrders: (filters) => ipcRenderer.invoke('get-purchase-orders', filters),
+getPurchaseOrder: (id) => ipcRenderer.invoke('get-purchase-order', id),
+savePurchaseOrder: (data) => ipcRenderer.invoke('save-purchase-order', data),
+setPurchaseOrderStatus: (id, status) => ipcRenderer.invoke('set-purchase-order-status', id, status),
+getOpenPurchaseOrders: (vendorId) => ipcRenderer.invoke('get-open-purchase-orders', vendorId),
+receivePurchaseOrder: (poId, payload) => ipcRenderer.invoke('receive-purchase-order', poId, payload),
+getGoodsReceipt: (id) => ipcRenderer.invoke('get-goods-receipt', id),
+getVendorActivity: (vendorId) => ipcRenderer.invoke('get-vendor-activity', vendorId),
 //Vat
 getAllVat: () => ipcRenderer.invoke('get-vat'),
 updateVat: (vatData) => ipcRenderer.invoke('updatevat',vatData),
@@ -162,6 +182,7 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   deleteTransaction: (id) => ipcRenderer.invoke('delete-transaction', id),
   voidTransaction: (id) => ipcRenderer.invoke('void-transaction', id),
   deleteCheck: (id) => ipcRenderer.invoke('delete-check', id),
+  getCheckBillApplications: (id) => ipcRenderer.invoke('get-check-bill-applications', id),
   markCheckPrinted: (id, printed) => ipcRenderer.invoke('mark-check-printed', id, printed),
   getTrialBalance: (startDate, endDate) => ipcRenderer.invoke('get-trial-balance', startDate, endDate),
   getTrialBalanceConsolidated: (payload) => ipcRenderer.invoke('get-trial-balance-consolidated', payload),
@@ -266,6 +287,15 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   customerPaymentsAll:     (filters)    => ipcRenderer.invoke('customer-payments-all', filters),
   customerPaymentUpdate:   (id, data)   => ipcRenderer.invoke('customer-payment-update', id, data),
   customerPaymentDelete:   (id)         => ipcRenderer.invoke('customer-payment-delete', id),
+// Customer refunds
+customerRefundCreate:    (payload)    => ipcRenderer.invoke('customer-refund-create', payload),
+customerRefundPreview:   (paymentId, amount) => ipcRenderer.invoke('customer-refund-preview', paymentId, amount),
+customerRefundable:      (paymentId)  => ipcRenderer.invoke('customer-refundable', paymentId),
+customerRefundsByCustomer: (customerId) => ipcRenderer.invoke('customer-refunds-by-customer', customerId),
+customerRefundsByPayment: (paymentId) => ipcRenderer.invoke('customer-refunds-by-payment', paymentId),
+customerRefundGet:       (id)         => ipcRenderer.invoke('customer-refund-get', id),
+customerRefundReverse:   (id)         => ipcRenderer.invoke('customer-refund-reverse', id),
+invoiceRefundCreate:     (payload)    => ipcRenderer.invoke('invoice-refund-create', payload),
   customerPaymentCreate:   (data)       => ipcRenderer.invoke('customer-payment-create', data),
   customerPaymentApply:    (paymentId, invoiceId, amount) => ipcRenderer.invoke('customer-payment-apply', paymentId, invoiceId, amount),
   customerPaymentAllocations: (paymentId) => ipcRenderer.invoke('customer-payment-allocations', paymentId),
@@ -279,6 +309,18 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   uploadDocument: (payload) => ipcRenderer.invoke('document-upload', payload),
   openDocument: (id) => ipcRenderer.invoke('document-open', id),
   deleteDocument: (id) => ipcRenderer.invoke('document-delete', id),
+  // Open a file the user just picked in THIS session (pending attachment).
+  // The path comes from Electron's own file picker via webUtils — never a
+  // renderer-supplied or stored path. The main process still verifies it exists.
+  openLocalAttachment: (file) => {
+    try {
+      const p = webUtils.getPathForFile(file);
+      if (!p) return Promise.resolve({ success: false, error: 'No local path for the selected file' });
+      return ipcRenderer.invoke('attachment-open-local', p);
+    } catch (e) {
+      return Promise.resolve({ success: false, error: e.message });
+    }
+  },
 
   // Recurring Transactions
   getRecurringTransactions: () => ipcRenderer.invoke('get-recurring-transactions'),
@@ -513,6 +555,7 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   journalAnchor: (entryId) => ipcRenderer.invoke('journal-anchor', entryId),
   journalRepostAll: () => ipcRenderer.invoke('journal-repost-all'),
   billPay: (payload) => ipcRenderer.invoke('bill-pay', payload),
+billSettleWithCredits: (payload) => ipcRenderer.invoke('bill-settle-with-credits', payload),
 
   // Vendor Credits
   vendorCreditsList: (supplierId) => ipcRenderer.invoke('vendor-credits-list', supplierId),
@@ -520,6 +563,8 @@ deleteRecord: (id,table) => ipcRenderer.invoke('deletingrecord', id,table),
   vendorCreditsCreate: (data) => ipcRenderer.invoke('vendor-credits-create', data),
   vendorCreditsApply: (creditId, expenseId, amount) => ipcRenderer.invoke('vendor-credits-apply', { creditId, expenseId, amount }),
   vendorCreditsVoid: (id) => ipcRenderer.invoke('vendor-credits-void', id),
+vendorCreditApplications: (creditId) => ipcRenderer.invoke('vendor-credits-applications', creditId),
+billCreditApplications: (expenseId) => ipcRenderer.invoke('bill-credit-applications', expenseId),
   // AI Assistant
   assistantAsk: (question) => ipcRenderer.invoke('assistant-ask', question),
 

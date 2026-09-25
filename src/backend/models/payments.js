@@ -368,12 +368,22 @@ const Payments = {
     const paidTotal      = Number(paid?.total      || 0);
     const appliedTotal   = Number(applied?.total   || 0);
 
+    // Refunds reduce the customer's NET payments (the original payments remain).
+    let refundedTotal = 0;
+    try {
+      refundedTotal = Number(db.prepare(
+        "SELECT COALESCE(SUM(amount),0) AS total FROM customer_refunds WHERE customer_id = ? AND status != 'Reversed'"
+      ).get(customerId)?.total || 0);
+    } catch { refundedTotal = 0; }
+
     return {
       invoicedTotal,
       paidTotal,
       appliedTotal,
+      refundedTotal,
+      netPaidTotal: paidTotal - refundedTotal,
       remainingBalance: invoicedTotal - appliedTotal,
-      unappliedCredits: Math.max(0, paidTotal - appliedTotal),
+      unappliedCredits: Math.max(0, (paidTotal - refundedTotal) - appliedTotal),
     };
   },
 

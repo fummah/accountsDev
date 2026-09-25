@@ -1,0 +1,54 @@
+{
+  "_comment": "SINGLE canonical Item Type capability definition. Consumed by src/backend/services/itemTypes.js AND src/frontend/src/utils/itemTypes.js. Every stock/accounting/UI decision derives from here; never maintain a parallel type list anywhere else.",
+  "types": {
+    "INVENTORY_PART": {
+      "code": "INVENTORY_PART",
+      "label": "Inventory Part",
+      "tracksQuantity": true,
+      "sellable": true,
+      "purchasable": true,
+      "needsInventoryAsset": true,
+      "needsCOGS": true,
+      "requiresIncomeAccount": true,
+      "requiresInventoryAccounts": true,
+      "sections": ["basic", "purchase", "sales", "inventory"]
+    },
+    "NON_INVENTORY_PART": {
+      "code": "NON_INVENTORY_PART",
+      "label": "Non-Inventory Part",
+      "tracksQuantity": false,
+      "sellable": true,
+      "purchasable": true,
+      "needsInventoryAsset": false,
+      "needsCOGS": false,
+      "requiresIncomeAccount": true,
+      "requiresInventoryAccounts": false,
+      "sections": ["basic", "purchase", "sales"]
+    },
+    "SERVICE": {
+      "code": "SERVICE",
+      "label": "Service",
+      "tracksQuantity": false,
+      "sellable": true,
+      "purchasable": true,
+      "needsInventoryAsset": false,
+      "needsCOGS": false,
+      "requiresIncomeAccount": true,
+      "requiresInventoryAccounts": false,
+      "sections": ["basic", "purchase", "sales"]
+    }
+  },
+  "legacyTypeMap": {
+    "product": "INVENTORY_PART",
+    "raw material": "INVENTORY_PART",
+    "asset": "INVENTORY_PART",
+    "bundle": "INVENTORY_PART",
+    "inventory part": "INVENTORY_PART",
+    "inventory_part": "INVENTORY_PART",
+    "non-inventory part": "NON_INVENTORY_PART",
+    "non inventory part": "NON_INVENTORY_PART",
+    "non_inventory_part": "NON_INVENTORY_PART",
+    "noninventory part": "NON_INVENTORY_PART",
+    "service": "SERVICE"
+  }
+}

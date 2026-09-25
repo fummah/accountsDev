@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Table, Space, message, Divider, Row, Col, Modal } from 'antd';
+import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Table, Space, message, Divider, Row, Col, Modal, Tooltip } from 'antd';
 import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined, SettingOutlined, MailOutlined, UserOutlined, FileTextOutlined, UnorderedListOutlined, MessageOutlined } from '@ant-design/icons';
 import { handleDocumentPDF } from '../shared/generateDocumentPDF';
 import SendEmailModal from '../shared/SendEmailModal';
 import { confirmSavedDocumentEdit, confirmPaymentImpact, confirmFinancialImpact, useUnsavedChanges } from '../shared/documentEditGuard';
 import CustomerContactFields from '../shared/CustomerContactFields';
 import { deriveDisplayName } from '../../../utils/contactIdentity';
+import { tracksInventory } from '../../../utils/itemTypes';
 import { resolveTaxRateFields } from '../../../utils/taxRate';
 import {
   FormSection, FormGrid, FormCol, DocumentActionBar, TotalsBlock, FORM_ITEM_STYLE,
@@ -14,7 +15,7 @@ import {
 import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
-import { ensureTrailingEmptyLine, removeLineAndEnsureEmpty, collapseToSingleTrailingEmpty } from '../../../utils/lineItems';
+import { ensureTrailingEmptyLine, removeLineItem, normalizeDocumentLines, collapseToSingleTrailingEmpty } from '../../../utils/lineItems';
 
 import AccountSelect from '../../shared/AccountSelect';
 import { InvoiceStatusBadge } from '../../StatusBadge';
@@ -356,7 +357,9 @@ const CreateInvoice = () => {
         const custId = (inv.customer_id || inv.customer) != null ? Number(inv.customer_id || inv.customer) : null;
         setSelectedCustomerId(custId);
         if (Array.isArray(inv.lines) && inv.lines.length > 0) {
-          const loaded = inv.lines.map((l, i) => ({
+          // Drop any legacy blank rows before editing, then add exactly ONE
+          // convenience row so the form never shows multiple empty lines.
+          const loaded = normalizeDocumentLines(inv.lines).map((l, i) => ({
             key: Date.now() + i,
             description: l.description || '',
             quantity: l.quantity || 1,
@@ -387,7 +390,10 @@ const CreateInvoice = () => {
   };
 
   const removeLine = (key) => {
-    runEditGuard(() => setLines(prev => removeLineAndEnsureEmpty(prev, l => l.key !== key, makeEmptyLine)));
+    // Deleting a line — including the auto-created blank convenience row —
+    // actually removes it. A trailing blank is NOT force-recreated here; the
+    // next product selection (or "Add Line") provides one again.
+    runEditGuard(() => setLines(prev => removeLineItem(prev, l => l.key !== key, makeEmptyLine)));
   };
 
   const updateLine = (key, field, value) => {
@@ -409,8 +415,17 @@ const CreateInvoice = () => {
       )));
       return;
     }
-    const desc = prod.description || prod.name || '';
-    const rate = Number(prod.selling_price || prod.price || 0);
+    const desc = prod.sales_description || prod.description || prod.name || '';
+    const rate = Number(prod.price || 0);
+    // Sales tax defaults from the Item Master's Sales Tax Code when the invoice
+    // has no explicit rate yet. The line also snapshots the rate on the backend.
+    const prodTax = prod.sales_tax_rate_id != null
+      ? vatRates.find(v => Number(v.id) === Number(prod.sales_tax_rate_id))
+      : null;
+    if (prodTax && !(Number(form.getFieldValue('vat')) > 0)) {
+      form.setFieldsValue({ vat: Number(prodTax.vat_percentage) || 0 });
+      setVatPercent(Number(prodTax.vat_percentage) || 0);
+    }
     runEditGuard(() => setLines(prev => {
       const updated = prev.map(l => {
         if (l.key !== key) return l;
@@ -455,8 +470,10 @@ const CreateInvoice = () => {
       const statement_message = vals.statement_message || '';
       const number = vals.number || '';
       const vat = Number(vals.vat) || 0;
-      const invoiceLines = lines.filter(l => l.description).map(l => ({
-        description: l.description,
+      // Only MEANINGFUL lines are saved — the blank convenience row (and any
+      // legacy blank row) is UI-only and must never become a document line.
+      const invoiceLines = normalizeDocumentLines(lines).map(l => ({
+        description: l.description || '',
         quantity: Number(l.quantity) || 1,
         rate: Number(l.rate) || 0,
         amount: Number(l.amount) || 0,
@@ -587,7 +604,7 @@ const CreateInvoice = () => {
         billingAddress: vals.billing_address || '',
         paidDate: paidDate || '',
       },
-      lines,
+      lines: normalizeDocumentLines(lines),
       subtotal,
       vatPercent: Number(vatPercent) || 0,
       vatAmount,
@@ -615,9 +632,20 @@ const CreateInvoice = () => {
 
   const customerOpen = !isEdit && !new URLSearchParams(location.search).get('customer');
 
+  // Read-only accounting preview for an item line: the Income account, plus the
+  // COGS / Inventory Asset accounts for an Inventory Part. The backend posts
+  // from the line SNAPSHOT, so this is exactly where the line will post.
+  const previewAccounting = (line) => {
+    const p = products.find(x => Number(x.id) === Number(line.product_id));
+    if (!p) return '—';
+    const nm = (id) => { const a = allAccounts.find(x => Number(x.id) === Number(id)); return a ? (a.accountName || a.name) : null; };
+    const inc = nm(p.income_account_id) || p.income_account || 'Income';
+    if (!tracksInventory(p.type)) return inc;
+    return `${inc} · ${nm(p.cogs_account_id) || 'COGS'} · ${nm(p.inventory_asset_account_id) || 'Inventory Asset'}`;
+  };
+
   const lineColumns = [
-    { title: 'Product', key: 'product', width: 180,
-      render: (_, r) => (
+    { title: 'Product', key: 'product', width: 180,      render: (_, r) => (
         <Select placeholder="Select product" size="small" allowClear style={{ width: '100%' }}
           value={r.product_id != null ? Number(r.product_id) : undefined}
           onChange={v => selectProduct(r.key, v)}
@@ -633,17 +661,19 @@ const CreateInvoice = () => {
       render: (_, r) => <InputNumber size="small" min={0} step={0.01} value={r.rate} onChange={v => updateLine(r.key, 'rate', v)} style={{ width: '100%' }} prefix={cSym} /> },
     { title: 'Amount', key: 'amount', width: 110,
       render: (_, r) => <span style={{ fontWeight: 500 }}>{cSym} {Number(r.amount || 0).toFixed(2)}</span> },
+    { title: 'Accounting', key: 'accounting', width: 200,
+      render: (_, r) => <Tooltip title={`Posts to: ${previewAccounting(r)}`}><span style={{ color: '#595959', fontSize: 12 }}>{previewAccounting(r)}</span></Tooltip> },
     { title: '', key: 'actions', width: 50,
       render: (_, r) => lines.length > 1 ? <Button size="small" danger icon={<DeleteOutlined />} onClick={() => removeLine(r.key)} /> : null },
   ];
 
   return (
     <div style={PAGE_WRAPPER_STYLE}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={handleBack} style={{ borderRadius: 8, color: '#595959', borderColor: '#d9d9d9', display: 'inline-flex', alignItems: 'center' }}>Back</Button>
-          <h2 style={{ margin: 0 }}>{isEdit ? `Edit Invoice #${id}` : 'Create Invoice'}</h2>
-        </Space>
+      <div className="al-page-head" style={{ marginBottom: 16 }}>
+        <div className="al-page-head-left">
+          <Button icon={<ArrowLeftOutlined />} onClick={handleBack} style={{ borderRadius: 8, color: '#595959', borderColor: '#d9d9d9' }}>Back</Button>
+          <h2>{isEdit ? `Edit Invoice #${id}` : 'Create Invoice'}</h2>
+        </div>
         <Space wrap>
           <Button icon={<UserOutlined />} disabled={!selectedCustomerId} onClick={() => history.push(`/main/customers/details/${selectedCustomerId}`)}>View Customer</Button>
           {isEdit && (<>

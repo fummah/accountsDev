@@ -394,7 +394,7 @@ const EmployeeList = () => {
           </Button>
         }
       >
-        <Space style={{ marginBottom: 16 }}>
+        <Space className="al-list-toolbar" style={{ marginBottom: 16 }}>
           <Search
             placeholder="Search employees..."
             allowClear

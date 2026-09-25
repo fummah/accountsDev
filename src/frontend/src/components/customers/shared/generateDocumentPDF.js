@@ -1,5 +1,6 @@
 import jsPDF, { GState } from 'jspdf';
 import 'jspdf-autotable';
+import { normalizeDocumentLines } from '../../../utils/lineItems';
 
 /**
  * Professional Invoice / Quotation PDF generator.
@@ -503,6 +504,12 @@ export function generateDocumentPDF({
   y += cardH + 10;
 
   // ── Line-item table ────────────────────────────────────────────────────
+  // Drop empty convenience rows here, in ONE place, so Preview / Download /
+  // Print / email-attachment PDFs all agree — and so legacy documents that
+  // already hold a stray blank line never print one. Numbering is applied
+  // AFTER filtering, so it stays sequential (1, 2, 3 …).
+  const cleanLines = normalizeDocumentLines(lines);
+
   const colHeaders = [];
   const colAlign = [];
   const colWidth = [];
@@ -519,7 +526,7 @@ export function generateDocumentPDF({
   const colStyles = {};
   colHeaders.forEach((_, i) => { colStyles[i] = { cellWidth: colWidth[i], halign: colAlign[i] }; });
 
-  const tableBody = lines.map((l, i) => {
+  const tableBody = cleanLines.map((l, i) => {
     const row = [];
     if (T.showLineNumbers) row.push(i + 1);
     row.push(l.description || '');

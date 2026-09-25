@@ -635,7 +635,7 @@ function sourceAssertions() {
 
   // The note must appear once per form. CustomerContactFields has two mutually
   // exclusive layout branches, so it legitimately contains two.
-  const EXPECTED_NOTES = { 'CustomerContactFields.js': 2 };
+  const EXPECTED_NOTES = { 'CustomerContactFields.js': 3 };
   for (const rel of identityForms) {
     const base = path.basename(rel);
     const n = (read(rel).match(/<ContactIdentityNote/g) || []).length;

@@ -24,7 +24,7 @@
  *
  *   • Outlook      /c ipm.note /m <addr?subject=&body=> /a <path>
  *                  https://support.microsoft.com/en-us/office/lifecycle/command-line-switches-for-microsoft-office-products
- *   • Thunderbird  -compose "to='..',subject='..',message='file:///..',attachment='file:///..'"
+ *   • Thunderbird  -compose "to=..,cc=..,subject=..,format=text,body=..,attachment='file:///..'"
  *                  https://kb.mozillazine.org/Command_line_arguments_(Thunderbird)
  *   • everything else (webmail, Windows Mail, browsers) — mailto:, which
  *     CANNOT carry an attachment at all. RFC 6068 has no attachment field.
@@ -75,6 +75,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { pathToFileURL } = require('node:url');
 const { spawn, execFileSync } = require('child_process');
 
 // ── Windows registry probing ────────────────────────────────────────────────
@@ -292,14 +293,18 @@ function detectMailClients() {
 /** RFC 6068: header fields must not contain CR/LF, and line breaks are %0D%0A. */
 const stripCrLf = (v) => String(v == null ? '' : v).replace(/[\r\n]+/g, ' ');
 
-function normalizeMessage({ to, subject, body, attachments } = {}) {
-  const recipients = String(to == null ? '' : to)
+function normalizeMessage({ to, cc, subject, body, attachments } = {}) {
+  const parseList = (v) => String(v == null ? '' : v)
     .split(/[;,]/)
     .map((s) => s.replace(/\s+/g, ''))
     .filter(Boolean);
+  const recipients = parseList(to);
+  const ccRecipients = parseList(cc);
   return {
     to: recipients.join(','),
     recipients,
+    cc: ccRecipients.join(','),
+    ccRecipients,
     subject: stripCrLf(subject == null ? '' : subject),
     // Normalise CRLF/CR to LF, then to the wire form for mailto.
     body: String(body == null ? '' : body).replace(/\r\n?/g, '\n'),
@@ -339,54 +344,89 @@ function buildMailtoUri(msg) {
 }
 
 /**
- * file:/// URL with every path segment percent-encoded.
+ * file:/// URL for a native path, built with Node's standard `pathToFileURL`
+ * (never a hand-rolled `'file:///' + p.replace(...)`), then percent-encoding the
+ * two characters that are unsafe inside Thunderbird's single-quoted
+ * `attachment=` value:
  *
- * The old helper was `'file:///' + p.replace(/\\/g, '/')`, which left spaces
- * raw and produced `file:///C:/Users/John Smith/...` — not a valid URL.
- * Apostrophes need encoding too: Thunderbird terminates a -compose value at
- * the first `'`, so `C:\Users\O'Brien\...` would truncate the field.
+ *   '  ends the field value  -> %27
+ *   ,  separates attachments -> %2C
+ *
+ * pathToFileURL already handles spaces, `#`, `?`, `%`, non-ASCII and UNC paths,
+ * so this helper only adds the compose-field-specific escaping.
  */
 function fileUri(p) {
-  const normalized = path.resolve(String(p)).replace(/\\/g, '/');
-
-  // UNC: \\server\share\file -> file://server/share/file
-  if (normalized.startsWith('//')) {
-    const [host, ...segs] = normalized.replace(/^\/+/, '').split('/');
-    return `file://${host}/${segs.map(encodeStrict).join('/')}`;
+  let url;
+  try {
+    url = pathToFileURL(path.resolve(String(p))).href;
+  } catch {
+    // Extremely defensive fallback for a path pathToFileURL rejects.
+    url = `file:///${path.resolve(String(p)).replace(/\\/g, '/')}`;
   }
-
-  const segs = normalized.split('/');
-  const encoded = segs.map((s, i) => (i === 0 ? s : encodeStrict(s))).join('/');
-  return `file:///${encoded}`.replace(/^file:\/\/\/+/, 'file:///');
+  return url.replace(/[&',]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
 /**
- * Thunderbird cannot escape a single quote inside a -compose value, and it does
- * NOT percent-decode values (bug 900117), so `%27` would reach the reader as
- * literal text. The only safe move is to swap the character. A typographic
- * apostrophe is what a human would have typed anyway.
+ * Percent-encode a value for a DOUBLE-quoted Thunderbird -compose field.
+ *
+ * Thunderbird's own parser (GetArgs in MsgComposeCommands.js) treats a
+ * double-quoted value as URI-encoded and runs decodeURIComponent over it, while
+ * a single-quoted value is taken raw. Encoding + double quotes is therefore the
+ * only form that carries the hard characters intact:
+ *
+ *   comma      -> %2C   (a raw comma would split the field)
+ *   apostrophe -> stays '  (safe inside double quotes; it only ends a
+ *                           SINGLE-quoted value)
+ *   ampersand  -> %26
+ *   newline    -> %0A   (paragraphs survive; no literal "\n")
+ *   Unicode    -> %XX%XX (UTF-8, decoded back by Thunderbird)
+ *   quote      -> %22   (so it can never terminate the value early)
+ *
+ * The old code used `message='file:///...'` for the body and swapped `'` for a
+ * typographic quote. Both were wrong: `message=` is read by Thunderbird with
+ * `nsIFile.initWithPath()`, i.e. it expects a NATIVE path and never resolves a
+ * `file:` URI, so the compose window came up with an empty body (and often an
+ * error dialog); and swapping the apostrophe silently rewrote the customer's
+ * text ("don't" -> "don’t").
  */
-const tbValue = (v) => String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').replace(/'/g, '\u2019');
+const tbEncoded = (v) => encodeURIComponent(String(v == null ? '' : v));
+
+// A percent-encoded body is roughly 3x the raw size for non-ASCII text, and a
+// Windows command line is capped at ~32k characters. Below this the body rides
+// inline; above it, the body file is handed over with `message=` instead.
+const TB_MAX_INLINE_BODY = 6000;
 
 /**
- * Thunderbird -compose string.
+ * Thunderbird -compose specification.
  *
- * Layout rules that are easy to get wrong:
- *   • double quotes wrap the WHOLE comma-separated list (handled by spawn argv)
- *   • single quotes group the value of one field
- *   • the body is delivered through `message=<file>` (a UTF-8 text file) rather
- *     than `body='...'`, which removes newline-encoding and comma/apostrophe
- *     ambiguity from the longest, most human field entirely
- *   • `attachment` must not be the first field (bug 627999, TB <= 3.1.9)
+ * The whole spec is ONE comma-separated string, passed as the single argument
+ * after `-compose` (never split into separate process arguments). Each field is
+ * `name=value`; see tbEncoded() for the value encoding.
+ *
+ * `format=text` keeps the body as plain text so its line breaks render as real
+ * paragraphs instead of being collapsed as HTML whitespace.
+ *
+ * The body is sent inline as an encoded `body=` field. For a body too long for
+ * the command line it falls back to `message=` — but with a NATIVE path, which
+ * is what Thunderbird's parser actually expects (`nsIFile.initWithPath`); the
+ * original bug was passing a `file:` URI here, which silently produced an empty
+ * compose window.
+ *
+ * `attachment` is the one field Thunderbird resolves as a URI, so it is a
+ * single-quoted, percent-encoded `file:` URI (commas inside the list separate
+ * attachments and are only safe because each URI is encoded).
  */
-function buildThunderbirdCompose(msg, { bodyPath, attachmentPaths } = {}) {
-  const fields = [
-    `to='${tbValue(msg.to)}'`,
-    `subject='${tbValue(msg.subject)}'`,
-  ];
-  if (bodyPath) {
-    fields.push('format=text');
-    fields.push(`message='${fileUri(bodyPath)}'`);
+function buildThunderbirdCompose(msg, { attachmentPaths, bodyPath } = {}) {
+  const fields = [`to="${tbEncoded(msg.to)}"`];
+  if (msg.cc) fields.push(`cc="${tbEncoded(msg.cc)}"`);
+  if (msg.subject) fields.push(`subject="${tbEncoded(msg.subject)}"`);
+  fields.push('format=text');
+  const encodedBody = tbEncoded(msg.body);
+  if (encodedBody.length > TB_MAX_INLINE_BODY && bodyPath) {
+    // `message=` is read raw (single-quoted) as a native filesystem path.
+    fields.push(`message='${String(bodyPath).replace(/'/g, '\u2019')}'`);
+  } else {
+    fields.push(`body="${encodedBody}"`);
   }
   const files = (attachmentPaths || []).map((p) => fileUri(p));
   if (files.length) fields.push(`attachment='${files.join(',')}'`);
@@ -403,6 +443,9 @@ function buildOutlookArgs(msg, { attachmentPaths } = {}) {
   const params = [];
   if (msg.subject) params.push(`subject=${q(msg.subject)}`);
   if (msg.body) params.push(`body=${q(msg.body)}`);
+  // `cc` is additive: it is only present when the caller supplied one, so the
+  // long-standing Outlook argv for a cc-less message is byte-identical.
+  if (msg.cc) params.push(`cc=${q(msg.cc)}`);
   const mValue = msg.to + (params.length ? `?${params.join('&')}` : '');
   const args = ['/c', 'ipm.note', '/m', mValue];
   for (const p of attachmentPaths || []) args.push('/a', p);
@@ -428,19 +471,39 @@ const safeFileStem = (name) => {
   return stem || 'document';
 };
 
+/**
+ * Root directory for generated email files.
+ *
+ * Electron's `app.getPath('temp')` when running inside the app (it is the
+ * writable OS temp directory — never the app bundle, resources/ or app.asar/),
+ * falling back to `os.tmpdir()` for tests and non-Electron callers.
+ */
+function defaultTempRoot() {
+  try {
+    const { app } = require('electron');
+    if (app && typeof app.getPath === 'function') {
+      const p = app.getPath('temp');
+      if (p) return p;
+    }
+  } catch { /* not running inside Electron — fall through */ }
+  return os.tmpdir();
+}
+
 /** Remove temp folders from previous sends once they are a day old. */
 function sweepOldTempDirs() {
-  try {
-    const root = os.tmpdir();
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    for (const entry of fs.readdirSync(root)) {
-      if (!entry.startsWith('acculedger-mail-')) continue;
-      const full = path.join(root, entry);
-      try {
-        if (fs.statSync(full).mtimeMs < cutoff) fs.rmSync(full, { recursive: true, force: true });
-      } catch { /* locked by a mail client — leave it */ }
-    }
-  } catch { /* %TEMP% unreadable — nothing to sweep */ }
+  const roots = new Set([os.tmpdir(), defaultTempRoot()]);
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const root of roots) {
+    try {
+      for (const entry of fs.readdirSync(root)) {
+        if (!entry.startsWith('acculedger-mail-')) continue;
+        const full = path.join(root, entry);
+        try {
+          if (fs.statSync(full).mtimeMs < cutoff) fs.rmSync(full, { recursive: true, force: true });
+        } catch { /* locked by a mail client — leave it */ }
+      }
+    } catch { /* temp root unreadable — nothing to sweep */ }
+  }
 }
 
 /**
@@ -454,7 +517,7 @@ function sweepOldTempDirs() {
  */
 function materializeOutgoing({ body, attachments, tmpRoot } = {}) {
   sweepOldTempDirs();
-  const dir = fs.mkdtempSync(path.join(tmpRoot || os.tmpdir(), 'acculedger-mail-'));
+  const dir = fs.mkdtempSync(path.join(tmpRoot || defaultTempRoot(), 'acculedger-mail-'));
 
   const bodyPath = path.join(dir, 'body.txt');
   fs.writeFileSync(bodyPath, Buffer.from(String(body == null ? '' : body), 'utf8'));
@@ -568,15 +631,34 @@ function launchDetached(exe, args, { settleMs = 1500 } = {}) {
     let settled = false;
     let child;
     try {
-      child = spawn(exe, args, { detached: true, stdio: 'ignore' });
+      // stderr is captured (bounded) so a genuine failure — a malformed
+      // -compose string, for example — can be reported with the client's own
+      // explanation instead of a bare exit code.
+      child = spawn(exe, args, { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
     } catch (e) {
       resolve({ ok: false, error: `${name} could not be started: ${e.message}` });
       return;
     }
 
+    let stderr = '';
+    try {
+      if (child.stderr) {
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (d) => { if (stderr.length < 4000) stderr += d; });
+        child.stderr.on('error', () => { /* never let a broken pipe throw */ });
+      }
+    } catch { /* no stderr handle — fine */ }
+    const stderrTail = () => {
+      const t = stderr.trim();
+      return t ? ` ${t.slice(0, 600)}` : '';
+    };
+
     const settle = (payload) => {
       if (settled) return;
       settled = true;
+      // Detach the diagnostic pipe so it cannot keep the parent's event loop
+      // referenced after we have already reported the outcome.
+      try { if (child.stderr) child.stderr.destroy(); } catch { /* already gone */ }
       try { child.unref(); } catch { /* already gone */ }
       resolve(payload);
     };
@@ -588,18 +670,19 @@ function launchDetached(exe, args, { settleMs = 1500 } = {}) {
 
     child.once('spawn', () => {
       const pid = child.pid;
-      const timer = setTimeout(() => settle({ ok: true, pid }), settleMs);
+      const timer = setTimeout(() => settle({ ok: true, pid, stderr: stderr.trim() || null }), settleMs);
       child.once('exit', (code, signal) => {
         if (settled) return;
         clearTimeout(timer);
         if (code === 0) {
-          settle({ ok: true, pid, exitedImmediately: true, exitCode: 0 });
+          settle({ ok: true, pid, exitedImmediately: true, exitCode: 0, stderr: stderr.trim() || null });
         } else {
           settle({
             ok: false,
             pid,
             exitCode: code,
-            error: `${name} started but exited immediately (${signal ? `signal ${signal}` : `code ${code}`}) without opening a window`,
+            stderr: stderr.trim() || null,
+            error: `${name} started but exited immediately (${signal ? `signal ${signal}` : `code ${code}`}) without opening a window.${stderrTail()}`,
           });
         }
       });
@@ -805,7 +888,7 @@ function knownUnusableOutcome({ base, adapter, manualPrimary, files, safeFiles, 
  */
 function desktopOutcome({
   base, adapter, res, manualPrimary, files, safeFiles, substituteNote,
-  method, client, pathAdvice, extraWarnings = [],
+  method, client, pathAdvice, extraWarnings = [], quickExitIsNormal = false,
 }) {
   if (!res.ok) {
     // We tried and the OS refused — no process was created. The user still
@@ -834,9 +917,14 @@ function desktopOutcome({
   // process started: the PDF went along. Account-profile state is NOT required
   // for this claim — the switch attaches the file regardless, and gating on the
   // (unreliable) profile probe is what wrongly reported Outlook as unable to
-  // attach. The one thing we cannot claim is a launch that died at once.
-  const confirmed = safeFiles.length > 0 && !res.exitedImmediately;
-  if (res.exitedImmediately) {
+  // attach. The one thing we cannot claim is a launch that died at once — EXCEPT
+  // where a quick, clean exit is the client's documented hand-off behaviour.
+  // Thunderbird hands a -compose request to an already-running instance and
+  // quits with code 0; that is a success, not a failure, so it must not be
+  // reported as one (and must not dump the PDF into Downloads for manual attach).
+  const quickExitIsExpected = res.exitedImmediately && quickExitIsNormal;
+  const confirmed = safeFiles.length > 0 && (!res.exitedImmediately || quickExitIsNormal);
+  if (res.exitedImmediately && !quickExitIsNormal) {
     warnings.push(`${client} started and exited immediately, so a compose window could not be confirmed.`);
   }
 
@@ -859,6 +947,9 @@ function desktopOutcome({
     attachmentPath: primary,
     guarantee: confirmed ? 'documented-switch' : 'none',
     warning: warnings.length ? warnings.join(' ') : null,
+    exitedImmediately: !!res.exitedImmediately,
+    handoffConfirmed: quickExitIsExpected || !res.exitedImmediately,
+    stderr: res.stderr || null,
   };
 }
 
@@ -929,18 +1020,17 @@ async function sendViaDefaultMailClient(message, deps = {}) {
   // ── Thunderbird ───────────────────────────────────────────────────────────
   if (adapter.kind === 'thunderbird') {
     const safeFiles = files.attachmentPaths.filter(isHandoffSafePath);
-    const bodySafe = isHandoffSafePath(files.bodyPath);
-    const compose = buildThunderbirdCompose(msg, {
-      bodyPath: bodySafe ? files.bodyPath : null,
-      attachmentPaths: safeFiles,
-    });
+    const compose = buildThunderbirdCompose(msg, { attachmentPaths: safeFiles, bodyPath: files.bodyPath });
     const res = await launch(adapter.exe, ['-compose', compose]);
     return desktopOutcome({
       base, adapter, res, manualPrimary, files, safeFiles, substituteNote,
       method: 'thunderbird-compose',
       client: 'Mozilla Thunderbird',
       pathAdvice: "Thunderbird's -compose string cannot carry",
-      extraWarnings: bodySafe ? [] : ['The message body could not be passed on the command line; the compose window opens empty — paste the message in.'],
+      // Thunderbird legitimately exits at once (code 0) when it hands the
+      // request to an already-running instance — that is a successful hand-off,
+      // not a failed launch.
+      quickExitIsNormal: true,
     });
   }
 
@@ -1026,11 +1116,12 @@ module.exports = {
   buildThunderbirdCompose,
   buildOutlookArgs,
   fileUri,
-  tbValue,
+  tbEncoded,
   safeFileStem,
   isHandoffSafePath,
   materializeOutgoing,
   publishForManualAttach,
   downloadsDir,
+  sweepOldTempDirs,
   launchDetached,
 };

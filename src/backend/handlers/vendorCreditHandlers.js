@@ -49,6 +49,24 @@ const registerVendorCreditHandlers = () => {
       return { error: error.message };
     }
   });
+
+  ipcMain.handle('vendor-credits-applications', async (_e, creditId) => {
+    try {
+      return VendorCredits.getApplications(creditId);
+    } catch (error) {
+      console.error('Error listing credit applications:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('bill-credit-applications', async (_e, expenseId) => {
+    try {
+      return VendorCredits.getBillApplications(expenseId);
+    } catch (error) {
+      console.error('Error listing bill credit applications:', error);
+      return { error: error.message };
+    }
+  });
 };
 
 module.exports = registerVendorCreditHandlers;

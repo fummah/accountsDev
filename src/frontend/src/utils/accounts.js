@@ -190,6 +190,28 @@ export const isBankAccount = (account = {}) => {
 export const getBankAccounts = (accounts = []) =>
   (Array.isArray(accounts) ? accounts : []).filter(isBankAccount);
 
+// ── Income-account eligibility (Manual Deposit lines) ─────────────────────
+//
+// A manual deposit line credits the account that represents WHAT the money is:
+// revenue. Only the Income family is valid — the real Chart-of-Accounts Types
+// 'Income' and 'Other Income'. Decided by the account's classification, never
+// by its name, and every child/sub-account of an income parent is included (the
+// shared AccountSelect renders the hierarchy).
+const INCOME_ACCOUNT_TYPES = new Set(['income', 'other income']);
+
+export const isIncomeAccount = (account = {}) => {
+  const t = String(account.accountType || account.type || '').trim().toLowerCase();
+  return INCOME_ACCOUNT_TYPES.has(t);
+};
+
+export const getIncomeAccounts = (accounts = []) =>
+  (Array.isArray(accounts) ? accounts : []).filter(isIncomeAccount);
+
+// Canonical type names for the shared AccountSelect `allowedTypes` prop. The
+// names mirror ChartOfAccounts.js's ACCOUNT_TYPES, so the two never drift.
+export const BANK_ACCOUNT_TYPE_NAMES = ['Bank'];
+export const INCOME_ACCOUNT_TYPE_NAMES = ['Income', 'Other Income'];
+
 // ── Bill-line account eligibility ─────────────────────────────────────────
 //
 // A vendor BILL line posts to the account that represents *what was bought*

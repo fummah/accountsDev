@@ -326,11 +326,13 @@ const BASELINE = {
     'billDate', 'billNumber', 'city', 'company', 'country', 'description', 'dueDate', 'email',
     'first_name', 'last_name', 'memo', 'normalBalance', 'openingBalance', 'parentId',
     'paymentDate', 'phone', 'postal_code', 'state', 'status', 'subType', 'taxLine', 'terms',
-    'vendorId'],
+    'vendorId',
+    // Quick-add "Add New Inventory Item" modal fields captured in the same file.
+    'category', 'name', 'price', 'sku', 'stock', 'type'],
 };
 eq('Invoice field set unchanged', fieldNames(src.invoice), BASELINE.Invoice);
 eq('Quote field set unchanged', fieldNames(src.quote), BASELINE.Quote);
-eq('Bill field set unchanged', fieldNames(src.bill), BASELINE.Bill);
+eq('Bill field set unchanged', fieldNames(src.bill), [...BASELINE.Bill].sort());
 ok('Invoice: every Form.Item in the document form carries the compact spacing',
   (src.invoice.match(/style=\{FORM_ITEM_STYLE\}/g) || []).length >= 9);
 ok('Quote: every Form.Item in the document form carries the compact spacing',
@@ -363,7 +365,8 @@ ok('Bill: Clear and the mount initialiser both go through applyDueDate',
   && (src.bill.match(/applyDueDate\(/g) || []).length >= 4);
 ok('Bill: account eligibility filter still applied',
   /getBillLineAccounts\(/.test(src.bill) && /isBillLineAccount/.test(src.bill));
-ok('Bill: attachments input preserved', /fileInputRef/.test(src.bill) && /type="file"/.test(src.bill));
+ok('Bill: uses the shared AttachmentManager for attachments',
+  /<AttachmentManager/.test(src.bill) && /entityType="bill"/.test(src.bill));
 ok('Bill: paid/reclassification logic preserved',
   /isReclassification/.test(src.bill) || /Credit Card \/ Loan Reclassification/.test(src.bill));
 ok('Bill: record-payment path preserved', /Record Payment/.test(src.bill));
@@ -380,7 +383,8 @@ ok('Quote: line items still a state-driven table inside the one Form',
   /<Table/.test(src.quote) && /setLines\(/.test(src.quote));
 ok('Invoice: print/PDF path preserved', /handleDocumentPDF/.test(src.invoice));
 ok('Quote: print/PDF path preserved', /handleDocumentPDF/.test(src.quote));
-ok('Bill: document viewer preserved', /handleOpenDocument/.test(src.bill));
+ok('Bill: attachment open/remove handled by the shared component',
+  /<AttachmentManager/.test(src.bill) && /attachmentRef/.test(src.bill));
 
 // ── 12. page width + responsive contract ─────────────────────────────────────
 console.log('\n12. Page width / responsive grid\n');
@@ -396,7 +400,7 @@ ok('FormCol degrades to 2 columns on tablet',
 ok('FormGrid wraps (no horizontal scroll)', /<Row gutter=\{gutter\}/.test(src.section));
 ok('action bar wraps instead of overflowing', /flexWrap: 'wrap'/.test(src.section));
 ok('the .ant-row column regression is still neutralised in custom.css',
-  /\.ant-form-vertical \.ant-row\s*\{[^}]*flex-direction:\s*row\s*!important/.test(src.customCss));
+  /\.ant-form-vertical \.ant-row(?::not\(\.ant-form-item-row\))?\s*\{[^}]*flex-direction:\s*row\s*!important/.test(src.customCss));
 ok('the LESS source no longer forces column on .ant-row',
   !/&-vertical\s*\{[^}]*?\.ant-row\s*\{[^}]*?flex-direction:\s*column/.test(src.formLess));
 // A 7-column antd Table with `table-layout:auto` pushes the DOCUMENT wider than a phone
@@ -491,7 +495,7 @@ for (const f of importerFiles) {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
   const kitImports = new Set();
-  const reImp = /import\s+([^;]*?)\s+from\s+'([^']*shared\/FormSection)'/g;
+  const reImp = /import\s+([^;]*?)\s+from\s+'([^']*(?:shared\/FormSection|\.\/FormSection))'/g;
   let m;
   while ((m = reImp.exec(code))) {
     const clause = m[1];

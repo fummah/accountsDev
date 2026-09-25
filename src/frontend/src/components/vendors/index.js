@@ -8,6 +8,7 @@ import SupplierVendorList from './SupplierVendorList';
 import VendorDetails from './VendorDetails';
 import VendorCredits from './VendorCredits';
 import UnifiedItemList from '../shared/UnifiedItemList';
+import PurchaseOrders from './purchasing/PurchaseOrders';
 
 const VendorRoutes = ({ match }) => {
   return (
@@ -21,6 +22,7 @@ const VendorRoutes = ({ match }) => {
       <Route exact path={`${match.path}/bills/edit/:id`} component={EnterBill} />
       <Route exact path={`${match.path}/bills/pay`} component={PayBills} />
       <Route exact path={`${match.path}/credits`} component={VendorCredits} />
+      <Route exact path={`${match.path}/purchasing/purchase-orders`} component={PurchaseOrders} />
       <Route exact path={`${match.path}/items`} component={UnifiedItemList} />
     </Switch>
   );

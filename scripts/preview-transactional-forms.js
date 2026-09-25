@@ -82,10 +82,10 @@ const row = (cells) => `
   </div>`;
 
 // ── FormSection / TotalsBlock / DocumentActionBar, inline styles verbatim ────
-const SECTION = 'border:1px solid #f0f0f0;border-radius:8px;padding:12px 16px 2px;margin-bottom:12px;background:#fff';
+const SECTION = 'border:1px solid #d9d9d9;border-radius:8px;padding:12px 16px 2px;margin-bottom:12px;background:#fff';
 const HEADER = 'display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;'
   + 'letter-spacing:0.04em;text-transform:uppercase;color:#595959;line-height:18px;'
-  + 'margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f5f5f5';
+  + 'margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #e8e8e8';
 const ICON = 'font-size:13px;color:#8c8c8c;display:inline-flex;align-items:center';
 
 const section = (title, glyph, body, extra) => `

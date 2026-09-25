@@ -38,6 +38,19 @@ function registerCustomerHandlers() {
             return { error: error.message };
         }
     });
+    // Export source: every customer matching the current search + status filter,
+    // with NO pagination cap. Accepts only the plain search/status DTO strings —
+    // never raw SQL or arbitrary filter objects from the renderer.
+    ipcMain.handle('get-customers-for-export', async (event, search, status) => {
+        try {
+            const s = typeof search === 'string' ? search : '';
+            const st = typeof status === 'string' ? status : '';
+            return await Customers.getExportRows(s, st);
+        } catch (error) {
+            console.error('Error fetching customers for export:', error);
+            return { error: error.message };
+        }
+    });
     ipcMain.handle('get-customer-report', async () => {
         try {
             return await Customers.getCustomerReport();
@@ -532,6 +545,47 @@ function registerCustomerHandlers() {
             console.error('customer-payment-delete:', e);
             return { success: false, error: e.message };
         }
+    });
+
+    // ── Customer Refunds ─────────────────────────────────────────────────────
+    const CustomerRefunds = require('../models/customerRefunds');
+    ipcMain.handle('customer-refund-create', async (event, payload) => {
+        try {
+            const ctx = (() => { try { return require('../security/authz').authorize(event, { permissions: 'write:transactions' }); } catch { return null; } })();
+            return CustomerRefunds.createRefund(payload || {}, { userId: (ctx && ctx.userId) || 'system' });
+        } catch (e) { console.error('customer-refund-create:', e); return { success: false, error: e.message }; }
+    });
+    ipcMain.handle('customer-refund-preview', async (_e, paymentId, amount) => {
+        try { return CustomerRefunds.previewRefund(Number(paymentId), Number(amount)); }
+        catch (e) { return { error: e.message }; }
+    });
+    ipcMain.handle('customer-refundable', async (_e, paymentId) => {
+        try { return CustomerRefunds.getRefundable(Number(paymentId)); }
+        catch (e) { return { error: e.message }; }
+    });
+    ipcMain.handle('customer-refunds-by-customer', async (_e, customerId) => {
+        try { return CustomerRefunds.getByCustomer(Number(customerId)); }
+        catch (e) { return []; }
+    });
+    ipcMain.handle('customer-refunds-by-payment', async (_e, paymentId) => {
+        try { return CustomerRefunds.getByPayment(Number(paymentId)); }
+        catch (e) { return []; }
+    });
+    ipcMain.handle('customer-refund-get', async (_e, id) => {
+        try { return CustomerRefunds.getById(Number(id)); }
+        catch (e) { return { error: e.message }; }
+    });
+    ipcMain.handle('customer-refund-reverse', async (event, id) => {
+        try {
+            const ctx = (() => { try { return require('../security/authz').authorize(event, { permissions: 'write:transactions' }); } catch { return null; } })();
+            return CustomerRefunds.reverseRefund(Number(id), { userId: (ctx && ctx.userId) || 'system' });
+        } catch (e) { console.error('customer-refund-reverse:', e); return { success: false, error: e.message }; }
+    });
+    ipcMain.handle('invoice-refund-create', async (event, payload) => {
+        try {
+            const ctx = (() => { try { return require('../security/authz').authorize(event, { permissions: 'write:transactions' }); } catch { return null; } })();
+            return CustomerRefunds.createInvoiceRefund(payload || {}, { userId: (ctx && ctx.userId) || 'system' });
+        } catch (e) { console.error('invoice-refund-create:', e); return { success: false, error: e.message }; }
     });
 
     ipcMain.handle('invoice-payments-list', async (_e, invoiceId) => {

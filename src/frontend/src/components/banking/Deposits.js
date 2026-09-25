@@ -3,7 +3,7 @@ import { Form, Select, Input, InputNumber, DatePicker, Button, Card, Table, mess
 import { PlusOutlined, SaveOutlined, DeleteOutlined, HistoryOutlined, SearchOutlined, ReloadOutlined, MinusCircleOutlined, EyeOutlined, StopOutlined, SwapOutlined, EditOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
-import { getBankAccounts } from '../../utils/accounts';
+import { BANK_ACCOUNT_TYPE_NAMES, INCOME_ACCOUNT_TYPE_NAMES } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
 
 
@@ -24,9 +24,8 @@ const parsePartyKey = (key) => {
 const Deposits = () => {
   const { symbol: cSym } = useCurrency();
   const [form] = Form.useForm();
-  const [bankAccounts, setBankAccounts] = useState([]);
-  const [incomeAccounts, setIncomeAccounts] = useState([]);
   const [allAccounts, setAllAccounts] = useState([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
   const [pendingPayments, setPendingPayments] = useState([]);
   const [selectedPaymentIds, setSelectedPaymentIds] = useState([]);
   const [allocations, setAllocations] = useState([]);
@@ -65,20 +64,26 @@ const Deposits = () => {
 
   const loadAccounts = async () => {
     try {
-      const data = await window.electronAPI.getChartOfAccounts({ type: 'Bank' });
-      const list = Array.isArray(data) ? data : [];
+      setAccountsLoading(true);
+      // Load the FULL chart of accounts. Each selector then declares which
+      // account TYPES it accepts via AccountSelect's `allowedTypes`:
+      //   • Deposit To   → Bank only
+      //   • Deposit Line → Income + Other Income
+      // Fetching a Bank-only list here (the previous bug) meant the income
+      // filter ran over bank accounts and always returned nothing.
+      const data = await window.electronAPI.getChartOfAccounts();
+      const list = Array.isArray(data) ? data : (data?.data || []);
       setAllAccounts(list);
-      // "Deposit To" must show ONLY accounts whose real account type is BANK.
-      // Filter by the Chart of Accounts type classification — never by name text.
-      const banks = getBankAccounts(list).filter(a => (a.status || 'Active').toLowerCase() === 'active');
-      setBankAccounts(banks);
-      const income = list.filter(a => {
-        const t = (a.accountType || a.type || '').toLowerCase();
-        return (t === 'income' || t === 'other income' || t === 'cost of goods sold') && a.status === 'Active';
-      });
-      setIncomeAccounts(income);
     } catch { message.error('Failed to load accounts'); }
+    finally { setAccountsLoading(false); }
   };
+
+  // Only ACTIVE accounts are selectable (inactive/archived are never offered).
+  const activeAccounts = useMemo(
+    () => (Array.isArray(allAccounts) ? allAccounts : [])
+      .filter(a => String(a.status || 'Active').toLowerCase() === 'active'),
+    [allAccounts]
+  );
 
   const loadHistory = async () => {
     try {
@@ -452,7 +457,7 @@ const Deposits = () => {
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <Form.Item name="bankAccountId" label="Deposit To" rules={[{ required: true, message: 'Select bank account' }]}
                   style={{ minWidth: 250, flex: 2 }}>
-                  <AccountSelect accounts={bankAccounts} placeholder="Select bank account"
+                  <AccountSelect accounts={activeAccounts} allowedTypes={BANK_ACCOUNT_TYPE_NAMES} loading={accountsLoading} placeholder="Select bank account"
                     dropdownRender={menu => (
                       <>
                         {menu}
@@ -524,10 +529,13 @@ const Deposits = () => {
                       </Select>
                       <AccountSelect
                         style={{ flex: 1.5 }}
-                        accounts={incomeAccounts}
+                        accounts={activeAccounts}
+                        allowedTypes={INCOME_ACCOUNT_TYPE_NAMES}
+                        loading={accountsLoading}
                         value={a.accountId || undefined}
                         onChange={(v) => updateAllocation(a.id, 'accountId', v)}
-                        placeholder="Select category/account"
+                        placeholder="Select income account"
+                        notFoundContent="No eligible income accounts found."
                         allowClear
                       />
                       <InputNumber

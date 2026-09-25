@@ -320,80 +320,71 @@ const Transactions = {
 
   voidTransaction(id) {
     this.assertNotReconciled(id);
+    const tx = this.getById(id);
+    // A check carries accounting (and possibly bill payment allocations) that a
+    // bare status flip would leave posted. Route it through the same central
+    // reversal used by delete, but keep the row and mark it Voided.
+    if (tx && String(tx.type || '').toLowerCase() === 'check') {
+      const BillPayments = require('./billPayments');
+      const activeApps = BillPayments.getActiveForCheck(id);
+      const postedJournal = db.prepare(
+        "SELECT id FROM journal_entries WHERE source_type = 'transaction' AND source_id = ? AND status = 'Posted' LIMIT 1"
+      ).get(String(id));
+      if (activeApps.length > 0 || postedJournal) {
+        const res = BillPayments.reverseForCheck(id, { keepCheck: true, reason: 'Check voided', userId: 'system' });
+        if (res && res.success !== false) return { changes: 1, success: true, reversed: true };
+        throw new Error((res && res.error) || 'Failed to reverse the voided check');
+      }
+    }
     return db.prepare("UPDATE transactions SET status='Voided' WHERE id=?").run(id);
   },
 
-  // Permanently delete a check AND reverse its accounting impact:
-  //   1. Reverse/void the posted journal entry (DR expense / CR bank) so
-  //      account balances are restored.
-  //   2. If the check was a bill payment, un-mark the bill as paid and
-  //      restore the vendor balance.
-  //   3. Delete the check transaction record itself.
-  // Returns { success, message, reversedBill }.
+  // Permanently delete a check AND reverse its accounting impact.
+  //
+  // The reversal itself lives in ONE place — models/billPayments.js
+  // (reverseForCheck) — which:
+  //   1. reverses/voids the posted journal entry so account balances (Bank, AP)
+  //      are restored,
+  //   2. reverses the explicit payment application(s) linking the check to any
+  //      bill(s), restoring the amount applied,
+  //   3. recalculates each affected bill's paid/remaining/status from its
+  //      remaining ACTIVE payments (never a hard-coded status),
+  //   4. restores the vendor balance where the payment reduced it,
+  //   5. deletes the check transaction record,
+  //   all atomically and idempotently.
+  //
+  // Normal write checks (no bill relationship) simply reverse their own
+  // journal; no bill is touched.
+  // Returns { success, message, reversedBills }.
   deleteCheck(id) {
     this.assertNotReconciled(id);
     const check = this.getById(id);
-    if (!check) return { success: false, error: 'Check not found' };
+    if (!check) {
+      // Idempotent: a retried delete must not error and must not reverse again.
+      return { success: true, alreadyReversed: true, message: 'Check already deleted', reversedBills: [] };
+    }
     if (String(check.type || '').toLowerCase() !== 'check') {
       return { success: false, error: `Transaction #${id} is not a check` };
     }
 
-    const amount = Number(check.amount || check.debit || check.credit || 0);
-
-    // 1) Reverse the posted journal entry for this check (if any).
-    let reversedJournal = false;
-    try {
-      const je = db.prepare(
-        "SELECT id FROM journal_entries WHERE source_type = 'transaction' AND source_id = ? AND status = 'Posted' LIMIT 1"
-      ).get(String(id));
-      if (je) {
-        JournalEntries.voidEntry(je.id);
-        reversedJournal = true;
-      }
-    } catch (jErr) {
-      console.warn('[transactions.deleteCheck] journal void failed:', jErr.message);
+    const BillPayments = require('./billPayments');
+    const res = BillPayments.reverseForCheck(id, { reason: 'Check deleted', userId: 'system' });
+    if (!res || res.success === false) {
+      return { success: false, error: (res && res.error) || 'Failed to reverse the payment' };
     }
 
-    // 2) If this check was a bill payment, reverse the bill's paid status and
-    //    restore the vendor balance. Bill-payment checks are created by the
-    //    bill-pay handler with a description like:
-    //      "Bill payment to <vendor> — Bill #<expenseId>"
-    let reversedBill = null;
-    try {
-      const m = String(check.description || '').match(/Bill\s*#(\d+)/i);
-      if (m) {
-        const expenseId = Number(m[1]);
-        const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(expenseId);
-        if (expense) {
-          const paidAmt = Number(expense.paid_amount || 0);
-          const newPaid = Math.max(0, paidAmt - amount);
-          const totalLines = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM expense_lines WHERE expense_id = ?').get(expenseId);
-          const totalAmount = Number(totalLines?.total || 0);
-          const newStatus = newPaid <= 0.005 ? 'Unpaid' : (newPaid >= totalAmount - 0.005 ? 'Paid' : 'Partially Paid');
-          db.prepare('UPDATE expenses SET paid_amount = ?, approval_status = ? WHERE id = ?')
-            .run(newPaid, newStatus, expenseId);
-          // Restore vendor balance (bill-pay reduced it by the payment amount).
-          try {
-            const exp = db.prepare('SELECT payee FROM expenses WHERE id = ?').get(expenseId);
-            if (exp && exp.payee) {
-              db.prepare('UPDATE suppliers SET balance = COALESCE(balance,0) + ? WHERE id = ?').run(amount, Number(exp.payee));
-            }
-          } catch (balErr) { console.warn('[transactions.deleteCheck] vendor balance restore failed:', balErr.message); }
-          reversedBill = { expenseId, newPaid, newStatus };
-        }
-      }
-    } catch (bErr) {
-      console.warn('[transactions.deleteCheck] bill reversal failed:', bErr.message);
-    }
-
-    // 3) Delete the check transaction (also cleans up attached documents).
-    const res = this.deleteTransaction(id);
-
+    const reversedBills = Array.isArray(res.reversedBills) ? res.reversedBills : [];
+    const first = reversedBills[0];
     return {
-      success: res.changes > 0,
-      message: res.changes > 0 ? `Check #${check.reference || id} deleted and payment reversed` : 'Check not found',
-      reversedJournal,
-      reversedBill,
+      success: true,
+      message: res.alreadyReversed
+        ? `Check #${check.reference || id} was already reversed`
+        : `Check #${check.reference || id} deleted and payment reversed`,
+      reversedJournal: true,
+      reversedBill: first
+        ? { expenseId: first.expenseId, newPaid: first.paid, newStatus: first.status }
+        : null,
+      reversedBills,
     };
   },
 
@@ -891,7 +882,10 @@ Transactions.getTrialBalance = function(startDate, endDate) {
     const start = startDate || '0000-01-01';
     const end = endDate || '9999-12-31';
 
-    // Read from journal_lines (authoritative double-entry source) — same as computedBalance()
+    // Read from journal_lines (authoritative double-entry source) — same as computedBalance().
+    // The Posted/date filter must gate the SUM (via CASE), not the LEFT JOIN:
+    // putting it in the JOIN's ON clause left non-Posted lines counted, so the
+    // Trial Balance included VOID entries and disagreed with the General Ledger.
     const rows = db.prepare(`
       SELECT coa.id                               AS accountId,
              coa.name                             AS accountName,
@@ -899,17 +893,15 @@ Transactions.getTrialBalance = function(startDate, endDate) {
              coa.subType                          AS accountSubType,
              coa.number                           AS accountNumber,
              coa.normalBalance,
-             COALESCE(SUM(jl.debit),  0)          AS totalDebit,
-             COALESCE(SUM(jl.credit), 0)          AS totalCredit
+             COALESCE(SUM(CASE WHEN je.status = 'Posted' AND je.date >= ? AND je.date <= ? THEN jl.debit  ELSE 0 END), 0) AS totalDebit,
+             COALESCE(SUM(CASE WHEN je.status = 'Posted' AND je.date >= ? AND je.date <= ? THEN jl.credit ELSE 0 END), 0) AS totalCredit
       FROM chart_of_accounts coa
       LEFT JOIN journal_lines jl   ON jl.account_id = coa.id
       LEFT JOIN journal_entries je ON je.id = jl.journal_id
-                                   AND je.status = 'Posted'
-                                   AND je.date >= ? AND je.date <= ?
       WHERE coa.status = 'Active'
       GROUP BY coa.id
       ORDER BY CAST(coa.number AS INTEGER), coa.name
-    `).all(start, end);
+    `).all(start, end, start, end);
 
     return rows.map(r => {
       // Single source of truth for the normal side (services/normalBalance.js):

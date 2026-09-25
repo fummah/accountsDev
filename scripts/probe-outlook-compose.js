@@ -133,7 +133,7 @@ const MESSAGE = {
     argv: adapter.kind === 'outlook'
       ? MailClient.buildOutlookArgs(msg, { attachmentPaths: [path.join(SCRATCH_ATTACH, 'Invoice_INV-PROBE-001.pdf')] })
       : adapter.kind === 'thunderbird'
-        ? ['-compose', MailClient.buildThunderbirdCompose(msg, { bodyPath: null, attachmentPaths: [path.join(SCRATCH_ATTACH, 'Invoice_INV-PROBE-001.pdf')] })]
+        ? ['-compose', MailClient.buildThunderbirdCompose(msg, { attachmentPaths: [path.join(SCRATCH_ATTACH, 'Invoice_INV-PROBE-001.pdf')] })]
         : null,
     manualAttachDir: process.env.ACCULEDGER_MANUAL_ATTACH_DIR || path.join(os.homedir(), 'Downloads'),
     result,

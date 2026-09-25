@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Card, Table, Button, Modal, Form, DatePicker, Input, InputNumber, Select, Row, Col, Divider, Space, message, Tag, Typography, Upload, Statistic, Empty } from 'antd';
-import { PlusOutlined, DeleteOutlined, CreditCardOutlined, EditOutlined, EyeOutlined, UploadOutlined, BookOutlined, ReloadOutlined, AccountBookOutlined } from '@ant-design/icons';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { Card, Table, Button, Modal, Form, DatePicker, Input, InputNumber, Select, Row, Col, Divider, Space, message, Tag, Typography, Statistic, Empty } from 'antd';
+import { PlusOutlined, DeleteOutlined, CreditCardOutlined, EditOutlined, EyeOutlined, BookOutlined, ReloadOutlined, AccountBookOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useHistory } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
+import { sumMoney } from '../../utils/money';
 import { dedupeAccounts, buildAccountLabelMap } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
+import AttachmentManager from '../shared/AttachmentManager';
 import JournalEntryDetailModal from '../accountant/JournalEntryDetailModal';
 
 const { Option } = Select;
@@ -69,6 +71,13 @@ const parseSplitLines = (raw) => {
   return [];
 };
 
+// A split line counts toward the charge total only when it names an account AND
+// carries a positive amount. Completely blank convenience rows (no account, no
+// amount) are ignored, exactly as the backend derives the total.
+const isMeaningfulSplitLine = (l) =>
+  Boolean(l && (l.category || l.accountId)) && (Number(l && l.amount) || 0) > 0;
+
+
 const CreditCardCharges = () => {
   const history = useHistory();
   const { symbol: cSym } = useCurrency();
@@ -84,17 +93,17 @@ const CreditCardCharges = () => {
   const [newCardName, setNewCardName] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [vendors, setVendors] = useState([]);
-  const [fileList, setFileList] = useState([]);
-  const [attachedDocs, setAttachedDocs] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const attachmentRef = useRef(null);
   // txId -> [accountId, ...] resolved from the posted GL entry (debit lines)
   const [txAccountIds, setTxAccountIds] = useState({});
 
-  // ── Register filters ──
+  // â”€â”€ Register filters â”€â”€
   const [selectedCardId, setSelectedCardId] = useState(null); // null = All Cards
   const [dateRange, setDateRange] = useState([moment().startOf('month'), moment().endOf('month')]);
   const [searchText, setSearchText] = useState('');
 
-  // ── Detail / GL modal ──
+  // â”€â”€ Detail / GL modal â”€â”€
   const [viewItem, setViewItem] = useState(null);
   const [viewDetail, setViewDetail] = useState(null);
   const [viewJournal, setViewJournal] = useState(null);
@@ -104,7 +113,7 @@ const CreditCardCharges = () => {
 
   const labelMap = useMemo(() => buildAccountLabelMap(accounts), [accounts]);
 
-  // Resolve each charge's stored category names → full COA hierarchy paths,
+  // Resolve each charge's stored category names â†’ full COA hierarchy paths,
   // then supplement with the real GL debit-line accounts (authoritative).
   // Recomputed whenever the chart of accounts or GL map loads so paths always render.
   const dataWithAccounts = useMemo(
@@ -123,7 +132,9 @@ const CreditCardCharges = () => {
     [data, accounts, labelMap, txAccountIds]
   );
 
-  const splitTotal = useMemo(() => splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0), [splitLines]);
+  // The charge total is ALWAYS the sum of the split-line amounts (blank rows
+  // contribute 0). Integer-cent math, recalculated on every edit/add/remove.
+  const splitTotal = useMemo(() => sumMoney(splitLines.map(l => l.amount)), [splitLines]);
 
   const resolveAccountId = (name) => {
     if (!name) return undefined;
@@ -140,49 +151,6 @@ const CreditCardCharges = () => {
       category: a ? (a.accountName || a.name) : (l.category || ''),
       accountId: id,
     } : l));
-  };
-
-  const loadDocuments = async (linkedId) => {
-    try {
-      const list = await window.electronAPI.getDocuments('creditcard', String(linkedId));
-      setAttachedDocs(Array.isArray(list) ? list : []);
-    } catch { setAttachedDocs([]); }
-  };
-
-  const openDocument = async (id) => {
-    const res = await window.electronAPI.openDocument(id);
-    if (!res?.success) message.error(res?.error || 'Unable to open file');
-  };
-
-  const deleteDocument = async (id) => {
-    const res = await window.electronAPI.deleteDocument(id);
-    if (res?.success) {
-      setAttachedDocs(prev => prev.filter(d => d.id !== id));
-      message.success('File deleted');
-    } else {
-      message.error(res?.error || 'Delete failed');
-    }
-  };
-
-  const uploadReceipt = async (linkedId) => {
-    const f = fileList && fileList[0];
-    if (!f) return;
-    const raw = f.originFileObj || f;
-    const reader = new FileReader();
-    const base64 = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result || '');
-      reader.onerror = () => reject(new Error('FileReader failed'));
-      reader.readAsDataURL(raw);
-    });
-    const res = await window.electronAPI.uploadDocument({
-      name: f.name || raw.name,
-      mime: f.type || raw.type || 'application/octet-stream',
-      data: base64,
-      category: 'creditcard',
-      linkedId,
-      enteredBy: 'system',
-    });
-    if (!res?.success) throw new Error(res?.error || 'Upload failed');
   };
 
   const handleAddCardAccount = async () => {
@@ -217,17 +185,24 @@ const CreditCardCharges = () => {
       const full = await window.electronAPI.getTransaction(record.key);
       if (full) {
         setEditingId(record.key);
-        loadDocuments(record.key);
         const split = parseSplitLines(full.categories || record.categories || '');
         const singleAmount = Number(full.amount || record.amount || 0);
         if (split.length > 0) {
-          setSplitLines(split.map((s, i) => ({
+          const hasLineAmounts = split.some(s => Number(s.amount) > 0);
+          const hydrated = split.map((s, i) => ({
             key: i,
             category: s.account,
             accountId: s.account_id != null ? s.account_id : resolveAccountId(s.account),
             description: s.description,
-            amount: split.length === 1 ? (Number(s.amount) || singleAmount) : Number(s.amount || 0),
-          })));
+            amount: Number(s.amount) || 0,
+          }));
+          // Legacy record: split accounts were stored without per-line amounts.
+          // Put the stored charge total on the first line so the derived total
+          // still matches the record instead of silently collapsing to $0.
+          if (!hasLineAmounts && singleAmount > 0 && hydrated.length > 0) {
+            hydrated[0].amount = singleAmount;
+          }
+          setSplitLines(hydrated);
         } else {
           setSplitLines([{ key: 1, category: '', accountId: undefined, description: full.description || '', amount: singleAmount }]);
         }
@@ -240,7 +215,6 @@ const CreditCardCharges = () => {
           })(),
           vendor: full.payee_name || record.vendor || '',
           description: full.description || '',
-          amount: split.length === 1 ? (Number(split[0].amount) || singleAmount) : singleAmount,
         });
         setShowModal(true);
       }
@@ -303,7 +277,7 @@ const CreditCardCharges = () => {
       const allAccs = Array.isArray(accs) ? accs : (accs?.data || []);
       setAccounts(dedupeAccounts(allAccs));
 
-      // Only real Credit Card liability accounts belong in the dropdown —
+      // Only real Credit Card liability accounts belong in the dropdown â€”
       // matching by name would pull in Income/Expense accounts whose names
       // merely contain "Credit Card" (e.g. "Credit Card Cash Back").
       const ccAccounts = allAccs.filter(a => {
@@ -316,7 +290,7 @@ const CreditCardCharges = () => {
       const txList = Array.isArray(txs) ? txs : [];
       setAllTransactions(txList);
 
-      // Only actual charges appear in the register — payments never do.
+      // Only actual charges appear in the register â€” payments never do.
       const charges = txList.filter(t => isChargeType(t.type));
       const cardNameById = (id) => cards.find(a => Number(a.id) === Number(id))?.accountName || cards.find(a => Number(a.id) === Number(id))?.name || '';
       const cardForTx = (t) => {
@@ -349,7 +323,7 @@ const CreditCardCharges = () => {
         const res = await window.electronAPI.journalTransactionAccounts?.(ids);
         if (res && !res.error) glMap = res;
       } catch { /* GL map optional */ }
-      // IPC serializes object keys to strings — normalize back to numeric ids.
+      // IPC serializes object keys to strings â€” normalize back to numeric ids.
       const normalized = {};
       Object.keys(glMap).forEach(k => { normalized[Number(k)] = glMap[k]; });
       setTxAccountIds(normalized);
@@ -364,7 +338,7 @@ const CreditCardCharges = () => {
 
   useEffect(() => { loadData(); }, []);
 
-  // ── Card selection helpers ──
+  // â”€â”€ Card selection helpers â”€â”€
   const selectedCard = useMemo(
     () => (selectedCardId == null ? null : creditCardAccounts.find(a => Number(a.id) === Number(selectedCardId)) || null),
     [selectedCardId, creditCardAccounts]
@@ -384,7 +358,7 @@ const CreditCardCharges = () => {
     return false;
   };
 
-  // ── Filtered register (respects card, date range, search) ──
+  // â”€â”€ Filtered register (respects card, date range, search) â”€â”€
   const filtered = useMemo(() => {
     let list = dataWithAccounts;
     if (selectedCardId != null) {
@@ -411,7 +385,7 @@ const CreditCardCharges = () => {
     return list;
   }, [dataWithAccounts, selectedCardId, selectedCard, dateRange, searchText]);
 
-  // ── Summary (respects selected card + date range) ──
+  // â”€â”€ Summary (respects selected card + date range) â”€â”€
   const summary = useMemo(() => {
     const cards = selectedCardId == null ? creditCardAccounts : creditCardAccounts.filter(a => Number(a.id) === Number(selectedCardId));
     const opening = cards.reduce((s, a) => s + (Number(a.openingBalance) || 0), 0);
@@ -440,37 +414,47 @@ const CreditCardCharges = () => {
     setEditingId(null);
     form.resetFields();
     setSplitLines([{ key: 1, category: '', accountId: undefined, description: '', amount: 0 }]);
-    setFileList([]);
-    setAttachedDocs([]);
+    setPendingFiles([]);
     setShowModal(true);
   };
 
   const handleCreate = async (values) => {
     try {
-      setLoading(true);
-      const date = values.date ? values.date.format('YYYY-MM-DD') : moment().format('YYYY-MM-DD');
-      // A lone split line with an account but no amount inherits the top-level
-      // amount field so the posted GL always matches the charge.
-      const baseLines = splitLines.map(l => ({ ...l, amount: Number(l.amount) || 0 }));
-      const canInherit = baseLines.length === 1 && baseLines[0].amount <= 0 && Number(values.amount) > 0 && Boolean(baseLines[0].category || baseLines[0].accountId);
-      const lines = canInherit ? [{ ...baseLines[0], amount: Number(values.amount) }] : baseLines;
-      const splitTotalAmt = lines.reduce((s, l) => s + l.amount, 0);
-      const declaredAmount = Number(values.amount) || 0;
-      // Never save a charge whose split lines don't add up to the charge amount.
-      if (splitTotalAmt > 0 && declaredAmount > 0 && Math.abs(splitTotalAmt - declaredAmount) > 0.005) {
-        form.setFields([{ name: 'amount', errors: [`Split lines total ${cSym}${splitTotalAmt.toFixed(2)} but the charge amount is ${cSym}${declaredAmount.toFixed(2)}`] }]);
-        message.error('Split line amounts must total the charge amount');
+      // The charge total is the SUM of the split lines — there is no standalone
+      // amount field. Validate the lines first so an incomplete line can never
+      // be silently dropped from the posting.
+      const problems = [];
+      splitLines.forEach((l, i) => {
+        const hasAccount = Boolean(l.category || l.accountId);
+        const amt = Number(l.amount) || 0;
+        const touched = hasAccount || amt > 0;
+        if (!touched) return; // blank convenience row — ignored
+        if (!hasAccount) problems.push(`Line ${i + 1}: select an account.`);
+        else if (amt <= 0) problems.push(`Line ${i + 1}: enter an amount greater than zero.`);
+      });
+      const lines = splitLines.filter(isMeaningfulSplitLine);
+      if (lines.length === 0 && problems.length === 0) {
+        problems.push('Add at least one expense line with an account and an amount.');
+      }
+      const totalAmount = sumMoney(lines.map(l => l.amount));
+      if (problems.length === 0 && totalAmount <= 0) {
+        problems.push('The charge total must be greater than zero.');
+      }
+      if (problems.length > 0) {
+        message.error(problems[0]);
         return;
       }
-      const totalAmount = splitTotalAmt || declaredAmount;
-      const splitRows = lines.filter(l => l.amount > 0).map(l => ({
+
+      setLoading(true);
+      const date = values.date ? values.date.format('YYYY-MM-DD') : moment().format('YYYY-MM-DD');
+      const splitRows = lines.map(l => ({
         account: l.category,
         accountId: l.accountId ?? resolveAccountId(l.category),
         account_id: l.accountId ?? resolveAccountId(l.category),
         description: l.description,
-        amount: l.amount,
+        amount: Number(l.amount) || 0,
       }));
-      const categories = splitRows.length > 0 ? JSON.stringify(splitRows) : lines.filter(l => l.category).map(l => l.category).join(', ');
+      const categories = JSON.stringify(splitRows);
       const descriptions = lines.filter(l => l.description).map(l => l.description).join('; ');
 
       const cardAccountName = values.creditCardAccount || values.card || '';
@@ -479,6 +463,8 @@ const CreditCardCharges = () => {
       const tx = {
         date,
         type: 'Credit Card',
+        // Derived total — the backend independently recomputes this from the
+        // split lines and refuses to trust a client-supplied amount.
         amount: totalAmount,
         description: descriptions || values.description || '',
         reference: cardAccount ? (cardAccount.accountName || cardAccount.name) : cardAccountName,
@@ -503,8 +489,7 @@ const CreditCardCharges = () => {
       }
       if (txId) {
         try {
-          await uploadReceipt(txId);
-          await loadDocuments(txId);
+          await attachmentRef.current?.uploadPending(txId);
         } catch (uploadErr) {
           console.error('[attachments] charge attachment upload failed:', uploadErr);
           message.error('The charge was saved, but the attachment could not be stored. Please try attaching the file again.');
@@ -514,7 +499,7 @@ const CreditCardCharges = () => {
       setEditingId(null);
       form.resetFields();
       setSplitLines([{ key: 1, category: '', accountId: undefined, description: '', amount: 0 }]);
-      setFileList([]);
+      setPendingFiles([]);
       await loadData();
     } catch (err) {
       message.error(err.message || 'Error saving credit charge');
@@ -563,8 +548,8 @@ const CreditCardCharges = () => {
           <Button icon={<ReloadOutlined />} onClick={loadData}>Refresh</Button>
         </Space>}
       >
-        {/* Toolbar: card filter + date range + search + add */}
-        <Space style={{ marginBottom: 16 }} wrap>
+        {/* Toolbar: card filter + date range + search + add — one aligned row */}
+        <Space className="al-list-toolbar" align="center" style={{ marginBottom: 16 }} wrap>
           <Select
             style={{ width: 220 }}
             value={selectedCardId == null ? 'all' : selectedCardId}
@@ -607,7 +592,7 @@ const CreditCardCharges = () => {
           <Col xs={24} sm={8}>
             <Card size="small" style={{ borderTop: '3px solid #722ed1' }}>
               <Statistic
-                title={`${registerTitle} — Current Balance`}
+                title={`${registerTitle} â€” Current Balance`}
                 value={summary.currentBalance}
                 precision={2}
                 prefix={cSym}
@@ -642,7 +627,7 @@ const CreditCardCharges = () => {
       <Modal
         title={editingId ? 'Edit Credit Card Charge' : 'Add Credit Card Charge'}
         visible={showModal}
-        onCancel={() => { setShowModal(false); setEditingId(null); form.resetFields(); setSplitLines([{ key: 1, category: '', accountId: undefined, description: '', amount: 0 }]); setFileList([]); setAttachedDocs([]); }}
+        onCancel={() => { setShowModal(false); setEditingId(null); form.resetFields(); setSplitLines([{ key: 1, category: '', accountId: undefined, description: '', amount: 0 }]); setPendingFiles([]); }}
         onOk={() => form.submit()}
         okText={editingId ? 'Update Charge' : 'Add Charge'}
         width={640}
@@ -674,20 +659,15 @@ const CreditCardCharges = () => {
             </Col>
           </Row>
           <div style={{ marginBottom: 16 }}>
-            {attachedDocs.length > 0 && (
-              <div style={{ marginBottom: 6 }}>
-                {attachedDocs.map(doc => (
-                  <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                    <span style={{ fontSize: 12 }}>{doc.document_name}</span>
-                    <Button size="small" type="link" onClick={() => openDocument(doc.id)}>Open</Button>
-                    <Button size="small" type="link" danger onClick={() => deleteDocument(doc.id)}>Delete</Button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <Upload fileList={fileList} onChange={({ fileList: fl }) => setFileList(fl)} beforeUpload={() => false} maxCount={1}>
-              <Button icon={<UploadOutlined />} size="small">Attach Receipt</Button>
-            </Upload>
+            <AttachmentManager
+              ref={attachmentRef}
+              entityType="creditcard"
+              entityId={editingId}
+              pendingFiles={pendingFiles}
+              onPendingChange={setPendingFiles}
+              entityLabel="charge"
+              emptyText="No receipt attached yet."
+            />
           </div>
 
           <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0 12px' }}>Expense Accounts (Split)</Divider>
@@ -711,12 +691,6 @@ const CreditCardCharges = () => {
               <span style={{ fontSize: 12, color: '#666' }}>Total: {cSym} {splitTotal.toFixed(2)}</span>
             </div>
           </div>
-
-          {splitLines.length <= 1 && (
-            <Form.Item name="amount" label="Amount" rules={[{ required: splitLines.length <= 1, message: 'Enter amount' }]}>
-              <InputNumber style={{ width: '100%' }} min={0} step={0.01} prefix={cSym} />
-            </Form.Item>
-          )}
 
           <Form.Item name="description" label="Memo / Description">
             <Input placeholder="Optional overall memo" />

@@ -13,7 +13,7 @@ import InvoiceList from './invoices/InvoiceList';
 import CustomerList from './CustomerList';
 import CustomerDetails from './CustomerDetails';
 import Leads from './Leads';
-import CreditNoteList from './creditNotes/CreditNoteList';
+import CreditNotesRedirect from './creditNotes/CreditNotesRedirect';
 import CustomerPaymentHistory from './payments/CustomerPaymentHistory';
 import InvoiceCustomization from './invoices/InvoiceCustomization';
 import QuoteCustomization from './quotes/QuoteCustomization';
@@ -36,7 +36,7 @@ const CustomerRoutes = ({ match }) => {
       <Route exact path={`${match.path}/recurring`} component={RecurringTransactions} />
       <Route exact path={`${match.path}/items`} component={ItemList} />
       <Route exact path={`${match.path}/leads`} component={Leads} />
-      <Route exact path={`${match.path}/credit-notes`} component={CreditNoteList} />
+      <Route exact path={`${match.path}/credit-notes`} component={CreditNotesRedirect} />
       <Route exact path={`${match.path}/payment-history`} component={CustomerPaymentHistory} />
       <Route exact path={`${match.path}/payment-history/:customerId`} component={CustomerPaymentHistory} />
       <Route exact path={`${match.path}/invoices/customize`} component={InvoiceCustomization} />

@@ -114,27 +114,20 @@ const BillTracker = () => {
       const stats = await window.electronAPI.getCheckStats?.().catch(() => null);
       const nextNum = stats?.nextCheckNumber ? parseInt(stats.nextCheckNumber, 10) : 1001;
 
-      const checkTx = {
-        date: paymentDate,
-        type: 'Check',
+      // One atomic backend call: creates the check, posts DR AP / CR Bank,
+      // records the explicit bill payment application and derives the bill's
+      // paid/remaining/status. Deleting the check later reverses all of it.
+      const payRes = await window.electronAPI.billPay({
+        expenseId: bill.id,
         amount: amt,
-        description: `Payment for bill ${bill.billNumber} - ${bill.vendorName}`,
-        reference: String(nextNum),
-        accountId: bankAccount ? Number(bankAccount.id) : undefined,
-        payee_name: bill.vendorName || '',
-        entered_by: 'system',
-        splitLines: [{ account: 'Accounts Payable', description: `Bill payment ${bill.billNumber}`, amount: amt }],
-      };
-      const checkRes = await window.electronAPI.insertTransaction(checkTx);
-      if (!checkRes || (!checkRes.changes && !checkRes.success)) {
-        throw new Error(`Failed to create check for bill ${bill.billNumber}`);
-      }
-      const checkId = checkRes.lastInsertRowid || checkRes.id;
-
-      const payRes = await window.electronAPI.markExpensePaid(bill.id);
+        paymentDate,
+        bankAccount: bankAccount ? Number(bankAccount.id) : undefined,
+        checkNumber: String(nextNum),
+      });
       if (!payRes?.success) {
-        throw new Error(payRes?.error || `Failed to mark bill ${bill.billNumber} as paid`);
+        throw new Error(payRes?.error || `Failed to pay bill ${bill.billNumber}`);
       }
+      const checkId = payRes.check?.id;
 
       setCreatedCheck({ checkId, billId: bill.id, billRef: bill.billNumber, amount: amt, payee: bill.vendorName, bankName, paymentDate });
       setPayModal(false);
@@ -320,7 +313,7 @@ const BillTracker = () => {
       </Row>
 
       {/* Filters */}
-      <Space style={{ marginBottom: 16 }} wrap>
+      <Space className="al-list-toolbar" style={{ marginBottom: 16 }} wrap>
         <Select allowClear placeholder="Status" style={{ width: 140 }} value={filters.status || undefined}
           onChange={v => setFilters(f => ({ ...f, status: v || '' }))}>
           <Option value="unpaid">Unpaid</Option>

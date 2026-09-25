@@ -268,9 +268,16 @@ try {
      /goToCustomer/.test(leadsJs) && /\/main\/customers\/details\/\$\{/.test(leadsJs));
   ok('Leads.js has a duplicate-customer guard', /duplicateWarning/.test(leadsJs) && /checkDuplicateCustomer/.test(leadsJs));
   ok('Leads.js confirms before clearing on mode switch', /Modal\.confirm/.test(leadsJs));
-  ok('Leads.js labels the four sections',
-     /Source<\/span>/.test(leadsJs) && /Customer-Contact Information/.test(leadsJs)
-     && /Lead Details/.test(leadsJs) && /Tags &amp; Notes/.test(leadsJs));
+  ok('Leads.js uses boxed sections (Source / Lead Details / Notes)',
+     /<FormSection\b/.test(leadsJs) && /title="Source"/.test(leadsJs)
+     && /title="Lead Details"/.test(leadsJs) && /title="Notes"/.test(leadsJs));
+  ok('Leads.js renders the shared contact block in the lead layout',
+     /<CustomerContactFields[\s\S]{0,200}?layout="lead"/.test(leadsJs));
+  ok('Leads.js has a one-time auto-open for the customer picker',
+     /autoOpenedCustomerRef/.test(leadsJs) && /customerDropdownOpen/.test(leadsJs)
+     && /onDropdownVisibleChange/.test(leadsJs));
+  ok('Leads.js customer dropdown offers + Add New Customer',
+     /Add New Customer/.test(leadsJs) && /setCustModalOpen\(true\)/.test(leadsJs));
   ok('Lead modal scrolls instead of overflowing', /maxHeight:\s*'calc\(100vh/.test(leadsJs) && /width=\{920\}/.test(leadsJs));
   ok('Lead table shows the linked customer', /title: 'Customer'/.test(leadsJs));
 

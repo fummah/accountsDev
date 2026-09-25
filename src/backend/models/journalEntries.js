@@ -1,6 +1,29 @@
 const db = require('./dbmgr');
 const Settings = require('./settings');
 
+/**
+ * The account a PURCHASE tax amount is debited to (input tax / VAT receivable).
+ * Resolved from the Chart of Accounts — never hardcoded. Returns null when the
+ * company has no tax account configured, so the tax stays on the expense line
+ * rather than being lost.
+ */
+const resolveInputTaxAccountId = () => {
+  try {
+    const COA = require('./chartOfAccounts');
+    for (const name of ['Input Tax', 'VAT Receivable', 'VAT Input', 'Tax Receivable']) {
+      const a = COA.getByName(name);
+      if (a && a.id != null) return Number(a.id);
+    }
+    const r = db.prepare(`
+      SELECT id FROM chart_of_accounts
+      WHERE LOWER(COALESCE(taxLine, '')) LIKE '%vat%'
+        AND LOWER(type) IN ('asset','other current asset','expense','other expense')
+        AND status = 'Active'
+      ORDER BY id LIMIT 1`).get();
+    return r ? Number(r.id) : null;
+  } catch { return null; }
+};
+
 const JournalEntries = {
   createTable: () => {
     // Tables may already be created by journal.js — just ensure all needed columns exist.
@@ -532,7 +555,7 @@ const JournalEntries = {
     const params = [accountId];
     if (from) { where += ' AND je.date >= ?'; params.push(from); }
     if (to)   { where += ' AND je.date <= ?'; params.push(to); }
-    return db.prepare(`
+    const rows = db.prepare(`
       SELECT jl.id, jl.debit, jl.credit, jl.description AS lineDesc,
              je.id AS journalId, je.date, je.reference, je.description,
              je.source_type, je.source_id, je.status, je.memo
@@ -542,6 +565,36 @@ const JournalEntries = {
       ORDER BY je.date DESC, je.id DESC
       LIMIT ${Number(limit)}
     `).all(...params);
+
+    // Party / source info (number, customer / vendor / payee) — resolved in
+    // batches per source type, never one query per row.
+    try { JournalEntries.attachSourceInfo(rows); }
+    catch (e) { console.error('[journalEntries] getByAccount source info failed:', e.message); }
+
+    // Counterpart accounts for every journal on the page — ONE query, then
+    // deduped per journal in JS. The account being viewed is excluded so the
+    // column shows the OTHER side(s) of each journal entry.
+    const journalIds = [...new Set(rows.map(r => r.journalId))];
+    if (journalIds.length) {
+      const ph = journalIds.map(() => '?').join(',');
+      const counterRows = db.prepare(`
+        SELECT jl.journal_id, jl.account_id, c.name AS accountName, c.number AS accountNumber
+        FROM journal_lines jl
+        LEFT JOIN chart_of_accounts c ON c.id = jl.account_id
+        WHERE jl.journal_id IN (${ph}) AND jl.account_id != ?
+      `).all(...journalIds, accountId);
+      const byJournal = new Map();
+      for (const cr of counterRows) {
+        if (!byJournal.has(cr.journal_id)) byJournal.set(cr.journal_id, new Map());
+        const m = byJournal.get(cr.journal_id);
+        if (!m.has(cr.account_id)) m.set(cr.account_id, { id: cr.account_id, name: cr.accountName || '', number: cr.accountNumber || '' });
+      }
+      for (const r of rows) {
+        const m = byJournal.get(r.journalId);
+        r.counterAccounts = m ? Array.from(m.values()) : [];
+      }
+    }
+    return rows;
   },
 
   // ── Fetch a single journal entry with its lines (drill-down) ──────────
@@ -604,12 +657,23 @@ const JournalEntries = {
     try {
       invoiceLines = db.prepare(`
         SELECT il.amount, il.quantity, il.description, il.product,
+               il.item_type, il.cogs_account_id, il.inventory_asset_account_id,
                p.income_account, p.income_account_id
         FROM invoice_lines il
         LEFT JOIN products p ON il.product = p.id
         WHERE il.invoice_id = ?
       `).all(Number(invoice.id));
-    } catch { invoiceLines = []; }
+    } catch {
+      try {
+        invoiceLines = db.prepare(`
+          SELECT il.amount, il.quantity, il.description, il.product,
+                 p.income_account, p.income_account_id
+          FROM invoice_lines il
+          LEFT JOIN products p ON il.product = p.id
+          WHERE il.invoice_id = ?
+        `).all(Number(invoice.id));
+      } catch { invoiceLines = []; }
+    }
 
     const vat = (() => {
       try { return Number(db.prepare('SELECT vat FROM invoices WHERE id = ?').get(Number(invoice.id))?.vat || 0); }
@@ -648,6 +712,67 @@ const JournalEntries = {
 
     if (totalCredit <= 0) return { error: 'Invoice has zero amount' };
 
+    // ── Inventory cost side: DR COGS / CR Inventory Asset (Phase 13) ────────
+    // Only for lines whose SNAPSHOT type is inventory. The cost comes from the
+    // issue movements this invoice caused — the document→stock reconciler values
+    // them from actual receipt layers — never the selling price. The accounts
+    // come from the LINE SNAPSHOT, so a later Item Master change cannot move
+    // historical COGS. Duplicate-product lines share the product's cost by qty.
+    const cogsLines = [];
+    try {
+      const ItemTypes = require('../services/itemTypes');
+      const byItem = db.prepare(`
+        SELECT itemId,
+               SUM(quantityChange) AS qty,
+               SUM(quantityChange * COALESCE(unitCost, 0)) AS cost
+        FROM stock_movements
+        WHERE sourceType = 'invoice' AND sourceId = ?
+        GROUP BY itemId
+      `).all(Number(invoice.id));
+
+      const costByProduct = new Map();
+      for (const r of byItem) {
+        const prod = db.prepare('SELECT id FROM products WHERE item_id = ? LIMIT 1').get(Number(r.itemId));
+        if (prod) costByProduct.set(Number(prod.id), -Number(r.cost || 0)); // issue cost is negative
+      }
+      const qtyByProduct = new Map();
+      for (const l of invoiceLines) {
+        const k = Number(l.product);
+        qtyByProduct.set(k, (qtyByProduct.get(k) || 0) + (Number(l.quantity) || 0));
+      }
+
+      for (const line of invoiceLines) {
+        if (!ItemTypes.tracksInventory(line.item_type)) continue;
+        const pid = Number(line.product);
+        const total = costByProduct.get(pid) || 0;
+        if (total <= 0) continue;
+        const share = (qtyByProduct.get(pid) || 0) > 0
+          ? (Number(line.quantity) || 0) / qtyByProduct.get(pid)
+          : 0;
+        const cost = Math.round(total * share * 100) / 100;
+        if (cost <= 0) continue;
+
+        // Snapshot accounts win; fall back to the master / system accounts for
+        // legacy lines created before the snapshot columns existed.
+        let cogsId = line.cogs_account_id != null ? Number(line.cogs_account_id) : null;
+        let invId = line.inventory_asset_account_id != null ? Number(line.inventory_asset_account_id) : null;
+        if (!cogsId || !invId) {
+          const p = db.prepare('SELECT cogs_account_id, inventory_asset_account_id FROM products WHERE id = ?').get(pid);
+          if (!cogsId && p && p.cogs_account_id) cogsId = Number(p.cogs_account_id);
+          if (!invId && p && p.inventory_asset_account_id) invId = Number(p.inventory_asset_account_id);
+        }
+        if (!cogsId) { const a = COA.getSystemAccount('Cost of Goods Sold'); if (a) cogsId = Number(a.id); }
+        if (!invId) { const a = COA.getSystemAccount('Inventory Asset'); if (a) invId = Number(a.id); }
+        if (!cogsId || !invId) continue;
+
+        cogsLines.push({ account_id: cogsId, debit: cost, credit: 0, description: 'Cost of goods sold' });
+        cogsLines.push({ account_id: invId, debit: 0, credit: cost, description: 'Inventory asset relieved' });
+      }
+    } catch (e) {
+      // COGS is best-effort: never block the revenue posting on a costing lookup.
+      console.error('[journalEntries] COGS posting skipped:', e.message);
+    }
+
     try {
       return JournalEntries.post({
         date: invoice.date || invoice.invoiceDate || new Date().toISOString().slice(0, 10),
@@ -657,6 +782,7 @@ const JournalEntries = {
         lines: [
           { account_id: ar.id, debit: totalCredit, credit: 0, description: 'Accounts Receivable' },
           ...creditLines,
+          ...cogsLines,
         ],
       });
     } catch (e) { return { error: e.message }; }
@@ -727,7 +853,7 @@ const JournalEntries = {
     let expenseLines = [];
     try {
       expenseLines = db.prepare(
-        `SELECT amount, description, category, account_id, line_type FROM expense_lines WHERE expense_id = ?`
+        `SELECT amount, description, category, account_id, line_type, tax_amount FROM expense_lines WHERE expense_id = ?`
       ).all(Number(expense.id));
     } catch {
       // `line_type` is owned by models/expenses.js, which may not have been
@@ -776,7 +902,19 @@ const JournalEntries = {
       }
       if (!acctId) acctId = fallbackExpAcct.id;
 
-      debitLines.push({ account_id: acctId, debit: lineAmt, credit: 0, description: line.description || line.category || 'Expense' });
+      // Line-level purchase tax: `amount` is the line TOTAL (incl. tax). Split
+      // the tax to the configured input-tax account so it is not expensed, and
+      // leave the net on the line's account. Total debit is unchanged, so the
+      // entry still balances and AP is credited the same total.
+      const taxAmt = Number(line.tax_amount) || 0;
+      const taxAcctId = taxAmt > 0 ? resolveInputTaxAccountId() : null;
+      if (taxAmt > 0 && taxAcctId && taxAmt < lineAmt) {
+        const net = Math.round((lineAmt - taxAmt) * 100) / 100;
+        debitLines.push({ account_id: acctId, debit: net, credit: 0, description: line.description || line.category || 'Expense' });
+        debitLines.push({ account_id: taxAcctId, debit: taxAmt, credit: 0, description: 'Input tax' });
+      } else {
+        debitLines.push({ account_id: acctId, debit: lineAmt, credit: 0, description: line.description || line.category || 'Expense' });
+      }
       totalDebit += lineAmt;
     }
 

@@ -4,7 +4,7 @@ import { PrinterOutlined, DownloadOutlined, SyncOutlined, SearchOutlined, Calend
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { useHistory, useLocation } from 'react-router-dom';
-import { dedupeAccounts } from '../../utils/accounts';
+import { dedupeAccounts, buildAccountLabelMap } from '../../utils/accounts';
 import { SOURCE_LABELS, SOURCE_COLORS, getSourceTransactionRoute } from '../../utils/sourceRoutes';
 import AccountSelect from '../shared/AccountSelect';
 import JournalEntryDetailModal from './JournalEntryDetailModal';
@@ -73,10 +73,10 @@ const GeneralLedger = () => {
 
   useEffect(() => { loadAccounts(); }, []);
 
-  // Deep-link support: ?account=<id>
+  // Deep-link support: ?accountId=<id> (also accepts the legacy ?account=<id>)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const acct = params.get('account');
+    const acct = params.get('accountId') || params.get('account');
     if (acct) setSelectedAccount(Number(acct));
   }, [location.search]);
 
@@ -137,6 +137,29 @@ const GeneralLedger = () => {
 
   const selectedAccountData = accounts.find(a => a.id === selectedAccount);
 
+  // id -> full hierarchy path (e.g. "Vehicle Expenses → Fuel") so duplicate
+  // child names are unambiguous in the Account(s) column.
+  const labelMap = useMemo(() => buildAccountLabelMap(accounts), [accounts]);
+
+  // Payee / Description: the resolved party (customer / vendor / payee) from the
+  // source relationship first, then the line description, journal description
+  // and memo. Never invents a party by parsing text when a relationship exists.
+  const partyOf = (r) => {
+    const p = r.source && r.source.party;
+    if (p) return p;
+    return r.lineDesc || r.description || r.memo || '-';
+  };
+
+  // Counterpart accounts (unique), excluding the account currently being viewed.
+  const counterLabels = (r) => (r.counterAccounts || [])
+    .map(a => labelMap.get(Number(a.id)) || a.name || '')
+    .filter(Boolean);
+
+  const counterText = (r) => {
+    const labels = counterLabels(r);
+    if (!labels.length) return '-';
+    return labels.length === 1 ? labels[0] : `Split (${labels.length} accounts)`;
+  };
 
   const filteredLedger = useMemo(() => {
     if (!searchText) return allLedger;
@@ -144,9 +167,15 @@ const GeneralLedger = () => {
     return allLedger.filter(e =>
       (e.description || '').toLowerCase().includes(q) ||
       (e.lineDesc || '').toLowerCase().includes(q) ||
-      (e.reference || '').toLowerCase().includes(q)
+      (e.reference || '').toLowerCase().includes(q) ||
+      (e.memo || '').toLowerCase().includes(q) ||
+      (e.source && e.source.party ? String(e.source.party).toLowerCase().includes(q) : false) ||
+      (e.source && e.source.number ? String(e.source.number).toLowerCase().includes(q) : false) ||
+      String(e.journalId || '').includes(q) ||
+      (e.counterAccounts || []).some(a =>
+        String(labelMap.get(Number(a.id)) || a.name || '').toLowerCase().includes(q))
     );
-  }, [allLedger, searchText]);
+  }, [allLedger, searchText, labelMap]);
 
   const sortedLedger = useMemo(() =>
     [...filteredLedger].sort((a, b) => new Date(a.date) - new Date(b.date) || Number(a.id) - Number(b.id)),
@@ -202,6 +231,9 @@ const GeneralLedger = () => {
       date,
       reference: '',
       lineDesc: openingState.label || 'Opening Balance',
+      // Synthetic row: no counterpart account and no posting, so it can never
+      // enter a column total.
+      counterAccounts: [],
       // Not a posting: zero on both sides, so it can never enter a column total.
       debit: 0,
       credit: 0,
@@ -260,40 +292,49 @@ const GeneralLedger = () => {
   };
 
   const columns = [
-    { title: 'Date', dataIndex: 'date', key: 'date', width: 110, sorter: (a, b) => new Date(a.date) - new Date(b.date), render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 90, sorter: (a, b) => new Date(a.date) - new Date(b.date), render: v => v ? <span style={{ whiteSpace: 'nowrap' }}>{moment(v).format('MM/DD/YYYY')}</span> : '-' },
     {
       title: 'Journal', dataIndex: 'journalId', key: 'journalId', width: 80,
       render: v => v
-        ? <a onClick={(e) => { e.stopPropagation(); openJournal(v); }} style={{ cursor: 'pointer' }} title="Open journal entry"><Text code style={{ cursor: 'pointer' }}>#{v}</Text></a>
-        : '-',
+        ? (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, height: 'auto' }}
+            onClick={(e) => { e.stopPropagation(); openJournal(v); }}
+            title="Open journal entry"
+          >
+            <Text code style={{ cursor: 'pointer' }}>#{v}</Text>
+          </Button>
+        )
+        : <Text type="secondary">-</Text>,
     },
-    { title: 'Description', dataIndex: 'lineDesc', key: 'lineDesc', ellipsis: true, render: (v, r) => (
-      r.source_type
-        ? <a onClick={(e) => { e.stopPropagation(); navigateToSource(r); }} style={{ cursor: 'pointer' }} title="View source transaction">{v || r.description || '-'}</a>
-        : <span>{v || r.description || '-'}</span>
-    ) },
-    { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true, render: v => v || <Text type="secondary">-</Text> },
     {
-      title: 'Type', key: 'type', width: 110,
+      title: 'Payee / Description', key: 'party', width: 190, ellipsis: true,
       render: (_, r) => {
-        if (r.isOpening) {
-          return <Tag color="purple" style={{ borderRadius: 4, fontSize: 11 }}>{r.lineDesc === 'Balance Brought Forward' ? 'BBF' : 'Opening'}</Tag>;
-        }
-        const st = r.source_type || 'manual';
-        const label = SOURCE_LABELS[st] || String(st).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        if (r.source_type) {
-          return (
-            <a onClick={(e) => { e.stopPropagation(); navigateToSource(r); }} style={{ cursor: 'pointer' }} title="View source transaction">
-              <Tag color={SOURCE_COLORS[st] || 'default'} style={{ borderRadius: 4, fontSize: 11 }}>{label}</Tag>
-            </a>
-          );
-        }
-        return <Tag color="default" style={{ borderRadius: 4, fontSize: 11 }}>Journal</Tag>;
+        const label = partyOf(r);
+        return r.source_type
+          ? <a onClick={(e) => { e.stopPropagation(); navigateToSource(r); }} style={{ cursor: 'pointer' }} title={label}>{label}</a>
+          : <span title={label}>{label}</span>;
       },
     },
-    { title: 'Debit', dataIndex: 'debit', key: 'debit', width: 130, align: 'right', render: v => Number(v) ? <Text style={{ color: '#3f8600' }}>{fmt(v)}</Text> : '' },
-    { title: 'Credit', dataIndex: 'credit', key: 'credit', width: 130, align: 'right', render: v => Number(v) ? <Text style={{ color: '#cf1322' }}>{fmt(v)}</Text> : '' },
-    { title: 'Balance', dataIndex: 'balance', key: 'balance', width: 140, align: 'right', render: v => <Text strong style={{ color: v >= 0 ? '#1890ff' : '#ff4d4f' }}>{fmt(v)}</Text> },
+    {
+      title: 'Account(s)', key: 'counterAccounts', width: 140, ellipsis: { showTitle: false },
+      render: (_, r) => {
+        const labels = counterLabels(r);
+        if (!labels.length) return <Text type="secondary">-</Text>;
+        if (labels.length === 1) return <span title={labels[0]}>{labels[0]}</span>;
+        return (
+          <Tooltip title={<div>{labels.map((l, i) => <div key={i}>{l}</div>)}</div>}>
+            <Tag color="blue" style={{ borderRadius: 4, cursor: 'help', marginRight: 0, padding: '0 6px' }}>Split ({labels.length} accounts)</Tag>
+          </Tooltip>
+        );
+      },
+    },
+    { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true, render: v => v ? <span title={v}>{v}</span> : <Text type="secondary">-</Text> },
+    { title: 'Debit', dataIndex: 'debit', key: 'debit', width: 105, align: 'right', render: v => Number(v) ? <Text style={{ color: '#3f8600', whiteSpace: 'nowrap' }}>{fmt(v)}</Text> : '' },
+    { title: 'Credit', dataIndex: 'credit', key: 'credit', width: 105, align: 'right', render: v => Number(v) ? <Text style={{ color: '#cf1322', whiteSpace: 'nowrap' }}>{fmt(v)}</Text> : '' },
+    { title: 'Balance', dataIndex: 'balance', key: 'balance', width: 115, align: 'right', render: v => <Text strong style={{ color: v >= 0 ? '#1890ff' : '#ff4d4f', whiteSpace: 'nowrap' }}>{fmt(v)}</Text> },
   ];
 
   // The opening row can legitimately have NO date (no period selected and no
@@ -304,18 +345,29 @@ const GeneralLedger = () => {
   const handlePrint = () => {
     if (!withRunningBalance.length) { message.warning('No data to print'); return; }
     const acct = selectedAccountData;
-    const rowsHtml = withRunningBalance.map(r => `<tr><td>${fmtDate(r.date, 'MM/DD/YYYY')}</td><td>${(r.lineDesc || r.description || '').replace(/</g, '&lt;')}</td><td>${(r.reference || '').replace(/</g, '&lt;')}</td><td style="text-align:right">${Number(r.debit) ? fmt(r.debit) : ''}</td><td style="text-align:right">${Number(r.credit) ? fmt(r.credit) : ''}</td><td style="text-align:right">${fmt(r.balance)}</td></tr>`).join('');
-    const html = `<!doctype html><html><head><title>General Ledger</title><style>body{font-family:Arial,sans-serif;font-size:12px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px}th{background:#f5f5f5;text-align:left}tfoot td{font-weight:bold;border-top:2px solid #333}</style></head><body><h2>General Ledger</h2><p><strong>${acct ? (acct.accountNumber || acct.accountCode || '') + ' - ' + (acct.accountName || acct.name || '') : ''}</strong></p><p>${dateRange[0].format('MM/DD/YYYY')} to ${dateRange[1].format('MM/DD/YYYY')}</p><table><thead><tr><th>Date</th><th>Description</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rowsHtml}</tbody><tfoot><tr><td colspan="3">Totals</td><td style="text-align:right">${fmt(totalDebit)}</td><td style="text-align:right">${fmt(totalCredit)}</td><td style="text-align:right">${fmt(netMovement)}</td></tr></tfoot></table></body></html>`;
+    const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+    const rowsHtml = withRunningBalance.map(r => `<tr><td>${fmtDate(r.date, 'MM/DD/YYYY')}</td><td>${r.journalId ? '#' + r.journalId : ''}</td><td>${esc(partyOf(r))}</td><td>${esc(counterText(r))}</td><td>${esc(r.reference || '')}</td><td style="text-align:right">${Number(r.debit) ? fmt(r.debit) : ''}</td><td style="text-align:right">${Number(r.credit) ? fmt(r.credit) : ''}</td><td style="text-align:right">${fmt(r.balance)}</td></tr>`).join('');
+    const html = `<!doctype html><html><head><title>General Ledger</title><style>body{font-family:Arial,sans-serif;font-size:11px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:5px}th{background:#f5f5f5;text-align:left}tfoot td{font-weight:bold;border-top:2px solid #333}</style></head><body><h2>General Ledger</h2><p><strong>${acct ? (acct.accountNumber || acct.accountCode || '') + ' - ' + (acct.accountName || acct.name || '') : ''}</strong></p><p>${dateRange[0].format('MM/DD/YYYY')} to ${dateRange[1].format('MM/DD/YYYY')}</p><table><thead><tr><th>Date</th><th>Journal</th><th>Payee / Description</th><th>Account(s)</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rowsHtml}</tbody><tfoot><tr><td colspan="5">Totals</td><td style="text-align:right">${fmt(totalDebit)}</td><td style="text-align:right">${fmt(totalCredit)}</td><td style="text-align:right">${fmt(netMovement)}</td></tr></tfoot></table></body></html>`;
     const w = window.open('', '_blank'); w.document.open(); w.document.write(html); w.document.close(); setTimeout(() => w.print(), 300);
   };
 
   const handleExport = () => {
     if (!withRunningBalance.length) { message.warning('No data to export'); return; }
-    const lines = [['Date', 'Description', 'Reference', 'Debit', 'Credit', 'Balance'].join(',')];
+    const q = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
+    const lines = [['Date', 'Journal', 'Payee / Description', 'Account(s)', 'Reference', 'Debit', 'Credit', 'Balance'].join(',')];
     withRunningBalance.forEach(r => {
-      lines.push([fmtDate(r.date, 'YYYY-MM-DD'), `"${(r.lineDesc || r.description || '').replace(/"/g, '""')}"`, `"${(r.reference || '').replace(/"/g, '""')}"`, Number(r.debit) || 0, Number(r.credit) || 0, r.balance.toFixed(2)].join(','));
+      lines.push([
+        fmtDate(r.date, 'YYYY-MM-DD'),
+        r.journalId ? q('#' + r.journalId) : '',
+        q(partyOf(r)),
+        q(counterText(r)),
+        q(r.reference || ''),
+        Number(r.debit) || 0,
+        Number(r.credit) || 0,
+        r.balance.toFixed(2),
+      ].join(','));
     });
-    lines.push(['Totals', '', '', totalDebit.toFixed(2), totalCredit.toFixed(2), netMovement.toFixed(2)].join(','));
+    lines.push(['Totals', '', '', '', '', totalDebit.toFixed(2), totalCredit.toFixed(2), netMovement.toFixed(2)].join(','));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `general-ledger-${selectedAccountData?.accountCode || 'all'}-${dateRange[0].format('YYYYMMDD')}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   };
@@ -430,14 +482,16 @@ const GeneralLedger = () => {
           />
         )}
         <Table
+          className="gl-ledger-table"
           columns={columns}
           dataSource={withRunningBalance}
           rowKey={(r, i) => r.id || r._idx || i}
           loading={loading}
           size="small"
+          tableLayout="fixed"
           onRow={(r) => ({ onDoubleClick: () => openJournal(r.journalId), style: { cursor: 'pointer' } })}
           pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100', '200'], showTotal: (total) => `${total} entries` }}
-          scroll={{ x: 1000 }}
+          scroll={{ x: 945 }}
           summary={pageData => {
             if (!pageData.length) return null;
             let pgDebit = 0, pgCredit = 0;

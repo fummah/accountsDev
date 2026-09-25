@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
-import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Alert, Tooltip, Modal, Statistic, Spin, Upload } from 'antd';
-import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, PlusOutlined, PaperClipOutlined, UploadOutlined, EditOutlined, BookOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Alert, Tooltip, Modal, Statistic, Spin } from 'antd';
+import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, PlusOutlined, PaperClipOutlined, EditOutlined, BookOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { dedupeAccounts, getBankAccounts, isBillLineAccount, isBankAccount } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
 import JournalEntryDetailModal from './JournalEntryDetailModal';
 import { FormSection, FormGrid, FormCol, DocumentActionBar, FORM_ITEM_STYLE } from '../shared/FormSection';
+import AttachmentManager from '../shared/AttachmentManager';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
@@ -64,9 +65,9 @@ const CheckPrinting = () => {
   const [accounts, setAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
 
-  // Split-line allocation accounts: what the cheque is being paid FOR — i.e.
+  // Split-line allocation accounts: what the cheque is being paid FOR â€” i.e.
   // everything a payment can be posted AGAINST (Expense, Asset, Liability,
-  // Loan, Equity, …) EXCEPT the Bank accounts. The source of funds is chosen
+  // Loan, Equity, â€¦) EXCEPT the Bank accounts. The source of funds is chosen
   // separately in the Bank Account field above, so a Bank account must never be
   // offered here. Eligibility comes from the shared isBillLineAccount rule
   // (type/subtype based, never by name); Bank is then removed.
@@ -230,8 +231,8 @@ const CheckPrinting = () => {
   const [watchMemo, setWatchMemo] = useState('');
   const [watchAccountId, setWatchAccountId] = useState(null);
   const [splitLines, setSplitLines] = useState([{ key: 1, account: '', accountId: undefined, description: '', amount: 0 }]);
-  const [pendingFile, setPendingFile] = useState(null);
-  const [attachedDocs, setAttachedDocs] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const attachmentRef = useRef(null);
   const [editingId, setEditingId] = useState(null);
   const [togglingPrintedId, setTogglingPrintedId] = useState(null);
   const [openBills, setOpenBills] = useState([]);
@@ -319,57 +320,6 @@ const CheckPrinting = () => {
     }
   }, []);
 
-  /* ── File attachment helpers ── */
-  const handleFileSelect = (file) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPendingFile({ name: file.name, mime: file.type, data: reader.result || '' });
-    };
-    reader.readAsDataURL(file);
-    return false;
-  };
-
-  const uploadPendingFile = async (transactionId) => {
-    if (!pendingFile) return;
-    try {
-      const res = await window.electronAPI.uploadDocument({
-        name: pendingFile.name,
-        mime: pendingFile.mime,
-        data: pendingFile.data,
-        category: 'check',
-        linkedId: transactionId,
-      });
-      if (!res?.success) throw new Error(res?.error || 'Upload failed');
-      setPendingFile(null);
-    } catch (e) {
-      console.error('[attachments] check attachment upload failed:', e);
-      message.error('The check was saved, but the attachment could not be stored. Please try attaching the file again.');
-    }
-  };
-
-  const loadDocuments = async (linkedId) => {
-    try {
-      const list = await window.electronAPI.getDocuments('check', String(linkedId));
-      setAttachedDocs(Array.isArray(list) ? list : []);
-    } catch { setAttachedDocs([]); }
-  };
-
-  const openDocument = async (id) => {
-    const res = await window.electronAPI.openDocument(id);
-    if (!res?.success) message.error(res?.error || 'Unable to open file');
-  };
-
-  const deleteDocument = async (id) => {
-    const res = await window.electronAPI.deleteDocument(id);
-    if (res?.success) {
-      setAttachedDocs(prev => prev.filter(d => d.id !== id));
-      message.success('File deleted');
-    } else {
-      message.error(res?.error || 'Delete failed');
-    }
-  };
-  /* ── end file helpers ── */
-
   const amountWords = useMemo(() => {
     const n = Number(amount || 0);
     if (n === 0) return 'Zero and 00/100 Dollars';
@@ -408,11 +358,11 @@ const CheckPrinting = () => {
       return `${toWords(dollars)} and ${String(cents).padStart(2, '0')}/100`;
     })();
 
-    // Written amount (in words) — preprinted stock supplies the line,
+    // Written amount (in words) â€” preprinted stock supplies the line,
     // so the words print cleanly with a rule below (QuickBooks-style).
     const wordsLine = words;
 
-    // ── Stub detail rows ──────────────────────────────────────────────
+    // â”€â”€ Stub detail rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const detailRows = splitLns.length > 0
       ? splitLns.map(l => `
           <tr>
@@ -426,7 +376,7 @@ const CheckPrinting = () => {
           </tr>`
         : '';
 
-    // ── Remittance stub (two copies rendered below check) ────────────
+    // â”€â”€ Remittance stub (two copies rendered below check) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const stub = () => `
       <div style="padding:8px 28px 6px; font-family:Arial,sans-serif; min-height:155px; box-sizing:border-box;">
         <!-- Stub header row: company | date -->
@@ -458,31 +408,32 @@ const CheckPrinting = () => {
         </table>
       </div>`;
 
-    /* ═══════════════════════════════════════════════════════════════════
-       CHECK BODY — pre-printed US check stock layout.
+    /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       CHECK BODY â€” pre-printed US check stock layout.
        Prints ONLY the dynamic fields, in this vertical order:
 
            Date                                    (top right)
            Numeric amount                          (right)
+           Payee name (bold)                       (above the words)
            Written amount                          (in words)
-           Payee name + address lines              (below the words)
+           Payee address lines                     (below the words)
            Memo                                    (only if entered)
 
        Static stock elements are NOT printed: the check number, the amount
        rule under the written amount, the cheque outline, and the signature
        line / "Authorized Signature" label. Two remittance stubs follow.
        All physical offsets live in the :root block above.
-       ═══════════════════════════════════════════════════════════════════ */
+       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
     const payeeAddrLines = (payeeAddr || '').split('\n').filter(Boolean);
 
     return `<!doctype html><html><head><title>Check</title>
     <style>
-      /* ══════════════════════════════════════════════════════════════════
-         PHYSICAL CALIBRATION — the only place offsets are defined.
+      /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+         PHYSICAL CALIBRATION â€” the only place offsets are defined.
          Tune these against a real print run; nothing below hard-codes a
          position. Moving --check-offset-x/y shifts the whole cheque body
          as one piece without disturbing the internal layout.
-         ══════════════════════════════════════════════════════════════════ */
+         â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
       :root {
         --check-offset-x: 0in;    /* nudge the whole body left/right */
         --check-offset-y: 0in;    /* nudge the whole body up/down    */
@@ -490,8 +441,9 @@ const CheckPrinting = () => {
         --check-pad-right: 28px;  /* right inset of the printed fields */
         --check-date-top: 8px;    /* date band            */
         --check-amount-top: 26px; /* numeric amount       */
-        --check-words-top: 14px;  /* written amount       */
-        --check-addr-top: 14px;   /* payee name + address */
+        --check-payee-top: 6px;   /* payee name           */
+        --check-words-top: 6px;   /* written amount       */
+        --check-addr-top: 14px;   /* payee address        */
         --check-memo-top: 8px;    /* memo                 */
       }
       @page { margin: 0.25in 0.35in; size: letter portrait; }
@@ -517,14 +469,17 @@ const CheckPrinting = () => {
       .amount-row { display: flex; justify-content: flex-end; align-items: flex-end; margin-top: var(--check-amount-top); }
       .amount-box { font-size: 12px; font-weight: 700; white-space: nowrap; padding: 2px 10px; }
 
+      /* ---------- PAYEE NAME (bold) - printed ABOVE the written amount ------ */
+      .payee-row  { margin-top: var(--check-payee-top); }
+      .payee-name { font-weight: 700; font-size: 14px; }
+
       /* ---------- WRITTEN AMOUNT (largest of the three; no rule beneath,
                      the pre-printed stock supplies it) ---------- */
       .words-row { margin-top: var(--check-words-top); }
       .words-text { font-size: 16px; letter-spacing: 0.02em; display: block; }
 
-      /* ---------- PAYEE NAME + ADDRESS (below the written amount) ---------- */
-      .addr-window { margin-top: var(--check-addr-top); padding-left: 40px; font-size: 12px; line-height: 1.45; min-height: 64px; }
-      .addr-name   { font-weight: 700; font-size: 14px; }
+      /* ---------- PAYEE ADDRESS (below the written amount) ---------- */
+      .addr-window { margin-top: var(--check-addr-top); font-size: 12px; line-height: 1.45; min-height: 64px; }
 
       /* ---------- MEMO ---------- */
       .memo-sig-row { margin-top: var(--check-memo-top); }
@@ -535,7 +490,7 @@ const CheckPrinting = () => {
       .stub-wrap.stub-last { border-bottom: none; }
     </style></head><body>
 
-      <!-- ═══════════════ CHECK BODY ═══════════════ -->
+      <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• CHECK BODY â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
       <div class="check-wrap">
         <div class="check-inner">
 
@@ -550,17 +505,22 @@ const CheckPrinting = () => {
             <span class="amount-box">${cSym}${amtStr}</span>
           </div>
 
-          <!-- WRITTEN AMOUNT (in words). No rule beneath it — the
+          <!-- PAYEE NAME (bold) - printed ABOVE the written amount, as the
+               pre-printed cheque stock expects. It is ALSO printed on the
+               remittance stub below; the two serve different parts of the
+               physical cheque and must not be deduplicated. -->
+          <div class="payee-row">
+            <span class="payee-name">${payeeName || ''}</span>
+          </div>
+
+          <!-- WRITTEN AMOUNT (in words). No rule beneath it - the
                pre-printed stock supplies that line. -->
           <div class="words-row">
             <span class="words-text">${wordsLine}</span>
           </div>
 
-          <!-- PAYEE NAME + ADDRESS — printed BELOW the written amount.
-               The name appears here only (it is not repeated on the
-               amount row). -->
+          <!-- PAYEE ADDRESS - printed BELOW the written amount. -->
           <div class="addr-window">
-            <div class="addr-name">${payeeName || ''}</div>
             ${payeeAddrLines.map(l => `<div>${l}</div>`).join('')}
           </div>
 
@@ -573,10 +533,10 @@ const CheckPrinting = () => {
         </div>
       </div>
 
-      <!-- ═══════════════ STUB 1 ═══════════════ -->
+      <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• STUB 1 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
       <div class="stub-wrap">${stub()}</div>
 
-      <!-- ═══════════════ STUB 2 ═══════════════ -->
+      <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• STUB 2 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
       <div class="stub-wrap stub-last">${stub()}</div>
 
     </body></html>`;
@@ -638,7 +598,7 @@ const CheckPrinting = () => {
       const userAmt = Number(values.amount || 0);
       const validSplits = splitLines.filter(l => Number(l.amount) > 0);
       const totalAmt = validSplits.length > 0 ? splitTotal : userAmt;
-      // Validate split lines match check amount — block if mismatch
+      // Validate split lines match check amount â€” block if mismatch
       if (validSplits.length > 0 && userAmt > 0 && Math.abs(splitTotal - userAmt) > 0.005) {
         message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not equal the check amount (${cSym}${userAmt.toFixed(2)}). Please correct the amounts before proceeding.`);
         setLoading(false);
@@ -671,7 +631,7 @@ const CheckPrinting = () => {
       const res = await window.electronAPI.insertTransaction(payload);
       if (res && res.error) throw new Error(res.error);
       const txId = res?.lastInsertRowid || res?.id || res?.invoiceId || null;
-      if (txId) await uploadPendingFile(txId);
+      if (txId) await attachmentRef.current?.uploadPending(txId);
       message.success(`Check #${values.checkNumber} recorded successfully`);
       if (!recordOnlyFlag) {
         const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
@@ -680,8 +640,8 @@ const CheckPrinting = () => {
       form.resetFields();
       setSplitLines([{ key: 1, account: '', description: '', amount: 0 }]);
       setAmount(0);
-      setPendingFile(null);
-      setAttachedDocs([]);
+      setPendingFiles([]);
+      
       form.setFieldsValue({ date: moment(), checkNumber: String(Number(values.checkNumber || 0) + 1) });
       reloadAll();
     } catch (e) {
@@ -697,7 +657,7 @@ const CheckPrinting = () => {
       const userAmt = Number(values.amount || 0);
       const validSplits = splitLines.filter(l => Number(l.amount) > 0);
       const totalAmt = validSplits.length > 0 ? splitTotal : userAmt;
-      // Validate split lines match check amount — block if mismatch
+      // Validate split lines match check amount â€” block if mismatch
       if (validSplits.length > 0 && userAmt > 0 && Math.abs(splitTotal - userAmt) > 0.005) {
         message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not equal the check amount (${cSym}${userAmt.toFixed(2)}). Please correct the amounts before proceeding.`);
         setLoading(false);
@@ -717,7 +677,7 @@ const CheckPrinting = () => {
       };
       const res = await window.electronAPI.updateTransaction(editingId, payload);
       if (res && res.error) throw new Error(res.error);
-      await uploadPendingFile(editingId);
+      await attachmentRef.current?.uploadPending(editingId);
       message.success(`Check #${values.checkNumber} updated`);
       if (!updateOnly) {
         const vals = { ...values, accountName: selectedAccount?.accountName || selectedAccount?.name, splitLines: splitLines.filter(l => l.amount > 0), _company: company };
@@ -734,8 +694,8 @@ const CheckPrinting = () => {
 
   const cancelEdit = () => {
     setEditingId(null);
-    setPendingFile(null);
-    setAttachedDocs([]);
+    setPendingFiles([]);
+    
     form.resetFields();
     setSplitLines([{ key: 1, account: '', description: '', amount: 0 }]);
     setAmount(0);
@@ -766,6 +726,33 @@ const CheckPrinting = () => {
     }
   };
 
+  // A check that pays one or more bills gets an explicit warning naming those
+  // bills; a normal write check keeps the plain delete confirmation.
+  const confirmDeleteCheck = async (record) => {
+    if (!record || !record.id) return;
+    let applications = [];
+    try {
+      const res = await window.electronAPI.getCheckBillApplications?.(record.id);
+      if (Array.isArray(res)) applications = res;
+    } catch { applications = []; }
+
+    const billLinked = applications.length > 0;
+    const total = applications.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+    const content = billLinked
+      ? (applications.length === 1
+          ? `This check is applied to 1 vendor bill (${applications[0].billNumber || '#' + applications[0].billId}) for ${cSym} ${fmt(total)}. Deleting it will reverse the payment and reopen the affected bill. This cannot be undone.`
+          : `This check is applied to ${applications.length} vendor bills totaling ${cSym} ${fmt(total)}. Deleting it will reverse those payment allocations and reopen the affected bills. This cannot be undone.`)
+      : 'This will permanently delete the check and reverse its posting (restore the bank/expense accounts). This cannot be undone.';
+
+    Modal.confirm({
+      title: `Delete Check #${record.reference}?`,
+      content,
+      okText: billLinked ? 'Delete & Reverse Payment' : 'Delete',
+      okType: 'danger',
+      onOk: () => handleDelete(record),
+    });
+  };
+
   // Only treat the description as a real memo when it was user-typed (not an
   // auto-generated placeholder like "Check #12 to Acme" or a bill-payment banner).
   const memoFromDescription = (desc) => {
@@ -779,7 +766,7 @@ const CheckPrinting = () => {
   const handleReprintHistory = (record) => {
     const desc = (record.description || '');
     const payeeName = record.payee_name?.trim() ||
-      desc.replace(/^Check #?\d*\s*to\s*/i, '').replace(/^Payment for bill\s+\S+\s*-\s*/i, '').replace(/^Bill payment to\s+(.+?)\s*—?\s*(?:Bill|#)\s*\S*/i, '$1').trim() ||
+      desc.replace(/^Check #?\d*\s*to\s*/i, '').replace(/^Payment for bill\s+\S+\s*-\s*/i, '').replace(/^Bill payment to\s+(.+?)\s*â€”?\s*(?:Bill|#)\s*\S*/i, '$1').trim() ||
       desc;
     // The transaction carries its own payee address, so reprinting never needs
     // a second name-based payee lookup. The lookup is a FALLBACK only, for
@@ -803,7 +790,7 @@ const CheckPrinting = () => {
     let payeeName = (record.payee_name || '').trim();
     if (!payeeName) {
       const desc = (record.description || '').replace(/^Check #?\d*\s*to\s*/i, '').trim();
-      const m = desc.match(/^Payment for bill\s+\S+\s*-\s*(.+)$/i) || desc.match(/^Bill payment to\s+(.+?)\s*—?\s*(?:Bill|#)/i);
+      const m = desc.match(/^Payment for bill\s+\S+\s*-\s*(.+)$/i) || desc.match(/^Bill payment to\s+(.+?)\s*â€”?\s*(?:Bill|#)/i);
       payeeName = (m && m[1] ? m[1] : desc).trim() || record.description || '';
     }
     // Prefer the address stored on the transaction; fall back to the payee
@@ -829,7 +816,6 @@ const CheckPrinting = () => {
       : [{ key: 1, account: '', accountId: undefined, description: '', amount: Number(record.amount || 0) }];
     setSplitLines(existingLines);
     setEditingId(record.id);
-    loadDocuments(record.id);
     const checkAmount = Number(record.amount || record.debit || 0);
     setAmount(checkAmount);
     form.setFieldsValue({
@@ -873,13 +859,7 @@ const CheckPrinting = () => {
         <Tooltip title="View journal entry"><Button type="text" size="small" icon={<BookOutlined />} onClick={() => openCheckJournal(r)} /></Tooltip>
         <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEditCheck(r)} /></Tooltip>
         <Tooltip title="Reprint"><Button type="text" size="small" icon={<PrinterOutlined />} onClick={() => handleReprintHistory(r)} /></Tooltip>
-        <Tooltip title="Delete & reverse payment"><Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({
-          title: `Delete Check #${r.reference}?`,
-          content: 'This will permanently delete the check and reverse its payment (restore the bill to unpaid and undo the bank/expense posting). This cannot be undone.',
-          okText: 'Delete',
-          okType: 'danger',
-          onOk: () => handleDelete(r),
-        })} /></Tooltip>
+        <Tooltip title="Delete & reverse payment"><Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => confirmDeleteCheck(r)} /></Tooltip>
       </Space>
     )},
   ];
@@ -904,7 +884,7 @@ const CheckPrinting = () => {
         <Col xs={12} sm={6}>
           <Card size="small" style={{ borderTop: '3px solid #52c41a' }}>
             <Statistic title="Bank Balance"
-              value={watchAccountId && selectedAccount ? Number(selectedAccount.balance || 0) : '—'}
+              value={watchAccountId && selectedAccount ? Number(selectedAccount.balance || 0) : 'â€”'}
               precision={watchAccountId && selectedAccount ? 2 : undefined}
               prefix={watchAccountId && selectedAccount ? cSym : undefined}
               valueStyle={{ fontSize: 18, color: '#52c41a' }}
@@ -975,7 +955,7 @@ const CheckPrinting = () => {
                           if (val.startsWith('v-')) {
                             checkOpenBills(Number(val.replace('v-', '')), name);
                           } else {
-                            // Non-vendor payee (customer/employee) — clear any prior vendor warning
+                            // Non-vendor payee (customer/employee) â€” clear any prior vendor warning
                             setShowInlineWarning(false);
                             setOpenBills([]);
                             setOpenBillsTotal(0);
@@ -1057,24 +1037,15 @@ const CheckPrinting = () => {
               </FormSection>
 
               <FormSection title="Attachments" icon={<PaperClipOutlined />}>
-                {attachedDocs.length > 0 && (
-                  <div style={{ marginBottom: 6 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>Attached files:</Text>
-                    {attachedDocs.map(doc => (
-                      <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                        <span style={{ fontSize: 12 }}>{doc.document_name}</span>
-                        <Button size="small" type="link" onClick={() => openDocument(doc.id)}>Open</Button>
-                        <Button size="small" type="link" danger onClick={() => deleteDocument(doc.id)}>Delete</Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <Upload beforeUpload={handleFileSelect} showUploadList={false} accept="*/*">
-                  <Button icon={<UploadOutlined />} size="small"><PaperClipOutlined /> {pendingFile ? 'Change File' : 'Attach Receipt'}</Button>
-                </Upload>
-                {pendingFile && (
-                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>{pendingFile.name} (pending)</Text>
-                )}
+                <AttachmentManager
+                  ref={attachmentRef}
+                  entityType="check"
+                  entityId={editingId}
+                  pendingFiles={pendingFiles}
+                  onPendingChange={setPendingFiles}
+                  entityLabel="Check"
+                  emptyText="No attachments yet — attach the check stub or receipt."
+                />
               </FormSection>
 
               <FormSection title="Split Lines (Expense Accounts)" icon={<UnorderedListOutlined />}>
@@ -1271,3 +1242,4 @@ const CheckPrinting = () => {
 };
 
 export default CheckPrinting;
+

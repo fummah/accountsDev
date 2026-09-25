@@ -34,8 +34,24 @@ const { code } = babel.transformSync(src, {
   filename: RENDERER, babelrc: false, configFile: false,
   presets: [[presetEnv, { targets: { node: 'current' }, modules: 'commonjs' }]],
 });
+// The renderer now imports the shared line-item helper; transpile it too and
+// hand it to the shim so this Node harness can resolve the relative import.
+const lineItemsPath = path.join(FE, 'src', 'utils', 'lineItems.js');
+const lineItemsCode = babel.transformSync(fs.readFileSync(lineItemsPath, 'utf8'), {
+  filename: lineItemsPath, babelrc: false, configFile: false,
+  presets: [[presetEnv, { targets: { node: 'current' }, modules: 'commonjs' }]],
+}).code;
+const lineItemsMod = { exports: {} };
+// eslint-disable-next-line no-new-func
+new Function('require', 'module', 'exports', lineItemsCode)(require, lineItemsMod, lineItemsMod.exports);
+
 const mod = { exports: {} };
-const shimRequire = (id) => (id === 'jspdf' ? require(jspdfPath) : id === 'jspdf-autotable' ? require(autotablePath) : require(id));
+const shimRequire = (id) => {
+  if (id === 'jspdf') return require(jspdfPath);
+  if (id === 'jspdf-autotable') return require(autotablePath);
+  if (id === '../../../utils/lineItems') return lineItemsMod.exports;
+  return require(id);
+};
 // eslint-disable-next-line no-new-func
 new Function('require', 'module', 'exports', '__filename', '__dirname', code)(shimRequire, mod, mod.exports, RENDERER, path.dirname(RENDERER));
 const { generateDocumentPDF } = mod.exports;

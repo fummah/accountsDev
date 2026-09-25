@@ -102,8 +102,9 @@ const money = (n) => Math.round(Number(n || 0) * 100) / 100;
 
   const legacyRows = db.prepare("SELECT COUNT(*) AS c FROM expense_lines WHERE line_type IS NULL OR line_type = ''").get().c;
   const nonAccount = db.prepare("SELECT COUNT(*) AS c FROM expense_lines WHERE line_type IS NOT NULL AND line_type <> '' AND line_type <> 'account'").get().c;
-  check('every pre-existing line reads as an account line',
-    nonAccount === 0, `${nonAccount} row(s) carry a non-account line_type`);
+  const garbage = db.prepare("SELECT COUNT(*) AS c FROM expense_lines WHERE line_type IS NOT NULL AND line_type <> '' AND line_type NOT IN ('account','item')").get().c;
+  check('every line carries a known line_type (account or item)',
+    garbage === 0, `${garbage} row(s) carry an unknown line_type`);
   console.log(`  legacy rows still reading as account lines: ${legacyRows}`);
 
   // ── (d) The seeded system account the item line depends on ─────────────
@@ -302,8 +303,8 @@ const money = (n) => Math.round(Number(n || 0) * 100) / 100;
   check('EnterBill renders the Type | Item/Account | Description | Qty | Rate | Amount | Warehouse | Actions columns',
     ['Type', 'Item / Account', 'Description', 'Qty', 'Amount', 'Warehouse'].every(h => billSrc.includes(`title: '${h}'`) || billSrc.includes(`title: \`${h}`)),
     'a column header is missing');
-  check('EnterBill only offers inventory-tracking products on an item line',
-    /getInventoryProducts\(products\)/.test(billSrc));
+check('EnterBill offers purchasable items (inventory + non-inventory + service) on an item line',
+  /isPurchasable\(/.test(billSrc));
   check('EnterBill does not prefill an item line rate from the selling price',
     !/rate:\s*(prod|product|p)\.price/.test(billSrc));
 

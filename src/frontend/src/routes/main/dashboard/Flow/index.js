@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useHistory } from "react-router-dom";
-import { Row, Col, Card, Spin, Button, Modal, message, Table, Tag } from "antd";
+import { Row, Col, Card, Spin, Button, Modal, message, Table, Tag, Alert } from "antd";
 import {
   BankOutlined, DollarOutlined, CreditCardOutlined, WalletOutlined,
   FundOutlined, RiseOutlined, FallOutlined,
@@ -92,6 +92,7 @@ const Flow = () => {
   const history = useHistory();
   const { fmt } = useCurrency();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const rowRef = useRef(null);
   const [balances, setBalances] = useState({});
   const [accountNames, setAccountNames] = useState({});
@@ -102,16 +103,30 @@ const Flow = () => {
 
   useEffect(() => {
     loadData();
+    // "Live" refresh: re-read the balances when the user returns to the window
+    // (e.g. right after posting a transaction on another screen). No polling.
+    const onFocus = () => loadData();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      // Primary: pre-aggregated balances from journal_lines (authoritative GL source)
-      const dbBals = await window.electronAPI?.getDashboardBalances?.() || {};
-      // Secondary: full account list for drill-down names
+      // Authoritative live balances from the GL (backend aggregates journal
+      // lines + opening balances per category). On failure the backend returns
+      // { error, bank: null, ... } so a failed load is NEVER shown as $0.00.
+      const dbBals = await window.electronAPI?.getDashboardBalances?.();
+      if (!dbBals || dbBals.error || dbBals.bank == null) {
+        throw new Error((dbBals && dbBals.error) || 'Dashboard balances could not be loaded');
+      }
+      // Full account list for drill-down names / counts.
       const accounts = await window.electronAPI?.getChartOfAccounts?.() || [];
-      const acctList = Array.isArray(accounts) ? accounts : [];
+      // Same population as the balance totals (Trial Balance / original rule):
+      // active accounts only, so the count and drill-down reconcile with the card.
+      const acctList = (Array.isArray(accounts) ? accounts : [])
+        .filter(a => String(a.status || 'Active').toLowerCase() === 'active');
 
       const bals = {};
       const names = {};
@@ -127,8 +142,11 @@ const Flow = () => {
       setBalances(bals);
       setAccountNames(names);
       setCategoryAccounts(catAccounts);
-
-    } catch (e) { console.error(e); }
+      setLoadError(null);
+    } catch (e) {
+      console.error(e);
+      setLoadError(e?.message || 'Dashboard balances could not be loaded');
+    }
     setLoading(false);
   };
 
@@ -138,6 +156,16 @@ const Flow = () => {
 
   return (
     <Auxiliary>
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Could not load live account balances"
+          description={loadError}
+          action={<Button size="small" onClick={loadData}>Retry</Button>}
+        />
+      )}
       {/* ──── Account Balances ──── */}
       <div style={{ marginBottom: 20, width: '100%' }}>
         <Row gutter={[12, 12]}>
@@ -164,8 +192,8 @@ const Flow = () => {
                       </Tag>
                     )}
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: (balances[cat.key] || 0) < 0 ? '#f5222d' : '#262626' }}>
-                    {fmt(balances[cat.key])}
+                  <div style={{ fontSize: 18, fontWeight: 700, color: (!loadError && (balances[cat.key] || 0) < 0) ? '#f5222d' : '#262626' }}>
+                    {loadError ? '—' : fmt(balances[cat.key])}
                   </div>
                   {count === 1 && (
                     <div style={{ fontSize: 10, color: '#aaa', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -392,7 +420,12 @@ const Flow = () => {
       {/* ──── Drill-Down Modal ──── */}
       {drillDown && (() => {
         const accts = categoryAccounts[drillDown.key] || [];
-        const total = accts.reduce((s, a) => s + Number(a.balance || 0), 0);
+        // The SAME per-account figure the card totals: the account's direct
+        // balance (never a rolled-up parent), so the drill-down sum equals the
+        // card amount and a grouping parent + its children are not double
+        // counted.
+        const ownBal = (a) => Number(a.ownBalance != null ? a.ownBalance : (a.balance || 0)) || 0;
+        const total = accts.reduce((s, a) => s + ownBal(a), 0);
         const isIncomeOrExpense = ['revenue','expenses'].includes(drillDown.key);
         const drillColumns = [
           {
@@ -420,14 +453,16 @@ const Flow = () => {
           },
           {
             title: 'Balance',
-            dataIndex: 'balance',
             key: 'balance',
             align: 'right',
-            render: v => (
-              <span style={{ fontWeight: 600, color: Number(v) < 0 ? '#f5222d' : '#262626' }}>
-                {fmt(v)}
-              </span>
-            ),
+            render: (_, r) => {
+              const v = ownBal(r);
+              return (
+                <span style={{ fontWeight: 600, color: v < 0 ? '#f5222d' : '#262626' }}>
+                  {fmt(v)}
+                </span>
+              );
+            },
           },
         ];
         return (

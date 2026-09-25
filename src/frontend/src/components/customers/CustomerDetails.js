@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Descriptions, Table, Tabs, Button, Space, Tag, Statistic, Row, Col, message, Form, Modal, Spin, Empty, List, Avatar, Typography } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, FileTextOutlined, DollarOutlined, PlusOutlined, LeftOutlined, RightOutlined, FileDoneOutlined, MailOutlined, PhoneOutlined, ClockCircleOutlined, CheckCircleOutlined, SolutionOutlined, SnippetsOutlined, HistoryOutlined, ProfileOutlined, FunnelPlotOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Table, Tabs, Button, Space, Tag, Statistic, Row, Col, message, Form, Modal, Spin, Empty, List, Avatar, Typography, Divider, InputNumber, Select, DatePicker } from 'antd';
+import { ArrowLeftOutlined, EditOutlined, FileTextOutlined, DollarOutlined, PlusOutlined, LeftOutlined, RightOutlined, FileDoneOutlined, MailOutlined, PhoneOutlined, ClockCircleOutlined, CheckCircleOutlined, SolutionOutlined, SnippetsOutlined, HistoryOutlined, ProfileOutlined, FunnelPlotOutlined, RollbackOutlined, FileProtectOutlined } from '@ant-design/icons';
 import { useParams, useHistory, Link } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { formatPhone } from '../../utils/phone';
 import CustomerPaymentHistory from './payments/CustomerPaymentHistory';
+import RefundInvoiceModal from './payments/RefundInvoiceModal';
+import AccountSelect from '../shared/AccountSelect';
 import CustomerContactFields from './shared/CustomerContactFields';
 import { resolveTaxRateFields, taxRateFormValue, describeTaxRate } from '../../utils/taxRate';
 import { MODAL_BODY_SCROLL_STYLE, MODAL_WIDTH } from '../shared/FormSection';
@@ -24,6 +26,21 @@ const CustomerDetails = () => {
   const [customer, setCustomer] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [quotes, setQuotes] = useState([]);
+  const [refunds, setRefunds] = useState([]);
+  const [creditNotes, setCreditNotes] = useState([]);
+  const [issueCreditOpen, setIssueCreditOpen] = useState(false);
+  const [issueCreditInvoice, setIssueCreditInvoice] = useState(null);
+  const [cnDetail, setCnDetail] = useState(null);
+  const [cnDetailOpen, setCnDetailOpen] = useState(false);
+  const [cnApply, setCnApply] = useState(null);
+  const [cnApplyInvoice, setCnApplyInvoice] = useState(null);
+  const [cnRefund, setCnRefund] = useState(null);
+  const [cnRefundAmount, setCnRefundAmount] = useState(0);
+  const [cnRefundBank, setCnRefundBank] = useState(null);
+  const [cnRefundMethod, setCnRefundMethod] = useState('Bank Transfer');
+  const [cnRefundDate, setCnRefundDate] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [cnBusy, setCnBusy] = useState(false);
   const [leads, setLeads] = useState([]);
   const [allCustomers, setAllCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -54,6 +71,18 @@ const CustomerDetails = () => {
       const qArr = Array.isArray(allQRaw) ? allQRaw : allQRaw || [];
       setQuotes(qArr.filter(q => String(q.customer) === String(id) || String(q.customer_id) === String(id)));
       setLeads(Array.isArray(leadsRaw) ? leadsRaw : []);
+      try {
+        const rfs = await window.electronAPI.customerRefundsByCustomer?.(id);
+        setRefunds(Array.isArray(rfs) ? rfs.filter(r => String(r.status || '').toLowerCase() !== 'reversed') : []);
+      } catch { setRefunds([]); }
+      try {
+        const cns = await window.electronAPI.creditNotesByCustomer?.(id);
+        setCreditNotes(Array.isArray(cns) ? cns : []);
+      } catch { setCreditNotes([]); }
+      try {
+        const accs = await window.electronAPI.getChartOfAccounts?.();
+        setAccounts(Array.isArray(accs) ? accs : (accs?.data || []));
+      } catch { setAccounts([]); }
     } catch {
       message.error('Failed to load customer');
     }
@@ -102,6 +131,43 @@ const CustomerDetails = () => {
   };
 
   const custName = customer?.display_name || customer?.name || `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim() || 'Customer';
+
+  // ── Customer credit / refund actions (managed in Customer Details) ────────
+  const openCreditNote = async (cn) => {
+    try {
+      const full = await window.electronAPI.creditNoteGet?.(cn.id);
+      setCnDetail(full && !full.error ? full : cn);
+    } catch { setCnDetail(cn); }
+    setCnDetailOpen(true);
+  };
+  const openIssueCredit = (invoice) => { setIssueCreditInvoice(invoice || null); setIssueCreditOpen(true); };
+  const applyCreditNote = async () => {
+    if (!cnApply || !cnApplyInvoice) { message.warning('Select an invoice'); return; }
+    setCnBusy(true);
+    try {
+      const res = await window.electronAPI.creditNoteApply?.(cnApply.id, cnApplyInvoice);
+      if (res?.success) { message.success('Credit applied to invoice'); setCnApply(null); setCnApplyInvoice(null); setCnDetailOpen(false); load(); }
+      else message.error(res?.error || 'Failed to apply credit');
+    } finally { setCnBusy(false); }
+  };
+  const openRefundCredit = (cn) => {
+    setCnRefund(cn);
+    setCnRefundAmount(Math.max(0, Number(cn.total || 0)));
+    setCnRefundBank(null); setCnRefundMethod('Bank Transfer'); setCnRefundDate(moment());
+  };
+  const doRefundCredit = async () => {
+    if (!cnRefund || !(Number(cnRefundAmount) > 0) || !cnRefundBank) { message.warning('Enter an amount and select a bank account'); return; }
+    setCnBusy(true);
+    try {
+      const res = await window.electronAPI.customerRefundCreate?.({
+        creditNoteId: cnRefund.id, customerId: id, amount: Number(cnRefundAmount),
+        bankAccountId: cnRefundBank, method: cnRefundMethod,
+        date: cnRefundDate ? cnRefundDate.format('YYYY-MM-DD') : undefined, reason: 'Credit refund',
+      });
+      if (res?.success) { message.success('Refund created'); setCnRefund(null); setCnDetailOpen(false); load(); }
+      else message.error(res?.error || 'Refund failed');
+    } finally { setCnBusy(false); }
+  };
   const receivableInvoices = invoices.filter(i => ['Open', 'Partially Paid'].includes(normalizeStatus(i.status)));
   const totalReceivables = receivableInvoices.reduce((s, i) => s + (Number(i.balance != null ? i.balance : i.amount) || 0), 0);
   const totalPaid = invoices.reduce((s, i) => s + (Number(i.totalPaid != null ? i.totalPaid : (normalizeStatus(i.status) === 'Paid' ? i.amount : 0)) || 0), 0);
@@ -135,6 +201,8 @@ const CustomerDetails = () => {
       } },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 120,
       render: s => <Tag color={statusColors[s] || 'default'}>{s}</Tag> },
+    { title: 'Actions', key: 'actions', width: 140,
+      render: (_, r) => <Button size="small" icon={<RollbackOutlined />} onClick={() => openIssueCredit(r)}>Issue Credit</Button> },
   ];
 
   const quoteColumns = [
@@ -305,7 +373,10 @@ const CustomerDetails = () => {
         {activeTab === 'invoices' && (
           <>
             <div style={{ marginBottom: 12 }}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={function() { history.push('/main/customers/invoices/new?customer=' + id); }}>New Invoice</Button>
+              <Space>
+                <Button type="primary" icon={<PlusOutlined />} onClick={function() { history.push('/main/customers/invoices/new?customer=' + id); }}>New Invoice</Button>
+                <Button icon={<RollbackOutlined />} onClick={() => openIssueCredit(null)}>Issue Credit</Button>
+              </Space>
             </div>
             <Table dataSource={invoices} columns={invoiceColumns} rowKey="id" size="small"
               pagination={{ defaultPageSize: 15, showTotal: function(t) { return t + ' invoices'; } }} />
@@ -323,12 +394,20 @@ const CustomerDetails = () => {
         )}
 
         {activeTab === 'transactions' && (
-          <Table dataSource={[].concat(invoices.map(function(i) { return Object.assign({}, i, { docType: 'Invoice' }); }), quotes.map(function(q) { return Object.assign({}, q, { docType: 'Quote' }); }))
-            .sort(function(a, b) { return (b.id || 0) - (a.id || 0); })}
+          <Table dataSource={[].concat(
+            invoices.map(function(i) { return Object.assign({}, i, { docType: 'Invoice' }); }),
+            quotes.map(function(q) { return Object.assign({}, q, { docType: 'Quote' }); }),
+            refunds.map(function(r) { return Object.assign({}, r, { docType: 'Refund', number: r.refund_number, start_date: r.date, amount: -Math.abs(Number(r.amount || 0)), status: r.status }); }),
+            creditNotes.map(function(cn) { return Object.assign({}, cn, { docType: 'Credit Note', number: cn.credit_note_number, start_date: cn.date, amount: -Math.abs(Number(cn.total || 0)), status: cn.status }); })
+          ).sort(function(a, b) { return (b.id || 0) - (a.id || 0); })}
             columns={[
-              { title: 'Type', dataIndex: 'docType', key: 'type', width: 80, render: function(t) { return <Tag color={t === 'Invoice' ? 'blue' : 'purple'}>{t}</Tag>; } },
-              { title: '#', dataIndex: 'number', key: 'number', width: 110,
-                render: function(t, r) { return <Link to={'/main/customers/' + (r.docType === 'Invoice' ? 'invoices' : 'quotes') + '/edit/' + r.id}>{t || '#' + r.id}</Link>; } },
+              { title: 'Type', dataIndex: 'docType', key: 'type', width: 110, render: function(t) { return <Tag color={t === 'Invoice' ? 'blue' : t === 'Refund' ? 'red' : t === 'Credit Note' ? 'orange' : 'purple'}>{t}</Tag>; } },
+              { title: '#', dataIndex: 'number', key: 'number', width: 120,
+                render: function(t, r) {
+                  if (r.docType === 'Refund') return t || 'REF';
+                  if (r.docType === 'Credit Note') return <a onClick={function() { openCreditNote(r); }}>{t || 'CN'}</a>;
+                  return <Link to={'/main/customers/' + (r.docType === 'Invoice' ? 'invoices' : 'quotes') + '/edit/' + r.id}>{t || '#' + r.id}</Link>;
+                } },
               { title: 'Date', dataIndex: 'start_date', key: 'date', width: 100, render: function(d) { return d ? moment(d).format('MM/DD/YYYY') : '-'; } },
               { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120,
                 render: function(v) { return <span style={{ fontWeight: 500 }}>{cSym} {Number(v || 0).toFixed(2)}</span>; } },
@@ -414,6 +493,87 @@ const CustomerDetails = () => {
             address1Placeholder="123 Main St" address2Placeholder="Apt/Suite"
             countryPlaceholder="Select a country" />
         </Form>
+      </Modal>
+
+      {/* Issue Credit (customer-scoped; invoice optional) — reuses the Credit Memo engine */}
+      <RefundInvoiceModal
+        customerId={id}
+        customerName={custName}
+        initialInvoiceId={issueCreditInvoice?.id}
+        visible={issueCreditOpen}
+        onClose={() => { setIssueCreditOpen(false); setIssueCreditInvoice(null); }}
+        onSuccess={load}
+      />
+
+      {/* Credit Note detail (reuses the existing credit-note API) */}
+      <Modal
+        title={cnDetail ? `Credit Note ${cnDetail.credit_note_number || ''}` : 'Credit Note'}
+        visible={cnDetailOpen}
+        onCancel={() => { setCnDetailOpen(false); setCnDetail(null); }}
+        footer={cnDetail ? [
+          (cnDetail.status === 'Draft' || cnDetail.status === 'Issued') && <Button key="apply" icon={<CheckCircleOutlined />} onClick={() => { setCnApply(cnDetail); setCnApplyInvoice(null); }}>Apply Credit</Button>,
+          <Button key="refund" icon={<RollbackOutlined />} onClick={() => openRefundCredit(cnDetail)}>Refund</Button>,
+          <Button key="close" onClick={() => { setCnDetailOpen(false); setCnDetail(null); }}>Close</Button>,
+        ].filter(Boolean) : null}
+        width={640}
+      >
+        {cnDetail && (
+          <>
+            <Descriptions size="small" column={2} bordered>
+              <Descriptions.Item label="Credit #">{cnDetail.credit_note_number}</Descriptions.Item>
+              <Descriptions.Item label="Date">{cnDetail.date ? moment(cnDetail.date).format('MM/DD/YYYY') : '-'}</Descriptions.Item>
+              <Descriptions.Item label="Reason">{cnDetail.reason || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Status"><Tag>{cnDetail.status}</Tag></Descriptions.Item>
+              <Descriptions.Item label="Total">{cSym} {Number(cnDetail.total || 0).toFixed(2)}</Descriptions.Item>
+              <Descriptions.Item label="Notes">{cnDetail.notes || '-'}</Descriptions.Item>
+            </Descriptions>
+            {Array.isArray(cnDetail.lines) && cnDetail.lines.length > 0 && (
+              <Table size="small" style={{ marginTop: 12 }} rowKey={(r, i) => i} pagination={false}
+                dataSource={cnDetail.lines}
+                columns={[
+                  { title: 'Description', dataIndex: 'description' },
+                  { title: 'Qty', dataIndex: 'quantity', align: 'right', width: 70 },
+                  { title: 'Price', dataIndex: 'unit_price', align: 'right', width: 100, render: v => `${cSym} ${Number(v || 0).toFixed(2)}` },
+                  { title: 'Amount', dataIndex: 'amount', align: 'right', width: 100, render: v => `${cSym} ${Number(v || 0).toFixed(2)}` },
+                ]} />
+            )}
+          </>
+        )}
+      </Modal>
+
+      {/* Apply Credit (only this customer's invoices) */}
+      <Modal title="Apply Credit to Invoice" visible={!!cnApply} onOk={applyCreditNote} confirmLoading={cnBusy}
+        onCancel={() => { setCnApply(null); setCnApplyInvoice(null); }} okText="Apply">
+        <Text type="secondary">Only this customer's invoices are listed.</Text>
+        <Select style={{ width: '100%', marginTop: 8 }} placeholder="Select invoice" value={cnApplyInvoice} onChange={setCnApplyInvoice} showSearch optionFilterProp="children">
+          {invoices.map(inv => <Select.Option key={inv.id} value={inv.id}>{`${inv.number || `INV-${inv.id}`} · ${inv.status || ''} · ${cSym} ${Number(inv.amount || 0).toFixed(2)}`}</Select.Option>)}
+        </Select>
+      </Modal>
+
+      {/* Refund Customer Credit (creates a linked Refund; the credit note remains) */}
+      <Modal title="Refund Customer Credit" visible={!!cnRefund} onOk={doRefundCredit} confirmLoading={cnBusy}
+        onCancel={() => setCnRefund(null)} okText="Refund" width={480}>
+        {cnRefund && (
+          <>
+            <Text>Credit {cnRefund.credit_note_number} · {cSym} {Number(cnRefund.total || 0).toFixed(2)} available</Text>
+            <div style={{ marginTop: 12 }}>
+              <div style={{ marginBottom: 4 }}>Refund Amount</div>
+              <InputNumber style={{ width: '100%' }} min={0} max={Number(cnRefund.total || 0)} precision={2} prefix={cSym} value={cnRefundAmount} onChange={v => setCnRefundAmount(v || 0)} />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <div style={{ marginBottom: 4 }}>Bank / Cash Account</div>
+              <AccountSelect accounts={accounts} allowedTypes={['Bank', 'Cash']} value={cnRefundBank} onChange={setCnRefundBank} placeholder="Select bank / cash account" />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <div style={{ marginBottom: 4 }}>Method</div>
+              <Select style={{ width: '100%' }} value={cnRefundMethod} onChange={setCnRefundMethod} options={['Bank Transfer', 'Cash', 'Check', 'EFT/ACH', 'Other'].map(m => ({ value: m, label: m }))} />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <div style={{ marginBottom: 4 }}>Date</div>
+              <DatePicker style={{ width: '100%' }} value={cnRefundDate} onChange={setCnRefundDate} />
+            </div>
+          </>
+        )}
       </Modal>
     </div>
     </Spin>

@@ -143,7 +143,7 @@ useEffect(() => {
           <div><p className="gx-text-grey h2">Overdue bills ({dueexpense}) </p></div>
           <div><h4 className="gx-mr-2 h4 gx-mb-0 gx-fs-xl gx-font-weight-medium">${formattedNumber(dueexpensemoney)}</h4></div>
         </div>
-        <span className="gx-text-primary gx-pointer" ><i className="icon icon-card gx-fs-sm gx-mr-2"/><Link to={{ pathname: "/inner/expenses", state: { tabKey: "2" } }}>View paid bills</Link></span> 
+        <span className="gx-text-primary gx-pointer" ><i className="icon icon-card gx-fs-sm gx-mr-2"/><Link to="/main/vendors/bills/pay">Pay Bills</Link></span> 
            <hr/>     
         </Col>
         <Col lg={12} md={12} sm={12} xs={24}>
@@ -151,7 +151,7 @@ useEffect(() => {
           <div><p className="gx-text-grey h2">Open bills ({openexpense}) </p></div>
           <div><h4 className="gx-mr-2 h4 gx-mb-0 gx-fs-xl gx-font-weight-medium">${formattedNumber(openexpensemoney)}</h4></div>
         </div> 
-        <span className="gx-text-primary gx-pointer" ><i className="icon icon-card gx-fs-sm gx-mr-2"/><Link to={{ pathname: "/inner/expenses", state: { tabKey: "1" } }}>New bill</Link></span> 
+        <span className="gx-text-primary gx-pointer" ><i className="icon icon-card gx-fs-sm gx-mr-2"/><Link to="/main/vendors/bills/enter">Enter Bills</Link></span> 
         <hr/>        
         </Col>
         </Row>

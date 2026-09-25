@@ -155,13 +155,21 @@ ok('Tax Settings holds Tax Status + Default Tax Rate',
   sectionOf('Tax Settings', src.taxSection).includes('name="taxable"')
   && sectionOf('Tax Settings', src.taxSection).includes('name="default_tax_rate_id"'));
 
-// ── 4. the Lead form must NOT be restyled ────────────────────────────────────
-console.log('\n4. CRM Lead form untouched\n');
-ok('legacy flat branch still exists', /if \(sections === false\)/.test(src.shared));
-check('Leads opts out of the sectioned layout (both usages)',
-  (src.leads.match(/sections=\{false\}/g) || []).length, 2);
+// ── 4. the Lead form now USES the shared boxed sections ──────────────────────
+console.log('\n4. CRM Lead form uses the shared section cards\n');
+ok('legacy flat branch still exists in the shared block', /if \(sections === false\)/.test(src.shared));
+check('Leads no longer opts out of the sectioned layout',
+  (src.leads.match(/sections=\{false\}/g) || []).length, 0);
 ok('Leads still renders CustomerContactFields',
   /<CustomerContactFields/.test(src.leads));
+ok('Leads uses the shared contact block in the lead layout',
+  /<CustomerContactFields[\s\S]{0,200}?layout="lead"/.test(src.leads));
+ok('Leads wraps its sections in the shared FormSection component',
+  /<FormSection\b/.test(src.leads));
+ok('Lead boxes Source / Lead Details / Notes',
+  /title="Source"/.test(src.leads) && /title="Lead Details"/.test(src.leads) && /title="Notes"/.test(src.leads));
+ok('Lead contact block provides the Customer/Contact + Address cards',
+  /title="Customer \/ Contact Information"/.test(src.shared) && /title="Address"/.test(src.shared));
 
 // ── 5. every customer consumer moved to the sectioned block ──────────────────
 console.log('\n5. Customer form consumers\n');
