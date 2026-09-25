@@ -30,7 +30,7 @@
     "files": [
       "src/backend/**/*",
       "src/backend/db/**/*",
-      "src/shared/**/*",
+      "src/frontend/src/shared/**/*",
       "src/frontend/build/**/*",
       "assets/**/*",
       "node_modules/**/*",

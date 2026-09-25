@@ -1,5 +1,5 @@
 {
-  "_comment": "SINGLE canonical Item Type capability definition. Consumed by src/backend/services/itemTypes.js AND src/frontend/src/utils/itemTypes.js. Every stock/accounting/UI decision derives from here; never maintain a parallel type list anywhere else.",
+  "_comment": "SINGLE canonical Item Type capability definition. Lives inside the frontend src/ (so CRA can import it without leaving the project src scope) and is also read by the backend (src/backend/services/itemTypes.js). Every stock/accounting/UI decision derives from here; never maintain a parallel type list anywhere else.",
   "types": {
     "INVENTORY_PART": {
       "code": "INVENTORY_PART",

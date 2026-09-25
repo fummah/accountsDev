@@ -1,5 +1,5 @@
 const path = require('path');
-const {override, fixBabelImports, addLessLoader, removeModuleScopePlugin} = require('customize-cra')
+const {override, fixBabelImports, addLessLoader} = require('customize-cra')
 
 
 const options = {
@@ -73,10 +73,6 @@ const fixPostcssLoader = () => config => {
 };
 
 const baseConfig = override(
-  // Allow importing the single shared canonical Item Type table
-  // (src/shared/itemTypes.json) that lives outside CRA's src/ scope. It is a
-  // plain JSON module, so only the ModuleScope guard needs relaxing.
-  removeModuleScopePlugin(),
   addLessLoader({
     javascriptEnabled: true,
     lessOptions: {

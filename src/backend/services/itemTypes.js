@@ -10,8 +10,8 @@
  *   NON_INVENTORY_PART  physical goods bought/sold but NOT quantity-tracked
  *   SERVICE             labour / service activities (no stock, optionally purchased)
  *
- * The capability table lives in ONE place — src/shared/itemTypes.json — which is
- * imported by BOTH this module and the renderer mirror
+ * The capability table lives in ONE place — src/frontend/src/shared/itemTypes.json
+ * — which is imported by BOTH this module and the renderer mirror
  * (src/frontend/src/utils/itemTypes.js). Adding a future type is a one-line
  * change to that JSON; UI/validation/transaction behaviour follow automatically.
  *
@@ -22,7 +22,7 @@
  * behaviour so existing inventory never silently stops moving.
  */
 
-const SHARED = require('../../shared/itemTypes.json');
+const SHARED = require('../../frontend/src/shared/itemTypes.json');
 
 const ITEM_TYPES = SHARED.types;
 const ITEM_TYPE_CODES = Object.keys(ITEM_TYPES);

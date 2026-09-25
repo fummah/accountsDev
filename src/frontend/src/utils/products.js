@@ -3,7 +3,7 @@
  *
  * REFACTORED: this module no longer keeps its own hardcoded type lists. It is a
  * thin compatibility facade over the ONE canonical Item Type capability model
- * (utils/itemTypes.js → src/shared/itemTypes.json). Anything that still imports
+ * (utils/itemTypes.js → src/frontend/src/shared/itemTypes.json). Anything that still imports
  * from here gets the same answer as the rest of the app, so the two can never
  * disagree.
  *

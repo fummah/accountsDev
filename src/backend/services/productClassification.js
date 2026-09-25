@@ -12,7 +12,7 @@
  *
  * ── ONE canonical definition ─────────────────────────────────────────────────
  * The authority is services/itemTypes.js, which is built from the single shared
- * table src/shared/itemTypes.json. This module no longer keeps its own hardcoded
+ * table src/frontend/src/shared/itemTypes.json. This module no longer keeps its own hardcoded
  * type lists — it derives everything from the canonical capabilities so a new
  * Item Type automatically controls stock behaviour. Legacy type names ('Product',
  * 'Raw Material', 'Asset', 'Bundle') are mapped by normalizeTypeCode.

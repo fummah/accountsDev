@@ -2,7 +2,7 @@
  * itemTypes.js — renderer side of the ONE canonical Item Type definition.
  *
  * The capability table is imported from the single shared source
- * (src/shared/itemTypes.json) — the SAME file the backend
+ * (src/frontend/src/shared/itemTypes.json) — the SAME file the backend
  * (src/backend/services/itemTypes.js) consumes. There is no second table to
  * keep in sync: every Add/Edit Item section, validation rule and transaction
  * default reads from here instead of branching on a raw type string.
@@ -15,7 +15,7 @@
  * Adding a future type is a one-line change to the shared JSON.
  */
 
-import SHARED from '../../../shared/itemTypes.json';
+import SHARED from '../shared/itemTypes.json';
 
 export const ITEM_TYPES = SHARED.types;
 export const ITEM_TYPE_CODES = Object.keys(ITEM_TYPES);
