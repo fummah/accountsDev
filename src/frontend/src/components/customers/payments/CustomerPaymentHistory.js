@@ -248,10 +248,6 @@ const CustomerPaymentHistory = ({ customerId, invoiceId, mode = 'all', embedded 
       },
     },
     {
-      title: 'Reference', dataIndex: 'reference', key: 'reference',
-      render: (v) => v || <Text type="secondary">—</Text>,
-    },
-    {
       title: 'Actions', key: 'actions', width: 150, fixed: 'right',
       render: (_, record) => (
         <Space size={4} onClick={e => e.stopPropagation()}>
