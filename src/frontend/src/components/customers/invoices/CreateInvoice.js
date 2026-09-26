@@ -675,13 +675,13 @@ const CreateInvoice = () => {
           <h2>{isEdit ? `Edit Invoice #${id}` : 'Create Invoice'}</h2>
         </div>
         <Space wrap>
-          <Button icon={<UserOutlined />} disabled={!selectedCustomerId} onClick={() => history.push(`/main/customers/details/${selectedCustomerId}`)}>View Customer</Button>
+          <Button className="gx-btn-secondary" icon={<UserOutlined />} disabled={!selectedCustomerId} onClick={() => history.push(`/main/customers/details/${selectedCustomerId}`)}>View Customer</Button>
           {isEdit && (<>
-            <Button icon={<EyeOutlined />} onClick={() => doPDF('preview')}>Preview</Button>
-            <Button icon={<FilePdfOutlined />} onClick={() => doPDF('download')}>Download PDF</Button>
-            <Button icon={<PrinterOutlined />} onClick={() => doPDF('print')}>Print</Button>
+            <Button className="gx-btn-info" icon={<EyeOutlined />} onClick={() => doPDF('preview')}>Preview</Button>
+            <Button className="gx-btn-danger" icon={<FilePdfOutlined />} onClick={() => doPDF('download')}>Download PDF</Button>
+            <Button className="gx-btn-warning" icon={<PrinterOutlined />} onClick={() => doPDF('print')}>Print</Button>
           </>)}
-          <Button icon={<SettingOutlined />} onClick={() => history.push('/main/customers/invoices/customize')}>Customize Template</Button>
+          <Button className="gx-btn-primary-light" icon={<SettingOutlined />} onClick={() => history.push('/main/customers/invoices/customize')}>Customize Template</Button>
         </Space>
       </div>
 

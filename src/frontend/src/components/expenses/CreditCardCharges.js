@@ -277,7 +277,7 @@ const CreditCardCharges = () => {
       const allAccs = Array.isArray(accs) ? accs : (accs?.data || []);
       setAccounts(dedupeAccounts(allAccs));
 
-      // Only real Credit Card liability accounts belong in the dropdown â€”
+      // Only real Credit Card liability accounts belong in the dropdown —
       // matching by name would pull in Income/Expense accounts whose names
       // merely contain "Credit Card" (e.g. "Credit Card Cash Back").
       const ccAccounts = allAccs.filter(a => {
@@ -290,7 +290,7 @@ const CreditCardCharges = () => {
       const txList = Array.isArray(txs) ? txs : [];
       setAllTransactions(txList);
 
-      // Only actual charges appear in the register â€” payments never do.
+      // Only actual charges appear in the register — payments never do.
       const charges = txList.filter(t => isChargeType(t.type));
       const cardNameById = (id) => cards.find(a => Number(a.id) === Number(id))?.accountName || cards.find(a => Number(a.id) === Number(id))?.name || '';
       const cardForTx = (t) => {
@@ -323,7 +323,7 @@ const CreditCardCharges = () => {
         const res = await window.electronAPI.journalTransactionAccounts?.(ids);
         if (res && !res.error) glMap = res;
       } catch { /* GL map optional */ }
-      // IPC serializes object keys to strings â€” normalize back to numeric ids.
+      // IPC serializes object keys to strings — normalize back to numeric ids.
       const normalized = {};
       Object.keys(glMap).forEach(k => { normalized[Number(k)] = glMap[k]; });
       setTxAccountIds(normalized);
@@ -592,7 +592,7 @@ const CreditCardCharges = () => {
           <Col xs={24} sm={8}>
             <Card size="small" style={{ borderTop: '3px solid #722ed1' }}>
               <Statistic
-                title={`${registerTitle} â€” Current Balance`}
+                title={`${registerTitle} — Current Balance`}
                 value={summary.currentBalance}
                 precision={2}
                 prefix={cSym}

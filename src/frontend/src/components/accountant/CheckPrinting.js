@@ -65,9 +65,9 @@ const CheckPrinting = () => {
   const [accounts, setAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
 
-  // Split-line allocation accounts: what the cheque is being paid FOR â€” i.e.
+  // Split-line allocation accounts: what the cheque is being paid FOR — i.e.
   // everything a payment can be posted AGAINST (Expense, Asset, Liability,
-  // Loan, Equity, â€¦) EXCEPT the Bank accounts. The source of funds is chosen
+  // Loan, Equity, …) EXCEPT the Bank accounts. The source of funds is chosen
   // separately in the Bank Account field above, so a Bank account must never be
   // offered here. Eligibility comes from the shared isBillLineAccount rule
   // (type/subtype based, never by name); Bank is then removed.
@@ -358,7 +358,7 @@ const CheckPrinting = () => {
       return `${toWords(dollars)} and ${String(cents).padStart(2, '0')}/100`;
     })();
 
-    // Written amount (in words) â€” preprinted stock supplies the line,
+    // Written amount (in words) — preprinted stock supplies the line,
     // so the words print cleanly with a rule below (QuickBooks-style).
     const wordsLine = words;
 
@@ -409,7 +409,7 @@ const CheckPrinting = () => {
       </div>`;
 
     /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       CHECK BODY â€” pre-printed US check stock layout.
+       CHECK BODY — pre-printed US check stock layout.
        Prints ONLY the dynamic fields, in this vertical order:
 
            Date                                    (top right)
@@ -429,7 +429,7 @@ const CheckPrinting = () => {
     return `<!doctype html><html><head><title>Check</title>
     <style>
       /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-         PHYSICAL CALIBRATION â€” the only place offsets are defined.
+         PHYSICAL CALIBRATION — the only place offsets are defined.
          Tune these against a real print run; nothing below hard-codes a
          position. Moving --check-offset-x/y shifts the whole cheque body
          as one piece without disturbing the internal layout.
@@ -598,7 +598,7 @@ const CheckPrinting = () => {
       const userAmt = Number(values.amount || 0);
       const validSplits = splitLines.filter(l => Number(l.amount) > 0);
       const totalAmt = validSplits.length > 0 ? splitTotal : userAmt;
-      // Validate split lines match check amount â€” block if mismatch
+      // Validate split lines match check amount — block if mismatch
       if (validSplits.length > 0 && userAmt > 0 && Math.abs(splitTotal - userAmt) > 0.005) {
         message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not equal the check amount (${cSym}${userAmt.toFixed(2)}). Please correct the amounts before proceeding.`);
         setLoading(false);
@@ -657,7 +657,7 @@ const CheckPrinting = () => {
       const userAmt = Number(values.amount || 0);
       const validSplits = splitLines.filter(l => Number(l.amount) > 0);
       const totalAmt = validSplits.length > 0 ? splitTotal : userAmt;
-      // Validate split lines match check amount â€” block if mismatch
+      // Validate split lines match check amount — block if mismatch
       if (validSplits.length > 0 && userAmt > 0 && Math.abs(splitTotal - userAmt) > 0.005) {
         message.error(`Split lines total (${cSym}${splitTotal.toFixed(2)}) does not equal the check amount (${cSym}${userAmt.toFixed(2)}). Please correct the amounts before proceeding.`);
         setLoading(false);
@@ -766,7 +766,7 @@ const CheckPrinting = () => {
   const handleReprintHistory = (record) => {
     const desc = (record.description || '');
     const payeeName = record.payee_name?.trim() ||
-      desc.replace(/^Check #?\d*\s*to\s*/i, '').replace(/^Payment for bill\s+\S+\s*-\s*/i, '').replace(/^Bill payment to\s+(.+?)\s*â€”?\s*(?:Bill|#)\s*\S*/i, '$1').trim() ||
+      desc.replace(/^Check #?\d*\s*to\s*/i, '').replace(/^Payment for bill\s+\S+\s*-\s*/i, '').replace(/^Bill payment to\s+(.+?)\s*—?\s*(?:Bill|#)\s*\S*/i, '$1').trim() ||
       desc;
     // The transaction carries its own payee address, so reprinting never needs
     // a second name-based payee lookup. The lookup is a FALLBACK only, for
@@ -790,7 +790,7 @@ const CheckPrinting = () => {
     let payeeName = (record.payee_name || '').trim();
     if (!payeeName) {
       const desc = (record.description || '').replace(/^Check #?\d*\s*to\s*/i, '').trim();
-      const m = desc.match(/^Payment for bill\s+\S+\s*-\s*(.+)$/i) || desc.match(/^Bill payment to\s+(.+?)\s*â€”?\s*(?:Bill|#)/i);
+      const m = desc.match(/^Payment for bill\s+\S+\s*-\s*(.+)$/i) || desc.match(/^Bill payment to\s+(.+?)\s*—?\s*(?:Bill|#)/i);
       payeeName = (m && m[1] ? m[1] : desc).trim() || record.description || '';
     }
     // Prefer the address stored on the transaction; fall back to the payee
@@ -884,7 +884,7 @@ const CheckPrinting = () => {
         <Col xs={12} sm={6}>
           <Card size="small" style={{ borderTop: '3px solid #52c41a' }}>
             <Statistic title="Bank Balance"
-              value={watchAccountId && selectedAccount ? Number(selectedAccount.balance || 0) : 'â€”'}
+              value={watchAccountId && selectedAccount ? Number(selectedAccount.balance || 0) : '—'}
               precision={watchAccountId && selectedAccount ? 2 : undefined}
               prefix={watchAccountId && selectedAccount ? cSym : undefined}
               valueStyle={{ fontSize: 18, color: '#52c41a' }}
@@ -955,7 +955,7 @@ const CheckPrinting = () => {
                           if (val.startsWith('v-')) {
                             checkOpenBills(Number(val.replace('v-', '')), name);
                           } else {
-                            // Non-vendor payee (customer/employee) â€” clear any prior vendor warning
+                            // Non-vendor payee (customer/employee) — clear any prior vendor warning
                             setShowInlineWarning(false);
                             setOpenBills([]);
                             setOpenBillsTotal(0);

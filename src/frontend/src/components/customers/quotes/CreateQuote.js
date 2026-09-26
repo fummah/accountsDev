@@ -656,19 +656,19 @@ const CreateQuote = () => {
           <h2>{isEdit ? `Edit Quote #${form.getFieldValue('number') || id}` : 'Create Quote'}</h2>
           <QuoteStatusBadge status={isEdit ? canonicalQuoteStatus : 'Pending'} />
           {isEdit && (<>
-            <Button icon={<CheckCircleOutlined />} disabled={!canAccept} loading={actionBusy} onClick={handleAccept}>Accept Quote</Button>
-            <Button icon={<CloseCircleOutlined />} danger disabled={!canDecline} loading={actionBusy} onClick={handleDecline}>Decline Quote</Button>
-            <Button type="primary" icon={<SwapOutlined />} disabled={!canConvert} loading={actionBusy} onClick={handleConvert}>Convert to Invoice</Button>
+            <Button className="gx-btn-success" icon={<CheckCircleOutlined />} disabled={!canAccept} loading={actionBusy} onClick={handleAccept}>Accept Quote</Button>
+            <Button className="gx-btn-danger" icon={<CloseCircleOutlined />} disabled={!canDecline} loading={actionBusy} onClick={handleDecline}>Decline Quote</Button>
+            <Button className="gx-btn-primary" icon={<SwapOutlined />} disabled={!canConvert} loading={actionBusy} onClick={handleConvert}>Convert to Invoice</Button>
           </>)}
         </div>
         <Space wrap>
-          <Button icon={<UserOutlined />} disabled={!selectedCustomerId} onClick={() => history.push(`/main/customers/details/${selectedCustomerId}`)}>View Customer</Button>
+          <Button className="gx-btn-secondary" icon={<UserOutlined />} disabled={!selectedCustomerId} onClick={() => history.push(`/main/customers/details/${selectedCustomerId}`)}>View Customer</Button>
           {isEdit && (<>
-            <Button icon={<EyeOutlined />} onClick={() => doPDF('preview')}>Preview</Button>
-            <Button icon={<FilePdfOutlined />} onClick={() => doPDF('download')}>Download PDF</Button>
-            <Button icon={<PrinterOutlined />} onClick={() => doPDF('print')}>Print</Button>
+            <Button className="gx-btn-info" icon={<EyeOutlined />} onClick={() => doPDF('preview')}>Preview</Button>
+            <Button className="gx-btn-danger" icon={<FilePdfOutlined />} onClick={() => doPDF('download')}>Download PDF</Button>
+            <Button className="gx-btn-warning" icon={<PrinterOutlined />} onClick={() => doPDF('print')}>Print</Button>
           </>)}
-          <Button icon={<SettingOutlined />} onClick={() => history.push('/main/customers/quotes/customize')}>Customize Template</Button>
+          <Button className="gx-btn-primary-light" icon={<SettingOutlined />} onClick={() => history.push('/main/customers/quotes/customize')}>Customize Template</Button>
         </Space>
       </div>
 

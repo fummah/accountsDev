@@ -1147,14 +1147,28 @@ const EnterBill = ({ history, location, match }) => {
   };
 
   return (
-    <div style={PAGE_WRAPPER_STYLE}>
-      <Card title={<span style={{ fontSize: 18, fontWeight: 600 }}><FileTextOutlined style={{ marginRight: 8 }} />{isEdit ? 'Edit Bill' : 'Enter Bill'}</span>}
-        extra={<Space><Button icon={<PrinterOutlined />} loading={printing} onClick={handlePrintBill}>Print</Button><Button icon={<DownloadOutlined />} onClick={() => {}}>Export</Button><Button icon={<ReloadOutlined />} onClick={loadVendors}>Refresh</Button></Space>}>
+    <div className="al-modern-page" style={PAGE_WRAPPER_STYLE}>
+      {/* Modern page head with a gradient badge + Wieldy-colored actions */}
+      <div className="al-page-head" style={{ marginBottom: 16 }}>
+        <div className="al-modern-head">
+          <div className="al-modern-badge" style={{ background: 'linear-gradient(135deg, #722ed1, #b37feb)' }}><FileTextOutlined /></div>
+          <div>
+            <h3 style={{ margin: 0 }}>{isEdit ? 'Edit Bill' : 'Enter Bill'}</h3>
+            <span style={{ color: '#667085' }}>Vendor bill &amp; inventory receipt</span>
+          </div>
+        </div>
+        <Space className="al-list-toolbar" align="center">
+          <Button className="gx-btn-warning" icon={<PrinterOutlined />} loading={printing} onClick={handlePrintBill}>Print</Button>
+          <Button className="gx-btn-info" icon={<DownloadOutlined />} onClick={() => {}}>Export</Button>
+          <Button className="gx-btn-primary-light" icon={<ReloadOutlined />} onClick={loadVendors}>Refresh</Button>
+        </Space>
+      </div>
+      <Card>
         <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #1890ff' }}><Statistic title="Total Lines" value={lines.length} valueStyle={{ color: '#1890ff', fontSize: 18 }} /></Card></Col>
-          <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #52c41a' }}><Statistic title="Total Amount" value={totalAmount} prefix={cSym} precision={2} valueStyle={{ color: '#52c41a', fontSize: 18 }} /></Card></Col>
-          <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #722ed1' }}><Statistic title="Vendor" value={vendorName || '—'} valueStyle={{ fontSize: 14 }} /></Card></Col>
-          <Col xs={12} sm={6}><Card size="small" style={{ textAlign: 'center', borderTop: '3px solid #fa8c16' }}><Statistic title="Status" value={isPaid ? 'Paid' : isEdit ? 'Unpaid' : 'New'} valueStyle={{ color: isPaid ? '#52c41a' : '#fa8c16', fontSize: 16 }} /></Card></Col>
+          <Col xs={12} sm={6}><Card size="small" className="al-stat-card" style={{ textAlign: 'center', borderTop: '3px solid #1890ff' }}><Statistic title="Total Lines" value={lines.length} valueStyle={{ color: '#1890ff', fontSize: 18 }} /></Card></Col>
+          <Col xs={12} sm={6}><Card size="small" className="al-stat-card" style={{ textAlign: 'center', borderTop: '3px solid #52c41a' }}><Statistic title="Total Amount" value={totalAmount} prefix={cSym} precision={2} valueStyle={{ color: '#52c41a', fontSize: 18 }} /></Card></Col>
+          <Col xs={12} sm={6}><Card size="small" className="al-stat-card" style={{ textAlign: 'center', borderTop: '3px solid #722ed1' }}><Statistic title="Vendor" value={vendorName || '—'} valueStyle={{ fontSize: 14 }} /></Card></Col>
+          <Col xs={12} sm={6}><Card size="small" className="al-stat-card" style={{ textAlign: 'center', borderTop: '3px solid #fa8c16' }}><Statistic title="Status" value={isPaid ? 'Paid' : isEdit ? 'Unpaid' : 'New'} valueStyle={{ color: isPaid ? '#52c41a' : '#fa8c16', fontSize: 16 }} /></Card></Col>
         </Row>
 
       <Form form={form} layout="vertical" onFinish={handleSubmit} initialValues={{ billDate: moment(), terms: 30 }}>
@@ -1241,7 +1255,7 @@ const EnterBill = ({ history, location, match }) => {
 
         <FormSection title="Line Items" icon={<DollarOutlined />}
           extra={
-            <Button size="small" icon={<ShoppingCartOutlined />} loading={loadingPOs}
+            <Button size="small" className="gx-btn-primary" icon={<ShoppingCartOutlined />} loading={loadingPOs}
               onClick={() => {
                 const v = form.getFieldValue('vendorId');
                 if (!v) { message.warning('Select a vendor first'); return; }
@@ -1322,11 +1336,11 @@ const EnterBill = ({ history, location, match }) => {
             </>}
           >
             {isEdit && !isPaid && (
-              <Button icon={<DollarOutlined />} size="large" onClick={openPayModal}>
+              <Button className="gx-btn-info" icon={<DollarOutlined />} size="large" onClick={openPayModal}>
                 Record Payment
               </Button>
             )}
-            <Button type="primary" htmlType="submit" loading={loading} icon={<SaveOutlined />} size="large">
+            <Button className="gx-btn-success" htmlType="submit" loading={loading} icon={<SaveOutlined />} size="large">
               {isEdit ? 'Update Bill' : 'Save Bill'}
             </Button>
           </DocumentActionBar>
