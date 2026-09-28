@@ -9,12 +9,20 @@ src/frontend/build/
 dist/
 out/
 release/
+accounting/
 
 # Database files (contain user data, not source code)
 src/backend/db/*.db
 src/backend/db/*.db-journal
 src/backend/db/*.db-wal
 src/backend/db/*.db-shm
+
+# Database backups / encrypted exports
+src/backend/db/backups/
+*.enc
+
+# Tool scratch dirs
+.workbuddy-ai/
 
 # Uploaded attachments
 src/backend/db/attachments/*
