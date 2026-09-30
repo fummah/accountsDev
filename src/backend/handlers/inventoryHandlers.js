@@ -102,6 +102,17 @@ function registerInventoryHandlers() {
     }
   });
 
+  // Inventory Movement Report (over the existing stock_movements ledger).
+  ipcMain.handle('get-inventory-movement-report', async (_e, opts) => {
+    try {
+      const Report = require('../services/inventoryMovementReportService');
+      return Report.getInventoryMovementReport(opts || {});
+    } catch (e) {
+      console.error('Error building inventory movement report:', e);
+      return { error: e.message };
+    }
+  });
+
   // Expiring lots within N days
   ipcMain.handle('list-expiring-lots', async (_e, days) => {
     try {

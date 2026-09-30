@@ -199,6 +199,9 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                 <Menu.Item key="main/inventory/reorder">
                   <Link to="/main/inventory/reorder"><i className="icon icon-alert"/><span>Reorder Needed</span></Link>
                 </Menu.Item>
+                <Menu.Item key="main/inventory/movement-report">
+                  <Link to="/main/inventory/movement-report"><i className="icon icon-chart"/><span>Movement Report</span></Link>
+                </Menu.Item>
                 <Menu.Item key="main/inventory/items">
                   <Link to="/main/inventory/items"><i className="icon icon-apps"/><span>Products &amp; Services</span></Link>
                 </Menu.Item>
