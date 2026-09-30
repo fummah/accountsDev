@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Row, Col, Button, Table, Space, Typography, Empty, Alert, Modal, Statistic } from 'antd';
+import { Card, Row, Col, Button, Table, Space, Typography, Empty, Alert, Modal } from 'antd';
 import {
   ReloadOutlined, AppstoreOutlined, CheckCircleOutlined, WarningOutlined,
   StopOutlined, ShoppingCartOutlined, InboxOutlined,
@@ -24,6 +24,17 @@ const PO_STATUS_BADGE = {
 // Wieldy badge (matches components/MailNotification/NotificationItem.js).
 const GxBadge = ({ color = 'grey', children }) => (
   <span className={`gx-badge gx-text-white gx-badge-${color}`} style={{ margin: 0 }}>{children}</span>
+);
+
+// Wieldy-style section header: a tinted icon tile + label.
+const SectionTitle = ({ icon, color, children }) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+    <span style={{
+      width: 28, height: 28, borderRadius: 8, display: 'inline-flex',
+      alignItems: 'center', justifyContent: 'center', background: `${color}1a`, color,
+    }}>{icon}</span>
+    <span style={{ fontWeight: 600 }}>{children}</span>
+  </span>
 );
 
 const InventoryDashboard = () => {
@@ -185,7 +196,7 @@ const InventoryDashboard = () => {
         />
       )}
 
-      {/* Stat cards — white cards with a colored border */}
+      {/* Stat cards — modern Wieldy-style layout, colors on the border + icon tile */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
         {cards.map((card) => (
           <Col xs={24} sm={12} lg={6} key={card.key}>
@@ -194,17 +205,38 @@ const InventoryDashboard = () => {
               className="al-stat-card"
               loading={loading}
               onClick={() => onCardClick(card)}
-              style={{ cursor: 'pointer', borderTop: `3px solid ${card.color}` }}
+              bodyStyle={{ padding: 16 }}
+              style={{
+                cursor: 'pointer',
+                border: `1px solid ${card.color}33`,
+                borderTop: `3px solid ${card.color}`,
+                borderRadius: 14,
+              }}
             >
-              <Statistic
-                title={<Space size={6}><span style={{ color: card.color }}>{card.icon}</span>{card.title}</Space>}
-                value={Number(card.value || 0)}
-                precision={card.money ? 2 : 0}
-                prefix={card.money ? cSym : undefined}
-                valueStyle={{ fontSize: 22, color: card.color }}
-                formatter={card.money ? undefined : (v) => Number(v).toLocaleString('en-US')}
-              />
-              {card.helper && <div style={{ marginTop: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>{card.helper}</Text></div>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <div
+                  style={{
+                    width: 48, height: 48, borderRadius: 12, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 22, color: '#fff',
+                    background: `linear-gradient(135deg, ${card.color}, ${card.color}cc)`,
+                    boxShadow: `0 4px 10px ${card.color}40`,
+                  }}
+                >
+                  {card.icon}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: '#667085', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {card.title}
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: '#1f2d3d', lineHeight: 1.15 }}>
+                    {card.money
+                      ? `${cSym} ${Number(card.value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : Number(card.value || 0).toLocaleString('en-US')}
+                  </div>
+                  {card.helper && <div style={{ fontSize: 11, color: '#98a2b3', marginTop: 2 }}>{card.helper}</div>}
+                </div>
+              </div>
             </Card>
           </Col>
         ))}
@@ -212,7 +244,7 @@ const InventoryDashboard = () => {
 
       {/* Stock Attention */}
       <div ref={attentionRef} style={{ marginBottom: 20 }}>
-        <Card title={<Space><WarningOutlined /> Stock Attention</Space>} className="al-stat-card">
+        <Card title={<SectionTitle icon={<WarningOutlined />} color="#faad14">Stock Attention</SectionTitle>} className="al-stat-card">
           {!loading && (!data || (data.stockAttention || []).length === 0) ? (
             <Empty description="No low-stock items. Inventory levels are currently above their reorder points." />
           ) : (
@@ -230,7 +262,7 @@ const InventoryDashboard = () => {
 
       {/* Incoming Stock */}
       <div ref={incomingRef} style={{ marginBottom: 20 }}>
-        <Card title={<Space><InboxOutlined /> Incoming Stock</Space>} className="al-stat-card">
+        <Card title={<SectionTitle icon={<InboxOutlined />} color="#13c2c2">Incoming Stock</SectionTitle>} className="al-stat-card">
           {!loading && (!data || (data.incomingStock || []).length === 0) ? (
             <Empty description="No incoming inventory. There are no open purchase-order quantities." />
           ) : (
@@ -248,7 +280,7 @@ const InventoryDashboard = () => {
 
       {/* Recent Inventory Activity */}
       <div ref={activityRef}>
-        <Card title={<Space><HistoryOutlined /> Recent Inventory Activity <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>Last {window} days</Text></Space>} className="al-stat-card">
+        <Card title={<SectionTitle icon={<HistoryOutlined />} color="#722ed1">Recent Inventory Activity <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>Last {window} days</Text></SectionTitle>} className="al-stat-card">
           {!loading && (!data || (data.recentActivity || []).length === 0) ? (
             <Empty description="No recent inventory activity." />
           ) : (
