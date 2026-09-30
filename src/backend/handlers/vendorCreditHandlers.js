@@ -50,6 +50,15 @@ const registerVendorCreditHandlers = () => {
     }
   });
 
+  ipcMain.handle('vendor-credits-update', async (event, id, data) => {
+    try {
+      return VendorCredits.updateCredit(id, data || {});
+    } catch (error) {
+      console.error('Error updating vendor credit:', error);
+      return { error: error.message };
+    }
+  });
+
   ipcMain.handle('vendor-credits-applications', async (_e, creditId) => {
     try {
       return VendorCredits.getApplications(creditId);

@@ -1,6 +1,7 @@
 // /backend/preload.js
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
-contextBridge.exposeInMainWorld('electronAPI', {
+const PRELOAD_VERSION = '2026.09.30';
+const api = {
   //Users
   getAllUsers: () => ipcRenderer.invoke('get-users'),
   updateUser: (userData) => ipcRenderer.invoke('updateuser',userData),
@@ -751,7 +752,26 @@ billCreditApplications: (expenseId) => ipcRenderer.invoke('bill-credit-applicati
   trainingProgress: (userId, module) => ipcRenderer.invoke('training-progress', userId, module),
   trainingProgressUpdate: (userId, module, step) => ipcRenderer.invoke('training-progress-update', userId, module, step),
   trainingProgressAll: (userId) => ipcRenderer.invoke('training-progress-all', userId),
-});
+
+  // API Server (handlers: src/backend/handlers/apiServer.js)
+  apiServerStatus: () => ipcRenderer.invoke('api-server-status'),
+  apiServerStart: () => ipcRenderer.invoke('api-server-start'),
+  apiServerStop: () => ipcRenderer.invoke('api-server-stop'),
+  apiServerHealth: () => ipcRenderer.invoke('api-server-health'),
+
+  // Vendor credit edit (handler: vendor-credits-update)
+  vendorCreditsUpdate: (id, data) => ipcRenderer.invoke('vendor-credits-update', id, data),
+
+  // Bridge self-description — lets the renderer detect a STALE preload build.
+  getBridgeInfo: () => ({
+    preloadVersion: PRELOAD_VERSION,
+    methodCount: Object.keys(api).length,
+    hasInventoryDashboard: typeof api.getInventoryDashboard === 'function',
+    hasReorderNeeded: typeof api.getReorderNeeded === 'function',
+    hasInventoryAlerts: typeof api.getInventoryAlerts === 'function',
+  }),
+};
+contextBridge.exposeInMainWorld('electronAPI', api);
 
 // Navigation event from main to renderer (production routing)
 try {

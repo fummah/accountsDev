@@ -1,10 +1,10 @@
 /**
- * verify-inventory-dashboard-wiring.js — the FULL Inventory Dashboard chain.
+ * verify-inventory-dashboard-wiring.js ??? the FULL Inventory Dashboard chain.
  *
  * Proves the exact chain the screenshot's error complains about:
- *   React page → window.electronAPI.getInventoryDashboard → IPC channel
- *   'get-inventory-dashboard' → inventoryHandlers → inventoryDashboardService
- *   → central stock/availability/valuation services → database.
+ *   React page ??? window.electronAPI.getInventoryDashboard ??? IPC channel
+ *   'get-inventory-dashboard' ??? inventoryHandlers ??? inventoryDashboardService
+ *   ??? central stock/availability/valuation services ??? database.
  *
  * It loads the REAL preload (with a stubbed `electron`) and asserts the bridge
  * method exists and invokes the RIGHT channel, then loads the REAL handler and
@@ -19,13 +19,15 @@ const BE = path.join(ROOT, 'src', 'backend');
 const FE = path.join(ROOT, 'src', 'frontend', 'src');
 const fs = require('fs');
 
-// ── Stub `electron` so we can load preload.js + handlers in plain Node ──────
+// ?????? Stub `electron` so we can load preload.js + handlers in plain Node ??????????????????
 const bridge = {};
 const invoked = [];
 const handlers = new Map();
 const electronStub = {
   contextBridge: { exposeInMainWorld: (name, api) => { bridge[name] = api; } },
-  ipcRenderer: { invoke: (ch) => { invoked.push(ch); return Promise.resolve({}); }, on() {}, send() {}, removeAllListeners() {}, sendSync() {} },
+  // Dispatch invoke() to the REAL registered handler, so calling the preload
+  // method exercises the whole chain: preload ??? ipcRenderer.invoke ??? ipcMain.handle.
+  ipcRenderer: { invoke: async (ch, ...args) => { invoked.push(ch); if (!handlers.has(ch)) throw new Error(`No IPC handler registered for "${ch}"`); return handlers.get(ch)({}, ...args); }, on() {}, send() {}, removeAllListeners() {}, sendSync() {} },
   ipcMain: { handle: (ch, fn) => { handlers.set(ch, fn); } },
   webUtils: { getPathForFile: () => '' },
   shell: { openExternal() {} },
@@ -44,27 +46,27 @@ const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
   const Warehouses = require(path.join(BE, 'models', 'warehouses.js'));
   const COA = require(path.join(BE, 'models', 'chartOfAccounts.js'));
 
-  console.log('\n=== 1-5: preload bridge ===');
+  console.log('\n=== 6-9: IPC handler registration ===');
+  const registerInventoryHandlers = require(path.join(BE, 'handlers', 'inventoryHandlers.js'));
+  registerInventoryHandlers();
+  check('handler "get-inventory-dashboard" is registered at startup', handlers.has('get-inventory-dashboard'));
+  check('the service is the central inventoryDashboardService (no new engine)', fs.readFileSync(path.join(BE, 'handlers', 'inventoryHandlers.js'), 'utf8').includes("services/inventoryDashboardService"));
+
+  console.log('\n=== 1-5: preload bridge + TRUE end-to-end call ===');
   require(path.join(BE, 'preload.js'));
   const api = bridge.electronAPI;
   check('preload exposes the electronAPI bridge', !!api);
   check('preload exposes getInventoryDashboard()', typeof api.getInventoryDashboard === 'function', `typeof=${typeof (api || {}).getInventoryDashboard}`);
+  check('bridge self-description getBridgeInfo() reports the inventory methods', (() => { const i = api.getBridgeInfo && api.getBridgeInfo(); return i && i.hasInventoryDashboard === true && i.hasReorderNeeded === true; })());
   invoked.length = 0;
-  await api.getInventoryDashboard();
+  // ONE call exercises: preload method → ipcRenderer.invoke → ipcMain.handle → service → DB
+  const res = await api.getInventoryDashboard();
   check('getInventoryDashboard invokes the exact channel "get-inventory-dashboard"', invoked.includes('get-inventory-dashboard'), invoked.join(','));
-
-  console.log('\n=== 6-9: IPC handler registration + shape ===');
-  const registerInventoryHandlers = require(path.join(BE, 'handlers', 'inventoryHandlers.js'));
-  registerInventoryHandlers();
-  check('handler "get-inventory-dashboard" is registered at startup', handlers.has('get-inventory-dashboard'));
-  const handler = handlers.get('get-inventory-dashboard');
-  const res = await handler({}, {});
-  check('handler returns the dashboard shape (summary + sections)', !!res && !!res.summary
+  check('the call returns the dashboard shape (summary + sections)', !!res && !!res.summary
     && typeof res.summary.totalInventoryItems === 'number'
     && Array.isArray(res.stockAttention) && Array.isArray(res.incomingStock) && Array.isArray(res.recentActivity),
     JSON.stringify(res && Object.keys(res)));
-  check('handler never returns an {error} object for a healthy DB', !(res && res.error));
-  check('the service is the central inventoryDashboardService (no new engine)', fs.readFileSync(path.join(BE, 'handlers', 'inventoryHandlers.js'), 'utf8').includes("services/inventoryDashboardService"));
+  check('the call never returns an {error} object for a healthy DB', !(res && res.error));
 
   console.log('\n=== 10-19: business rules with controlled data ===');
   const W = Warehouses.getOrCreateDefault();
@@ -83,7 +85,7 @@ const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
   const poId = Number(db.prepare("INSERT INTO purchase_orders (po_number, vendor_id, po_date, status, subtotal, tax_total, total, created_by) VALUES (?,1,'2026-06-01','OPEN',0,0,0,'t')").run(`WDASH-${stamp}`).lastInsertRowid);
   db.prepare("INSERT INTO purchase_order_lines (purchase_order_id, item_id, line_no, description, item_type, unit, qty_ordered, qty_received, qty_billed, unit_cost, tax_rate, amount) VALUES (?,?,1,'x','INVENTORY_PART','Each',20,0,0,20,0,0)").run(poId, D.id);
 
-  const dash = await handler({}, {});
+  const dash = await api.getInventoryDashboard();
   const att = dash.stockAttention || [];
   const rowOf = (pid) => att.find((r) => Number(r.productId) === Number(pid));
   check('ITEM A (20/10) is In Stock (not in Stock Attention)', !rowOf(A.id));

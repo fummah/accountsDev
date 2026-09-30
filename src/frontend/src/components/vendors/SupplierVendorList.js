@@ -540,7 +540,7 @@ const SupplierVendorList = () => {
       </Drawer>}
 
       {/* Detail Drawer */}
-      <Drawer title={null} closable width={520} visible={detailDrawerOpen} onClose={() => setDetailDrawerOpen(false)} className="gx-profile-drawer">
+        <Drawer title={null} closable width={760} visible={detailDrawerOpen} onClose={() => setDetailDrawerOpen(false)} className="gx-profile-drawer">
         {viewingSupplier && (
           <div>
             {(() => {
