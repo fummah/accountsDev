@@ -160,7 +160,7 @@ check('H9 sidebar link added', /Item Profitability/.test(sidebar));
 const uil = fs.readFileSync(path.join(FE, 'components/shared/UnifiedItemList.js'), 'utf8');
 check('H10 item detail shows a Profitability section', /Profitability<\/Space>|title="Profitability"|Profitability\n/.test(uil) && /viewDetail\.profitability/.test(uil));
 check('H11 item form shows a live read-only preview', /computeProfitability\(watchCost, watchPrice\)/.test(uil));
-check('H12 item list supports ?item= deep link', /URLSearchParams\(location\.search\)\.get\('item'\)/.test(uil));
+check('H12 item list supports ?item= deep link', /URLSearchParams\(location\.search\)/.test(uil) && /params\.get\('item'\)/.test(uil));
 
 console.log('\n=== I. no accounting impact ===');
 check('I1 no new journal entries created by profitability', db.prepare("SELECT COUNT(*) AS n FROM journal_entries WHERE memo LIKE '%profitab%'").get().n === 0);

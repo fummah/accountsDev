@@ -76,9 +76,9 @@ const fs = require('fs');
 const ui = fs.readFileSync(path.join(ROOT, 'src', 'frontend', 'src', 'components', 'shared', 'UnifiedItemList.js'), 'utf8');
 check('UnifiedItemList defines stockOf()', /const stockOf = \(r\) =>/.test(ui));
 check('UnifiedItemList reads inventory_stock', /r\.inventory_stock != null/.test(ui));
-check('UnifiedItemList Stock column uses stockOf', /title: 'Stock'[\s\S]{0,220}stockOf\(r\)/.test(ui));
+check('UnifiedItemList Stock column uses stockOf', /title: 'On Hand'[\s\S]{0,340}stockOf\(r\)/.test(ui));
 check('UnifiedItemList no longer reads raw r.stock for the column', !/const s = Number\(r\.stock \|\| r\.quantity \|\| 0\)/.test(ui));
-check('the product form Stock field is read-only', /Quantity on Hand[\s\S]{0,400}?disabled/.test(ui));
+check('the product form Stock field is read-only', /Stock Availability[\s\S]{0,400}?Read-only/.test(ui) && /On Hand[\s\S]{0,120}?stockOf\(editingItem\)/.test(ui));
 
 const productsSrc = fs.readFileSync(path.join(ROOT, 'src', 'backend', 'models', 'products.js'), 'utf8');
 check('products.js derives inventory_stock from item_stock', /SUM\(s\.quantity\) FROM item_stock s WHERE s\.itemId = p\.item_id/.test(productsSrc));

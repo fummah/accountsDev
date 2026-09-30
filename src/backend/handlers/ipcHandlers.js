@@ -510,6 +510,17 @@ safeHandle('get-products-paginated', async (event, page, pageSize, search, typeF
   }
 });
 
+// Filtered item list — search + category + vendor + stock status + On PO, all
+// applied server-side (services/itemTypes + products.getFiltered).
+safeHandle('get-products-filtered', async (event, opts) => {
+  try {
+    return await Products.getFiltered(opts || {});
+  } catch (error) {
+    console.error('Error fetching products (filtered):', error);
+    return { error: error.message };
+  }
+});
+
 // Handler to insert an product
 safeHandle('insert-product', async (event, type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock, income_account_id) => {
   try {

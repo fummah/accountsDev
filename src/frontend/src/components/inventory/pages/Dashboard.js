@@ -89,10 +89,10 @@ const InventoryDashboard = () => {
 
   const cards = [
     { key: 'totalInventoryItems', title: 'Total Inventory Items', value: s.totalInventoryItems, icon: <AppstoreOutlined />, color: '#1890ff', target: 'items' },
-    { key: 'inStockItems', title: 'In Stock', value: s.inStockItems, icon: <CheckCircleOutlined />, color: '#52c41a', target: 'attention' },
-    { key: 'lowStockItems', title: 'Low Stock', value: s.lowStockItems, icon: <WarningOutlined />, color: '#faad14', target: 'reorder' },
-    { key: 'outOfStockItems', title: 'Out of Stock', value: s.outOfStockItems, icon: <StopOutlined />, color: '#f5222d', target: 'reorderOut' },
-    { key: 'itemsOnPO', title: 'On Purchase Order', value: s.itemsOnPO, icon: <ShoppingCartOutlined />, color: '#13c2c2', target: 'incoming' },
+    { key: 'inStockItems', title: 'In Stock', value: s.inStockItems, icon: <CheckCircleOutlined />, color: '#52c41a', target: 'itemsInStock' },
+    { key: 'lowStockItems', title: 'Low Stock', value: s.lowStockItems, icon: <WarningOutlined />, color: '#faad14', target: 'itemsLow' },
+    { key: 'outOfStockItems', title: 'Out of Stock', value: s.outOfStockItems, icon: <StopOutlined />, color: '#f5222d', target: 'itemsOut' },
+    { key: 'itemsOnPO', title: 'On Purchase Order', value: s.itemsOnPO, icon: <ShoppingCartOutlined />, color: '#13c2c2', target: 'itemsOnPo' },
     { key: 'recentlyReceived', title: 'Recently Received', value: s.recentlyReceived, icon: <InboxOutlined />, color: '#722ed1', target: 'activity', helper: `Last ${window} days` },
     { key: 'recentlySold', title: 'Recently Sold', value: s.recentlySold, icon: <LineChartOutlined />, color: '#eb2f96', target: 'activity', helper: `Last ${window} days` },
     { key: 'inventoryValue', title: 'Inventory Value', value: s.inventoryValue, money: true, icon: <WalletOutlined />, color: '#fa8c16', target: 'attention' },
@@ -100,9 +100,10 @@ const InventoryDashboard = () => {
 
   const onCardClick = (card) => {
     if (card.target === 'items') { history.push('/main/inventory/items'); return; }
-    if (card.target === 'reorder') { history.push('/main/inventory/reorder'); return; }
-    if (card.target === 'reorderOut') { history.push('/main/inventory/reorder?status=OUT_OF_STOCK'); return; }
-    if (card.target === 'incoming') { scrollTo(incomingRef); return; }
+    if (card.target === 'itemsInStock') { history.push('/main/inventory/items?stockStatus=IN_STOCK'); return; }
+    if (card.target === 'itemsLow') { history.push('/main/inventory/items?stockStatus=LOW_STOCK'); return; }
+    if (card.target === 'itemsOut') { history.push('/main/inventory/items?stockStatus=OUT_OF_STOCK'); return; }
+    if (card.target === 'itemsOnPo') { history.push('/main/inventory/items?onPo=true'); return; }
     if (card.target === 'activity') { scrollTo(activityRef); return; }
     scrollTo(attentionRef);
   };
@@ -250,7 +251,8 @@ const InventoryDashboard = () => {
 
       {/* Stock Attention */}
       <div ref={attentionRef} style={{ marginBottom: 20 }}>
-        <Card title={<SectionTitle icon={<WarningOutlined />} color="#faad14">Stock Attention</SectionTitle>} className="al-stat-card">
+        <Card title={<SectionTitle icon={<WarningOutlined />} color="#faad14">Stock Attention</SectionTitle>} className="al-stat-card"
+          extra={<a onClick={() => history.push('/main/inventory/reorder')}>Open Reorder Needed</a>}>
           {!loading && (!data || (data.stockAttention || []).length === 0) ? (
             <Empty description="No low-stock items. Inventory levels are currently above their reorder points." />
           ) : (

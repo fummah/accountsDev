@@ -98,6 +98,20 @@ const getSections = (raw) => {
 /** Canonical list for dropdowns / validation messages. */
 const typeOptions = () => ITEM_TYPE_CODES.map(code => ({ value: code, label: ITEM_TYPES[code].label }));
 
+/**
+ * Every raw `products.type` value that TRACKS inventory (canonical codes +
+ * legacy vocabulary), lower-cased — for building SQL `LOWER(p.type) IN (...)`
+ * filters from the ONE capability table instead of a hand-maintained list.
+ */
+const inventoryTypeKeys = () => {
+  const keys = new Set();
+  for (const code of ITEM_TYPE_CODES) if (ITEM_TYPES[code].tracksQuantity) keys.add(code.toLowerCase());
+  for (const [legacy, code] of Object.entries(LEGACY_TYPE_MAP)) {
+    if (ITEM_TYPES[code] && ITEM_TYPES[code].tracksQuantity) keys.add(legacy.toLowerCase());
+  }
+  return [...keys];
+};
+
 module.exports = {
   ITEM_TYPES,
   ITEM_TYPE_CODES,
@@ -114,4 +128,5 @@ module.exports = {
   isPurchasable,
   getSections,
   typeOptions,
+  inventoryTypeKeys,
 };

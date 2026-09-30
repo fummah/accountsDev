@@ -54,6 +54,28 @@ const accountName = (accountId) => {
 const INVENTORY_STOCK_SQL =
   `COALESCE((SELECT SUM(s.quantity) FROM item_stock s WHERE s.itemId = p.item_id), 0)`;
 
+/**
+ * On-Purchase-Order quantity for a product, as a SQL scalar expression.
+ * Mirrors services/inventoryAvailabilityService EXACTLY: the outstanding
+ * (remaining-to-receive) quantity of every ACTIVE PO line — DRAFT / CANCELLED /
+ * CLOSED POs excluded, per line MAX(ordered − received, 0). Billing is
+ * irrelevant (billed-but-not-received stays On PO). Used only for server-side
+ * filtering/sorting so the SQL matches the central service; the authoritative
+ * value is still attached by attachAvailability().
+ */
+const ON_PO_SQL =
+  `COALESCE((SELECT SUM(MAX(pol.qty_ordered - pol.qty_received, 0))
+     FROM purchase_order_lines pol
+     JOIN purchase_orders po ON po.id = pol.purchase_order_id
+     WHERE pol.item_id = p.id
+       AND po.status NOT IN ('DRAFT','CANCELLED','CLOSED')
+       AND MAX(pol.qty_ordered - pol.qty_received, 0) > 0.005), 0)`;
+
+/** Escape LIKE wildcards so a search for "50%" / "a_b" is literal. */
+const escapeLike = (s) => String(s).replace(/[\\%_]/g, (m) => `\\${m}`);
+
+const UNCATEGORIZED = '__UNCATEGORIZED__';
+
 const Products = {
   createTable: () => {
     db.prepare(`
@@ -258,49 +280,108 @@ const Products = {
     }
   },
 
-  getPaginated: (page = 1, pageSize = 25, search = '', typeFilter = '', categoryFilter = '', statusFilter = '') => {
-    const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
-    const limit = Math.max(1, Math.min(500, pageSize));
-    const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
-    const typeParam = typeFilter && typeFilter.trim() ? typeFilter.trim() : null;
-    const catParam = categoryFilter && categoryFilter.trim() ? categoryFilter.trim() : null;
-    const statusParam = statusFilter && statusFilter.trim() ? statusFilter.trim().toUpperCase() : null;
-    let total;
-    let data;
-    const whereParts = [];
-    const params = [];
-    if (searchParam) {
-      whereParts.push('(p.name LIKE ? OR p.sku LIKE ? OR p.category LIKE ?)');
-      params.push(searchParam, searchParam, searchParam);
-    }
-    if (typeParam) {
-      whereParts.push('p.type = ?');
-      params.push(typeParam);
-    }
-    if (catParam) {
-      whereParts.push('p.category = ?');
-      params.push(catParam);
-    }
-    if (statusParam) {
-      // Stock-status filter (inventory-tracked items only), using the SAME
-      // On-Hand expression and the same <= rule as the central status helper.
-      const stock = INVENTORY_STOCK_SQL;
-      whereParts.push("LOWER(p.type) IN ('inventory_part','inventory part','product','raw material','asset','bundle')");
-      if (statusParam === 'OUT_OF_STOCK') whereParts.push(`(${stock}) <= 0`);
-      else if (statusParam === 'LOW_STOCK') whereParts.push(`(${stock}) > 0 AND p.reorder_point IS NOT NULL AND (${stock}) <= p.reorder_point`);
-      else if (statusParam === 'IN_STOCK') whereParts.push(`(${stock}) > 0 AND (p.reorder_point IS NULL OR (${stock}) > p.reorder_point)`);
-    }
-    const whereClause = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
-    const selectSql = `SELECT p.*, ${INVENTORY_STOCK_SQL} AS inventory_stock FROM products p${whereClause}`;
-    if (params.length) {
-      total = db.prepare(`SELECT COUNT(*) AS total FROM products p${whereClause}`).get(...params).total;
-      data = db.prepare(`${selectSql} ORDER BY p.id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
-    } else {
-      total = db.prepare('SELECT COUNT(*) AS total FROM products p').get().total;
-      data = db.prepare(`${selectSql} ORDER BY p.id DESC LIMIT ? OFFSET ?`).all(limit, offset);
-    }
-    return { data: Products.attachAvailability(data), total };
+  /** Attach preferred vendor display names (one batch query, no N+1). */
+  attachVendorNames: (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    const ids = [...new Set(list.map((r) => (r.preferred_vendor_id == null ? null : Number(r.preferred_vendor_id))).filter(Boolean))];
+    if (!ids.length) return list.map((r) => ({ ...r, preferred_vendor_name: '' }));
+    const names = new Map();
+    try {
+      const ph = ids.map(() => '?').join(',');
+      for (const v of db.prepare(`SELECT id, display_name, first_name, last_name, company_name FROM suppliers WHERE id IN (${ph})`).all(...ids)) {
+        names.set(Number(v.id), v.display_name || [v.first_name, v.last_name].filter(Boolean).join(' ') || v.company_name || '');
+      }
+    } catch { /* suppliers optional */ }
+    return list.map((r) => ({ ...r, preferred_vendor_name: r.preferred_vendor_id != null ? (names.get(Number(r.preferred_vendor_id)) || '') : '' }));
   },
+
+  /**
+   * Filtered + paginated item list — THE single query engine behind the
+   * Products & Services / Inventory list. Every filter is applied in SQL, so
+   * pagination and the result count operate across the WHOLE dataset (never
+   * just the visible page). Stock and On-PO reuse the SAME expressions as the
+   * central services. Returns { data, total, page, pageSize }.
+   */
+  getFiltered: (opts = {}) => {
+    const page = Math.max(1, Number(opts.page) || 1);
+    const pageSize = Math.max(1, Math.min(500, Number(opts.pageSize) || 25));
+    const offset = (page - 1) * pageSize;
+    const search = String(opts.search || '').trim();
+    const typeFilter = String(opts.typeFilter || '').trim();
+    const categoryFilter = String(opts.categoryFilter || '').trim();
+    const statusParam = ['', 'ALL'].includes(String(opts.stockStatus || opts.statusFilter || '').trim().toUpperCase())
+      ? ''
+      : String(opts.stockStatus || opts.statusFilter || '').trim().toUpperCase();
+    const vendorId = opts.vendorId != null && opts.vendorId !== '' && opts.vendorId !== 'all' ? Number(opts.vendorId) : null;
+    const onPoRaw = opts.onPo;
+    const onPo = onPoRaw === true || onPoRaw === 'true' || onPoRaw === 'ON_PO' ? true
+      : onPoRaw === false || onPoRaw === 'false' || onPoRaw === 'NOT_ON_PO' ? false : null;
+    const includeInactive = opts.includeInactive === true || opts.includeInactive === 'true';
+    const sortKey = String(opts.sort || 'id').trim();
+    const dir = String(opts.sortDir || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    const where = [];
+    const params = [];
+    if (!includeInactive) where.push('(p.is_active IS NULL OR p.is_active = 1)');
+    if (search) {
+      const like = `%${escapeLike(search)}%`;
+      where.push("(p.name LIKE ? ESCAPE '\\' OR p.sku LIKE ? ESCAPE '\\')");
+      params.push(like, like);
+    }
+    if (typeFilter && typeFilter !== 'all') { where.push('p.type = ?'); params.push(typeFilter); }
+    if (categoryFilter === UNCATEGORIZED) where.push("(p.category IS NULL OR TRIM(p.category) = '')");
+    else if (categoryFilter && categoryFilter !== 'all') { where.push('p.category = ?'); params.push(categoryFilter); }
+    if (vendorId != null) { where.push('p.preferred_vendor_id = ?'); params.push(vendorId); }
+
+    const invKeys = ItemTypes.inventoryTypeKeys();
+    const invIn = `LOWER(p.type) IN (${invKeys.map(() => '?').join(',')})`;
+
+    if (statusParam) {
+      // Stock-status filter — inventory-tracked items only, using the same
+      // On-Hand expression and the same <= boundary as the central helper.
+      where.push(invIn);
+      params.push(...invKeys);
+      if (statusParam === 'OUT_OF_STOCK') where.push(`(${INVENTORY_STOCK_SQL}) <= 0`);
+      else if (statusParam === 'LOW_STOCK') where.push(`(${INVENTORY_STOCK_SQL}) > 0 AND p.reorder_point IS NOT NULL AND (${INVENTORY_STOCK_SQL}) <= p.reorder_point`);
+      else if (statusParam === 'IN_STOCK') where.push(`(${INVENTORY_STOCK_SQL}) > 0 AND (p.reorder_point IS NULL OR (${INVENTORY_STOCK_SQL}) > p.reorder_point)`);
+    }
+
+    if (onPo !== null) {
+      // On-PO is a physical, inventory-tracked metric (same rule as the central
+      // availability service); Services / Non-Inventory Parts are never "On PO".
+      where.push(invIn);
+      params.push(...invKeys);
+      where.push(onPo ? `(${ON_PO_SQL}) > 0.005` : `(${ON_PO_SQL}) <= 0.005`);
+    }
+
+    const whereClause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+    const sortExpr = {
+      id: 'p.id',
+      name: 'LOWER(p.name)',
+      sku: 'LOWER(p.sku)',
+      category: "LOWER(COALESCE(p.category, ''))",
+      price: 'p.price',
+      onHand: `(${INVENTORY_STOCK_SQL})`,
+      onPo: `(${ON_PO_SQL})`,
+      expected: `((${INVENTORY_STOCK_SQL}) + (${ON_PO_SQL}))`,
+      reorderPoint: 'p.reorder_point',
+      status: 'p.id',
+    }[sortKey] || 'p.id';
+    const orderBy = `${sortExpr} ${dir}, p.id ${dir}`;
+
+    const total = db.prepare(`SELECT COUNT(*) AS total FROM products p${whereClause}`).get(...params).total;
+    const data = db.prepare(
+      `SELECT p.*, ${INVENTORY_STOCK_SQL} AS inventory_stock, (${ON_PO_SQL}) AS on_po_qty,
+              ((${INVENTORY_STOCK_SQL}) + (${ON_PO_SQL})) AS expected_qty
+       FROM products p${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`
+    ).all(...params, pageSize, offset);
+
+    return { data: Products.attachVendorNames(Products.attachAvailability(data)), total, page, pageSize };
+  },
+
+  /** Back-compat wrapper: the original positional signature delegates here. */
+  getPaginated: (page = 1, pageSize = 25, search = '', typeFilter = '', categoryFilter = '', statusFilter = '') =>
+    Products.getFiltered({ page, pageSize, search, typeFilter, categoryFilter, stockStatus: statusFilter }),
 
   getById: (id) => db.prepare('SELECT * FROM products WHERE id = ?').get(Number(id)),
 

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Card, Table, Button, Modal, Form, Input, InputNumber, Select, Space, message, Tag, Row, Col, Tooltip, Popconfirm, Drawer, Divider, Avatar, Typography, Switch, Descriptions, Tabs, Statistic, Empty, Spin, DatePicker } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, PrinterOutlined, AppstoreOutlined, DollarOutlined, FileTextOutlined, BoxPlotOutlined, ShoppingOutlined, EyeOutlined, RiseOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Card, Table, Button, Modal, Form, Input, InputNumber, Select, Space, message, Tag, Row, Col, Tooltip, Popconfirm, Drawer, Divider, Avatar, Typography, Switch, Descriptions, Tabs, Statistic, Empty, Spin, DatePicker, Alert } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, PrinterOutlined, AppstoreOutlined, DollarOutlined, FileTextOutlined, BoxPlotOutlined, ShoppingOutlined, EyeOutlined, RiseOutlined, ClearOutlined } from '@ant-design/icons';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
 import moment from 'moment';
@@ -60,6 +60,12 @@ const UnifiedItemList = () => {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [vendorFilter, setVendorFilter] = useState('all');
+  const [onPoFilter, setOnPoFilter] = useState('all');
+  const [sort, setSort] = useState({ field: 'id', order: 'descend' });
+  const [error, setError] = useState(null);
+  const didMountFilters = useRef(false);
+  const lastSearch = useRef('');
   const [pagination, setPagination] = useState({ current: 1, pageSize: 25, total: 0 });
   const [form] = Form.useForm();
   const [itemType, setItemType] = useState('INVENTORY_PART');
@@ -106,25 +112,43 @@ const UnifiedItemList = () => {
   const watchPrice = Form.useWatch('salesPrice', form);
   const liveProfit = useMemo(() => computeProfitability(watchCost, watchPrice), [watchCost, watchPrice]);
 
-  const fetchItems = useCallback(async (page = pagination.current, size = pagination.pageSize, term = search, type = typeFilter, cat = categoryFilter, status = statusFilter) => {
+  const fetchItems = useCallback(async (overrides = {}) => {
+    const f = {
+      page: pagination.current,
+      pageSize: pagination.pageSize,
+      search,
+      typeFilter,
+      categoryFilter,
+      stockStatus: statusFilter,
+      vendorId: vendorFilter,
+      onPo: onPoFilter,
+      sort: sort.field,
+      sortDir: sort.order === 'ascend' ? 'asc' : 'desc',
+      ...overrides,
+    };
     setLoading(true);
+    setError(null);
     try {
-      const data = await window.electronAPI.getProductsPaginated?.(page, size, term || '', type === 'all' ? '' : type, cat === 'all' ? '' : cat, status === 'all' ? '' : status);
+      const fn = window.electronAPI?.getProductsFiltered;
+      if (!fn) throw new Error('Item filtering is unavailable — restart the app so the latest backend (preload) loads.');
+      const data = await fn(f);
+      if (data && data.error) throw new Error(data.error);
       if (data && Array.isArray(data.data)) {
         setItems(data.data);
-        setPagination(p => ({ ...p, current: page, total: data.total || data.data.length }));
+        setPagination(p => ({ ...p, current: f.page, pageSize: f.pageSize, total: data.total || 0 }));
       } else {
         const all = await window.electronAPI.getAllProducts?.();
         const list = Array.isArray(all) ? all : (all?.all || all?.data || []);
         setItems(list);
-        setPagination(p => ({ ...p, current: page, total: list.length }));
+        setPagination(p => ({ ...p, current: 1, total: list.length }));
       }
-    } catch (error) {
-      message.error('Failed to load items');
+    } catch (e) {
+      console.error('[items] filtered load failed:', e);
+      setError(e?.message || String(e));
       setItems([]);
     }
     setLoading(false);
-  }, [pagination.current, pagination.pageSize, search, typeFilter, categoryFilter, statusFilter]);
+  }, [pagination.current, pagination.pageSize, search, typeFilter, categoryFilter, statusFilter, vendorFilter, onPoFilter, sort]);
 
   const loadLookups = useCallback(async () => {
     try {
@@ -154,18 +178,57 @@ const UnifiedItemList = () => {
     } catch { setSubcategories([]); }
   }, []);
 
-  useEffect(() => { fetchItems(); loadLookups(); loadSubcategories(''); }, [fetchItems, loadLookups, loadSubcategories]);
+  useEffect(() => { loadLookups(); loadSubcategories(''); }, [loadLookups, loadSubcategories]);
 
-  // Deep link: /main/inventory/items?item=<id> opens the item detail drawer;
-  // ?stockStatus=OUT_OF_STOCK|LOW_STOCK|IN_STOCK presets the stock-status filter.
+  // Mount: read filters (and the ?item= detail deep link) from the URL, then load.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const itemParam = params.get('item');
     if (itemParam && Number(itemParam)) openView({ id: Number(itemParam) });
-    const stockStatus = params.get('stockStatus');
-    if (stockStatus && ['OUT_OF_STOCK', 'LOW_STOCK', 'IN_STOCK'].includes(stockStatus)) handleStatusChange(stockStatus);
+    const next = {
+      search: params.get('search') || '',
+      typeFilter: params.get('type') || 'all',
+      categoryFilter: params.get('category') || 'all',
+      stockStatus: params.get('stockStatus') || 'all',
+      vendorId: params.get('vendorId') || 'all',
+      onPo: params.get('onPo') || 'all',
+    };
+    setSearch(next.search);
+    setTypeFilter(next.typeFilter);
+    setCategoryFilter(next.categoryFilter);
+    setStatusFilter(next.stockStatus);
+    setVendorFilter(next.vendorId);
+    setOnPoFilter(next.onPo);
+    lastSearch.current = next.search;
+    fetchItems({ page: 1, ...next });
+    didMountFilters.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search]);
+  }, []);
+
+  // Persist the active filters in the URL (refresh / Back / dashboard & alert
+  // drill-downs all preserve them).
+  useEffect(() => {
+    if (!didMountFilters.current) return;
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (typeFilter && typeFilter !== 'all') params.set('type', typeFilter);
+    if (categoryFilter && categoryFilter !== 'all') params.set('category', categoryFilter);
+    if (statusFilter && statusFilter !== 'all') params.set('stockStatus', statusFilter);
+    if (vendorFilter && vendorFilter !== 'all') params.set('vendorId', vendorFilter);
+    if (onPoFilter && onPoFilter !== 'all') params.set('onPo', onPoFilter);
+    const qs = params.toString();
+    routerHistory.replace(`${location.pathname}${qs ? `?${qs}` : ''}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, typeFilter, categoryFilter, statusFilter, vendorFilter, onPoFilter]);
+
+  // Debounced search (300 ms) — one backend query per pause, not per keystroke.
+  useEffect(() => {
+    if (lastSearch.current === search) return undefined;
+    lastSearch.current = search;
+    const t = setTimeout(() => fetchItems({ page: 1 }), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const uniqueCategories = useMemo(() => {
     const set = new Set(categories.map(c => c.name));
@@ -363,12 +426,28 @@ const UnifiedItemList = () => {
     } catch { message.error('Delete failed'); }
   };
 
-  const handleTableChange = (pag) => { setPagination(p => ({ ...p, current: pag.current, pageSize: pag.pageSize })); fetchItems(pag.current, pag.pageSize, search, typeFilter, categoryFilter); };
-  const handleSearch = () => fetchItems(1, pagination.pageSize, search, typeFilter, categoryFilter);
-  const handleTypeChange = (v) => { setTypeFilter(v || 'all'); fetchItems(1, pagination.pageSize, search, v || 'all', categoryFilter); };
-  const handleCategoryChange = (v) => { setCategoryFilter(v || 'all'); fetchItems(1, pagination.pageSize, search, typeFilter, v || 'all'); };
-  const handleStatusChange = (v) => { setStatusFilter(v || 'all'); fetchItems(1, pagination.pageSize, search, typeFilter, categoryFilter, v || 'all'); };
-  const handleRefresh = () => fetchItems(pagination.current, pagination.pageSize, search, typeFilter, categoryFilter);
+  const handleTableChange = (pag, _filters, sorter) => {
+    const field = sorter && sorter.field ? sorter.field : 'id';
+    const order = sorter && sorter.order ? sorter.order : 'descend';
+    setSort({ field, order });
+    setPagination(p => ({ ...p, current: pag.current, pageSize: pag.pageSize }));
+    fetchItems({ page: pag.current, pageSize: pag.pageSize, sort: field, sortDir: order === 'ascend' ? 'asc' : 'desc' });
+  };
+  const handleSearch = () => fetchItems({ page: 1 });
+  const handleTypeChange = (v) => { setTypeFilter(v || 'all'); fetchItems({ page: 1, typeFilter: v || 'all' }); };
+  const handleCategoryChange = (v) => { setCategoryFilter(v || 'all'); fetchItems({ page: 1, categoryFilter: v || 'all' }); };
+  const handleStatusChange = (v) => { setStatusFilter(v || 'all'); fetchItems({ page: 1, stockStatus: v || 'all' }); };
+  const handleVendorChange = (v) => { setVendorFilter(v || 'all'); fetchItems({ page: 1, vendorId: v || 'all' }); };
+  const handleOnPoChange = (v) => { setOnPoFilter(v || 'all'); fetchItems({ page: 1, onPo: v || 'all' }); };
+  const handleRefresh = () => fetchItems();
+  const clearFilters = () => {
+    setSearch(''); setTypeFilter('all'); setCategoryFilter('all');
+    setStatusFilter('all'); setVendorFilter('all'); setOnPoFilter('all');
+    lastSearch.current = '';
+    fetchItems({ page: 1, search: '', typeFilter: 'all', categoryFilter: 'all', stockStatus: 'all', vendorId: 'all', onPo: 'all' });
+  };
+  const hasActiveFilters = search !== '' || typeFilter !== 'all' || categoryFilter !== 'all'
+    || statusFilter !== 'all' || vendorFilter !== 'all' || onPoFilter !== 'all';
 
   const handleAddCategory = async () => {
     try {
@@ -445,13 +524,11 @@ const UnifiedItemList = () => {
 
   const columns = [
     {
-      title: 'SKU / Code', key: 'sku', width: 120,
-      sorter: (a, b) => (a.sku || '').localeCompare(b.sku || ''),
+      title: 'SKU / Code', dataIndex: 'sku', key: 'sku', width: 120, sorter: true,
       render: (_, r) => r.sku ? <Text code style={{ fontSize: 11 }}>{r.sku}</Text> : '-',
     },
     {
-      title: 'Name', dataIndex: 'name', key: 'name',
-      sorter: (a, b) => (a.name || '').localeCompare(b.name || ''),
+      title: 'Name', dataIndex: 'name', key: 'name', sorter: true,
       render: (v, r) => (
         <Space size={8}>
           <Avatar size={26} style={{ background: '#e6f7ff', color: '#1890ff', fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
@@ -468,9 +545,13 @@ const UnifiedItemList = () => {
         </Space>
       ),
     },
-    { title: 'Category', dataIndex: 'category', key: 'category', render: (v, r) => v ? <Tag color="#f0f0f0" style={{ color: '#595959', borderRadius: 4 }}>{v}{r.subcategory ? ` → ${r.subcategory}` : ''}</Tag> : '-' },
+    { title: 'Category', dataIndex: 'category', key: 'category', width: 140, sorter: true, render: (v, r) => v ? <Tag color="#f0f0f0" style={{ color: '#595959', borderRadius: 4 }}>{v}{r.subcategory ? ` → ${r.subcategory}` : ''}</Tag> : <Text type="secondary">—</Text> },
     {
-      title: 'Type', dataIndex: 'type', key: 'type', width: 160,
+      title: 'Preferred Vendor', dataIndex: 'preferred_vendor_name', key: 'preferredVendor', width: 170, ellipsis: true,
+      render: (v) => v ? <Text>{v}</Text> : <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'Type', dataIndex: 'type', key: 'type', width: 150,
       render: v => {
         const code = normalizeTypeCode(v);
         const lbl = itemTypeLabel(v) || 'Non-Inventory Part';
@@ -478,13 +559,7 @@ const UnifiedItemList = () => {
       },
     },
     {
-      title: 'Price', key: 'price', width: 120, align: 'right',
-      sorter: (a, b) => Number(a.price || 0) - Number(b.price || 0),
-      render: (_, r) => <span style={{ fontWeight: 600 }}>{cSym} {Number(r.price || 0).toFixed(2)}</span>,
-    },
-    {
-      title: 'On Hand', key: 'onHand', width: 90, align: 'right',
-      sorter: (a, b) => stockOf(a) - stockOf(b),
+      title: 'On Hand', dataIndex: 'onHand', key: 'onHand', width: 90, align: 'right', sorter: true,
       render: (_, r) => {
         if (normalizeTypeCode(r.type) !== 'INVENTORY_PART') return <Text type="secondary">—</Text>;
         const s = stockOf(r);
@@ -492,7 +567,7 @@ const UnifiedItemList = () => {
       },
     },
     {
-      title: 'On PO', key: 'onPo', width: 80, align: 'right',
+      title: 'On PO', dataIndex: 'onPo', key: 'onPo', width: 80, align: 'right', sorter: true,
       render: (_, r) => {
         if (normalizeTypeCode(r.type) !== 'INVENTORY_PART') return <Text type="secondary">—</Text>;
         const v = Number(r.on_po || 0);
@@ -501,11 +576,18 @@ const UnifiedItemList = () => {
       },
     },
     {
-      title: 'Expected', key: 'expected', width: 90, align: 'right',
+      title: 'Expected', dataIndex: 'expected', key: 'expected', width: 90, align: 'right', sorter: true,
       render: (_, r) => {
         if (normalizeTypeCode(r.type) !== 'INVENTORY_PART') return <Text type="secondary">—</Text>;
         const e = r.expected != null ? Number(r.expected) : stockOf(r);
         return <Tooltip title="Expected = On Hand + outstanding quantity on active Purchase Orders"><span style={{ fontWeight: 600 }}>{e}</span></Tooltip>;
+      },
+    },
+    {
+      title: 'Reorder Point', dataIndex: 'reorderPoint', key: 'reorderPoint', width: 110, align: 'right', sorter: true,
+      render: (_, r) => {
+        if (normalizeTypeCode(r.type) !== 'INVENTORY_PART') return <Text type="secondary">—</Text>;
+        return r.reorder_point == null ? <Text type="secondary">—</Text> : <Text>{Number(r.reorder_point)}</Text>;
       },
     },
     {
@@ -520,7 +602,11 @@ const UnifiedItemList = () => {
       },
     },
     {
-      title: 'Actions', key: 'actions', width: 130, align: 'center',
+      title: 'Price', dataIndex: 'price', key: 'price', width: 120, align: 'right', sorter: true,
+      render: (_, r) => <span style={{ fontWeight: 600 }}>{cSym} {Number(r.price || 0).toFixed(2)}</span>,
+    },
+    {
+      title: 'Actions', key: 'actions', width: 130, align: 'center', fixed: 'right',
       render: (_, r) => (
         <Space size={4}>
           <Tooltip title="View"><Button type="text" size="small" icon={<EyeOutlined />} style={{ color: '#1890ff' }} onClick={() => openView(r)} /></Tooltip>
@@ -591,31 +677,53 @@ const UnifiedItemList = () => {
 
       {/* Table card */}
       <Card bodyStyle={{ padding: 0 }} style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid #f0f0f0' }}>
+        {error && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ margin: 16, borderRadius: 10 }}
+            message="Unable to load inventory items."
+            description={error}
+            action={<Button size="small" onClick={() => fetchItems()}>Retry</Button>}
+          />
+        )}
         <div className="al-list-toolbar" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: 16, borderBottom: '1px solid #f0f0f0' }}>
           <Input
-            placeholder="Search name, SKU, description..."
+            placeholder="Search item name or SKU..."
             prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
             allowClear
-            style={{ width: 220, borderRadius: 8 }}
+            style={{ width: 230, borderRadius: 8 }}
             value={search}
             onChange={e => setSearch(e.target.value)}
             onPressEnter={handleSearch}
-            onClear={() => { setSearch(''); fetchItems(1, pagination.pageSize, '', typeFilter, categoryFilter); }}
+            onClear={() => { setSearch(''); lastSearch.current = ''; fetchItems({ page: 1, search: '' }); }}
           />
-          <Select value={typeFilter} onChange={handleTypeChange} style={{ width: 170, borderRadius: 8 }} placeholder="Type">
+          <Select value={typeFilter} onChange={handleTypeChange} style={{ width: 165, borderRadius: 8 }} placeholder="Type">
             <Option value="all">All Types</Option>
             {typeOptions().map(t => <Option key={t.value} value={t.value}>{t.label}</Option>)}
           </Select>
-          <Select value={categoryFilter} onChange={handleCategoryChange} style={{ width: 160, borderRadius: 8 }} placeholder="Category">
+          <Select value={categoryFilter} onChange={handleCategoryChange} style={{ width: 165, borderRadius: 8 }} placeholder="Category" showSearch optionFilterProp="children">
             <Option value="all">All Categories</Option>
             {uniqueCategories.map(c => <Option key={c} value={c}>{c}</Option>)}
           </Select>
+          <Select value={vendorFilter} onChange={handleVendorChange} style={{ width: 180, borderRadius: 8 }} placeholder="Vendor" showSearch optionFilterProp="children">
+            <Option value="all">All Vendors</Option>
+            {vendors.map(v => <Option key={v.id} value={v.id}>{v.display_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || v.company_name}</Option>)}
+          </Select>
           <Select value={statusFilter} onChange={handleStatusChange} style={{ width: 150, borderRadius: 8 }} placeholder="Stock Status">
-            <Option value="all">All Statuses</Option>
+            <Option value="all">All Stock</Option>
             <Option value="IN_STOCK">In Stock</Option>
             <Option value="LOW_STOCK">Low Stock</Option>
             <Option value="OUT_OF_STOCK">Out of Stock</Option>
           </Select>
+          <Select value={onPoFilter} onChange={handleOnPoChange} style={{ width: 130, borderRadius: 8 }} placeholder="On PO">
+            <Option value="all">All</Option>
+            <Option value="true">On PO</Option>
+            <Option value="false">Not On PO</Option>
+          </Select>
+          {hasActiveFilters && (
+            <Button icon={<ClearOutlined />} style={{ borderRadius: 8 }} onClick={clearFilters}>Clear Filters</Button>
+          )}
           <Tooltip title="Refresh"><Button icon={<ReloadOutlined />} style={{ borderRadius: 8 }} onClick={handleRefresh} /></Tooltip>
           <Tooltip title="Print"><Button icon={<PrinterOutlined />} style={{ borderRadius: 8 }} onClick={handlePrint} /></Tooltip>
           <Tooltip title="Download CSV"><Button icon={<DownloadOutlined />} style={{ borderRadius: 8 }} onClick={exportCSV} /></Tooltip>
@@ -623,8 +731,19 @@ const UnifiedItemList = () => {
             <DollarOutlined /> {cSym} {Number(totalValue || 0).toFixed(2)} in stock · {lowStockCount} low
           </span>
         </div>
+        <div style={{ padding: '10px 16px 0', color: '#8c8c8c', fontSize: 12 }}>
+          {loading ? 'Loading items…' : `${Number(pagination.total || 0).toLocaleString('en-US')} item${Number(pagination.total) === 1 ? '' : 's'}`}
+        </div>
         <Table columns={columns} dataSource={items} loading={loading} rowKey={r => r.id || r.sku || r.name}
           onChange={handleTableChange}
+          scroll={{ x: 1500 }}
+          locale={{ emptyText: loading ? ' ' : (error ? ' ' : (
+            <Empty
+              description={hasActiveFilters ? 'No items match the selected filters.' : 'No inventory items available.'}
+            >
+              {hasActiveFilters && <Button type="primary" ghost onClick={clearFilters}>Clear Filters</Button>}
+            </Empty>
+          )) }}
           pagination={{ ...pagination, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: t => `${t} items`, style: { margin: 16 } }}
           size="middle" rowClassName={() => 'item-row'} />
       </Card>
