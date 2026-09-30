@@ -192,6 +192,20 @@ const addPo = (status, lines) => {
   const overallA2 = Avail.getItemAvailability(A2.id);
   check('Overall On Hand 30 / On PO 50 / Expected 80', eq(overallA2.onHand, 30) && eq(overallA2.onPurchaseOrder, 50) && eq(overallA2.expected, 80), JSON.stringify(overallA2));
 
+  console.log('\n=== TEST 26: large dataset (batch, no N+1) ===');
+  const N = 250;
+  const bigIds = [];
+  for (let i = 0; i < N; i++) bigIds.push(mkItem('INVENTORY_PART', `Bulk${i}-${stamp}`).id);
+  clearPos();
+  for (let i = 0; i < N; i += 2) addPo('OPEN', [{ item: bigIds[i], ordered: 10, received: 0 }]);
+  const t0 = Date.now();
+  const batchBig = Avail.getAvailabilityForItems(bigIds);
+  const ms = Date.now() - t0;
+  console.log(`  batch availability for ${N} items in ${ms} ms`);
+  check('batch returns availability for all items', Object.keys(batchBig).length === N, String(Object.keys(batchBig).length));
+  check('batch is efficient (< 3000ms for 250 items)', ms < 3000, `${ms}ms`);
+  check('batch values correct for a sample', eq(batchBig[Number(bigIds[0])].onPurchaseOrder, 10) && eq(batchBig[Number(bigIds[1])].onPurchaseOrder, 0));
+
   console.log('\n=== UI / wiring static checks ===');
   const fs = require('fs');
   const FE = path.join(ROOT, 'src', 'frontend', 'src');
