@@ -302,9 +302,11 @@ const PurchaseOrders = () => {
   const newItemHandled = useRef(false);
   useEffect(() => {
     if (newItemHandled.current || !items.length) return;
-    const newItemId = new URLSearchParams(location.search).get('newItem');
+    const params = new URLSearchParams(location.search);
+    const newItemId = params.get('newItem');
     if (!newItemId) return;
     newItemHandled.current = true;
+    const qty = Number(params.get('qty')) || 0;
     const line = makeLine();
     setEditing(null);
     form.resetFields();
@@ -312,6 +314,7 @@ const PurchaseOrders = () => {
     setLines([line]);
     setFormOpen(true);
     selectItem(line.key, Number(newItemId));
+    if (qty > 0) updateLine(line.key, 'qtyOrdered', qty);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
 

@@ -98,7 +98,8 @@ const ReorderNeeded = () => {
   const createPo = (item) => {
     // Reuse the existing New Purchase Order flow (drawer). Nothing is saved
     // automatically; the user reviews Vendor / Qty / Cost / Date.
-    history.push(`/main/vendors/purchasing/purchase-orders?newItem=${item.productId}`);
+    // Suggested quantity = MAX(Reorder Point - Expected, 0) (overridable).
+    history.push(`/main/vendors/purchasing/purchase-orders?newItem=${item.productId}&qty=${item.shortfall || ''}`);
   };
 
   const cards = [
