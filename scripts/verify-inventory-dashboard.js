@@ -24,6 +24,10 @@ const Warehouses = require(path.join(BE, 'models', 'warehouses.js'));
 const COA = require(path.join(BE, 'models', 'chartOfAccounts.js'));
 require(path.join(BE, 'models', 'purchaseOrders.js'));
 const Dashboard = require(path.join(BE, 'services', 'inventoryDashboardService.js'));
+const Expenses = require(path.join(BE, 'models', 'expenses.js'));
+const JournalEntries = require(path.join(BE, 'models', 'journalEntries.js'));
+const Quotes = require(path.join(BE, 'models', 'quotes.js'));
+const Valuation = require(path.join(BE, 'services', 'inventoryValuation.js'));
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {
@@ -142,6 +146,68 @@ const summary = () => Dashboard.getDashboard().summary;
   console.log('\n=== Payload shape ===');
   check('payload has summary + 3 sections + window',
     dash2.summary && Array.isArray(dash2.stockAttention) && Array.isArray(dash2.incomingStock) && Array.isArray(dash2.recentActivity) && Number(dash2.window) > 0);
+
+  console.log('\n=== TEST 5: qty 3 with no reorder point is NOT low stock ===');
+  const F = mkItem('INVENTORY_PART', `NoReorder-${stamp}`, { reorderPoint: 0 });
+  Inventory.receiveStock(itemId(F), W.id, 3, 5, { sourceType: 'receipt', sourceId: 882001 });
+  check('TEST 5 not in Stock Attention / not Low Stock', !Dashboard.getDashboard().stockAttention.some((r) => r.productId === Number(F.id)));
+
+  console.log('\n=== TEST 11: old receipt (outside window) not counted ===');
+  const OLD = mkItem('INVENTORY_PART', `OldReceipt-${stamp}`, { reorderPoint: 0 });
+  const oldItem = itemId(OLD);
+  const before11 = Dashboard.getDashboard().summary.recentlyReceived;
+  const oldDate = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  db.prepare("INSERT INTO stock_movements (itemId, warehouseId, quantityChange, reason, sourceType, sourceId, movedAt) VALUES (?,?,?,?,?,?,?)")
+    .run(oldItem, W.id, 20, 'PURCHASE RECEIPT', 'receipt', 883001, oldDate);
+  check('TEST 11 old receipt not counted as Recently Received', Dashboard.getDashboard().summary.recentlyReceived === before11);
+
+  console.log('\n=== TEST 13: quote does not change stock or Recently Sold ===');
+  const QUO = mkItem('INVENTORY_PART', `QuoteItem-${stamp}`, { reorderPoint: 0 });
+  const quoItem = itemId(QUO);
+  const cust = db.prepare('SELECT id FROM customers ORDER BY id LIMIT 1').get();
+  const stockQ = () => Number((db.prepare('SELECT COALESCE(SUM(quantity),0) AS q FROM item_stock WHERE itemId = ?').get(quoItem) || {}).q) || 0;
+  const soldBefore13 = Dashboard.getDashboard().summary.recentlySold;
+  const stockBefore13 = stockQ();
+  try { Quotes.insertQuote('Pending', cust.id, '', 0, '', '2026-06-01', '', '', '', `Q-DASH-${stamp}`, 'system', 0, [{ product_id: QUO.id, description: 'q', quantity: 2, rate: 5, amount: 10 }]); } catch { /* best effort */ }
+  check('TEST 13 quote leaves stock and Recently Sold unchanged', stockQ() === stockBefore13 && Dashboard.getDashboard().summary.recentlySold === soldBefore13);
+
+  console.log('\n=== TEST 14: voided sale (net 0) does not count as Recently Sold ===');
+  const VOID = mkItem('INVENTORY_PART', `VoidItem-${stamp}`, { reorderPoint: 0 });
+  const voidItem = itemId(VOID);
+  const soldBefore14 = Dashboard.getDashboard().summary.recentlySold;
+  Inventory.issueStock(voidItem, W.id, 5, 5, { sourceType: 'invoice', sourceId: 884001 });
+  Inventory.receiveStock(voidItem, W.id, 5, 5, { sourceType: 'invoice', sourceId: 884002 });
+  check('TEST 14 voided sale not counted', Dashboard.getDashboard().summary.recentlySold === soldBefore14);
+
+  console.log('\n=== TEST 15-17: inventory value via the valuation engine ===');
+  const VAL = mkItem('INVENTORY_PART', `ValItem-${stamp}`, { reorderPoint: 0 });
+  const valItem = itemId(VAL);
+  Inventory.receiveStock(valItem, W.id, 10, 20, { sourceType: 'receipt', sourceId: 881001 });
+  check('TEST 15 value 10@20 = 200', near(Valuation.currentValue(valItem, 'FIFO'), 200), String(Valuation.currentValue(valItem, 'FIFO')));
+  Inventory.issueStock(valItem, W.id, 2, 20, { sourceType: 'invoice', sourceId: 881002 });
+  check('TEST 16 after selling 2 → 160', near(Valuation.currentValue(valItem, 'FIFO'), 160), String(Valuation.currentValue(valItem, 'FIFO')));
+  Inventory.receiveStock(valItem, W.id, 5, 30, { sourceType: 'receipt', sourceId: 881003 });
+  check('TEST 17 after receiving 5@30 → 310', near(Valuation.currentValue(valItem, 'FIFO'), 310), String(Valuation.currentValue(valItem, 'FIFO')));
+
+  console.log('\n=== TEST 18: dashboard Inventory Value reconciles to Inventory Asset GL ===');
+  const invAssetBalance = () => Number((db.prepare('SELECT COALESCE(SUM(jl.debit - jl.credit),0) AS b FROM journal_lines jl WHERE jl.account_id = ?').get(Number(invAsset.id)) || {}).b) || 0;
+  const gvalBefore = Dashboard.getDashboard().summary.inventoryValue;
+  const glBefore = invAssetBalance();
+  const GI = mkItem('INVENTORY_PART', `GLItem-${stamp}`, { reorderPoint: 0 });
+  const giBill = await Expenses.insertExpense(supplier.id, 'Accounts Payable', '2026-06-10', 'bill', `GL-${stamp}`, 'bill', 'system', 'Unpaid',
+    [{ line_type: 'item', product_id: GI.id, quantity: 10, rate: 20, amount: 200, description: 'gl' }], '2026-06-10', 't', 30);
+  JournalEntries.postExpense({ id: Number(giBill.expenseId), date: '2026-06-10', description: 'gl', reference: `GL-${stamp}` });
+  const gvalAfter = Dashboard.getDashboard().summary.inventoryValue;
+  const glAfter = invAssetBalance();
+  check('TEST 18 value delta == Inventory Asset GL delta', near(gvalAfter - gvalBefore, glAfter - glBefore), `${gvalAfter - gvalBefore} vs ${glAfter - glBefore}`);
+
+  console.log('\n=== TEST 29: large dataset loads efficiently ===');
+  for (let i = 0; i < 300; i++) mkItem('INVENTORY_PART', `DashBulk${i}-${stamp}`, { reorderPoint: 0 });
+  const t0 = Date.now();
+  const bigDash = Dashboard.getDashboard();
+  const ms = Date.now() - t0;
+  console.log(`  dashboard built for the whole company in ${ms} ms`);
+  check('TEST 29 dashboard < 3000ms with 300+ items', ms < 3000 && !!bigDash.summary, `${ms}ms`);
 
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

@@ -63,6 +63,9 @@ const replay = (itemId, method, excludeMovementId = null) => {
     } else if (q < 0) {
       let out = -q;
       if (m === 'FIFO') {
+        // FIFO consumes the oldest layers; the authoritative value is the sum of
+        // the REMAINING layers, so track quantity here and derive value below.
+        qtyOn -= out;
         while (out > 1e-9 && layers.length) {
           const L = layers[0];
           const take = Math.min(L.qty, out);
@@ -76,6 +79,9 @@ const replay = (itemId, method, excludeMovementId = null) => {
       }
     }
   }
+
+  // For FIFO the on-hand value is exactly the remaining cost layers.
+  if (m === 'FIFO') value = layers.reduce((s, L) => s + L.qty * L.cost, 0);
 
   return { method: m, layers, qtyOn, value };
 };

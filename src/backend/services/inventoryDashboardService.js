@@ -166,21 +166,28 @@ const getDashboard = ({ days } = {}) => {
     .filter(([id]) => trackedIds.has(id))
     .reduce((s, [, q]) => s + q, 0);
 
+  // Recently received / sold are NET per item within the window, so a voided /
+  // reversed document (which leaves an equal-and-opposite movement) cancels out
+  // and cannot inflate the count.
   const receivedRows = db.prepare(`
-    SELECT DISTINCT p.id AS product_id
+    SELECT p.id AS product_id
     FROM stock_movements m
     JOIN products p ON p.item_id = m.itemId
-    WHERE m.quantityChange > 0 AND m.sourceType IN ('receipt', 'bill')
+    WHERE m.sourceType IN ('receipt', 'bill')
       AND date(m.movedAt) >= date(?)
+    GROUP BY p.id
+    HAVING SUM(m.quantityChange) > 0.005
   `).all(since);
   const recentlyReceived = receivedRows.filter((r) => trackedIds.has(Number(r.product_id))).length;
 
   const soldRows = db.prepare(`
-    SELECT DISTINCT p.id AS product_id
+    SELECT p.id AS product_id
     FROM stock_movements m
     JOIN products p ON p.item_id = m.itemId
-    WHERE m.quantityChange < 0 AND m.sourceType = 'invoice'
+    WHERE m.sourceType = 'invoice'
       AND date(m.movedAt) >= date(?)
+    GROUP BY p.id
+    HAVING SUM(m.quantityChange) < -0.005
   `).all(since);
   const recentlySold = soldRows.filter((r) => trackedIds.has(Number(r.product_id))).length;
 
