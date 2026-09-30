@@ -4,9 +4,9 @@
     "electron-builder": "^25.1.8",
     "electron-rebuild": "^3.2.9"
   },
-  "name": "AccuLedger-Desktop-App",
+  "name": "AccuLedger",
   "version": "1.0.0",
-  "description": "AccuLedger Desktop App",
+  "description": "AccuLedger",
   "main": "src/backend/main.js",
   "scripts": {
     "start": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
@@ -25,7 +25,7 @@
   "smoke": "node scripts/smoke-tests.js",
   "build": {
     "electronVersion": "32.2.0",
-    "productName": "AccuLedger Desktop App",
+    "productName": "AccuLedger",
     "appId": "com.tendai.myapp",
     "files": [
       "src/backend/**/*",
@@ -45,7 +45,7 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico",
-      "executableName": "AccuLedger_Desktop_App"
+      "executableName": "AccuLedger"
     },
     "nsis": {
       "oneClick": false,
@@ -60,7 +60,7 @@
     "url": "git+https://github.com/fummah/accountsDev.git"
   },
   "keywords": [
-    "AccuLedger_Desktop_App"
+    "AccuLedger"
   ],
   "author": "Tendai Fuma",
   "license": "ISC",
