@@ -359,6 +359,7 @@ invoiceRefundCreate:     (payload)    => ipcRenderer.invoke('invoice-refund-crea
   getInventoryDashboard: (opts) => ipcRenderer.invoke('get-inventory-dashboard', opts),
   getReorderNeeded: (filters) => ipcRenderer.invoke('get-reorder-needed', filters),
   getPurchasingDashboard: (opts) => ipcRenderer.invoke('get-purchasing-dashboard', opts),
+  getPurchasingReports: (opts) => ipcRenderer.invoke('get-purchasing-reports', opts),
   getExpectedDeliveries: (filters) => ipcRenderer.invoke('get-expected-deliveries', filters),
   getInventoryMovementReport: (opts) => ipcRenderer.invoke('get-inventory-movement-report', opts),
   getInventoryAlerts: (filters) => ipcRenderer.invoke('get-inventory-alerts', filters),

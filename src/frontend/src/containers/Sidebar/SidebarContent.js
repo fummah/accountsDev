@@ -127,6 +127,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                     <span>Purchasing Dashboard</span>
                   </Link>
                 </Menu.Item>
+                <Menu.Item key="main/vendors/purchasing/reports">
+                  <Link to="/main/vendors/purchasing/reports">
+                    <i className="icon icon-chart"/>
+                    <span>Purchasing Reports</span>
+                  </Link>
+                </Menu.Item>
                 <Menu.Item key="main/vendors/bills/tracker">
                   <Link to="/main/vendors/bills/tracker">
                     <i className="icon icon-contacts"/>

@@ -686,6 +686,12 @@ safeHandle('get-purchasing-dashboard', async (event, opts) => {
     return Svc.getPurchasingDashboard(opts || {});
   } catch (error) { return { error: error.message }; }
 });
+safeHandle('get-purchasing-reports', async (event, opts) => {
+  try {
+    const Svc = require('../services/purchasingReportsService');
+    return Svc.getPurchasingReports(opts || {});
+  } catch (error) { return { error: error.message }; }
+});
 safeHandle('get-expected-deliveries', async (event, filters) => {
   try {
     const Svc = require('../services/expectedDeliveryService');
