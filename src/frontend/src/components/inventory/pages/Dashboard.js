@@ -56,8 +56,19 @@ const InventoryDashboard = () => {
     setLoading(true);
     setError(null);
     try {
-      const fn = window.electronAPI?.getInventoryDashboard;
-      if (!fn) throw new Error('Inventory Dashboard is unavailable — restart the app so the latest backend (preload) loads.');
+      const api = window.electronAPI || {};
+      const fn = api.getInventoryDashboard;
+      if (typeof fn !== 'function') {
+        // The preload bridge did not expose the method. Log exactly what IS
+        // available so a stale / partial preload is immediately diagnosable.
+        console.error('[inventory dashboard] window.electronAPI.getInventoryDashboard is not a function.', {
+          electronAPIPresent: !!window.electronAPI,
+          bridgeMethodCount: Object.keys(api).length,
+          hasInventoryAlerts: typeof api.getInventoryAlerts,
+          hasReorderNeeded: typeof api.getReorderNeeded,
+        });
+        throw new Error('The inventory dashboard API (getInventoryDashboard) is not exposed by the preload bridge in this build.');
+      }
       const res = await fn();
       if (!res || res.error) throw new Error((res && res.error) || 'No data returned');
       setData(res);
@@ -189,17 +200,24 @@ const InventoryDashboard = () => {
         </Space>
       </div>
 
-      {error && (
+      {error ? (
         <Alert
           type="error"
           showIcon
           style={{ marginBottom: 16, borderRadius: 10 }}
           message="Unable to load inventory summary."
-          description={error}
+          description={(
+            <>
+              <div>{error}</div>
+              <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: 4 }}>
+                No figures are shown because the dashboard did not load — displaying zeros would be misleading. Technical details were logged to the browser console.
+              </div>
+            </>
+          )}
           action={<Button size="small" onClick={load}>Retry</Button>}
         />
-      )}
-
+      ) : (
+        <>
       {/* Stat cards — modern Wieldy-style layout, colors on the border + icon tile */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
         {cards.map((card) => (
@@ -303,6 +321,8 @@ const InventoryDashboard = () => {
           )}
         </Card>
       </div>
+        </>
+      )}
 
       <Modal
         title={historyModal.itemName ? `Inventory History — ${historyModal.itemName}` : 'Inventory History'}

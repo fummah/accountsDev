@@ -30,7 +30,7 @@ module.exports = {
     const token = ctx.accessToken;
     if (!baseUrl || !token) return [];
     // Yodlee typical endpoint: /ysl/accounts
-    const url = `${baseUrl.replace(/\\/$/, '')}/ysl/accounts`;
+    const url = `${baseUrl.replace(/\/$/, '')}/ysl/accounts`;
     const data = await httpGet(url, { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' });
     const accounts = data.account || data.accounts || [];
     return accounts.map((a, idx) => ({
@@ -50,7 +50,7 @@ module.exports = {
     if (endDate) params.push(`toDate=${encodeURIComponent(endDate)}`);
     const qs = params.length ? `?${params.join('&')}` : '';
     // Yodlee typical endpoint: /ysl/transactions
-    const url = `${baseUrl.replace(/\\/$/, '')}/ysl/transactions${qs}`;
+    const url = `${baseUrl.replace(/\/$/, '')}/ysl/transactions${qs}`;
     const data = await httpGet(url, { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' });
     const txs = data.transaction || data.transactions || [];
     return txs.map(t => ({

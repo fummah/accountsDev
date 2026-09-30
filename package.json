@@ -30,6 +30,9 @@
     "files": [
       "src/backend/**/*",
       "src/backend/db/**/*",
+      "!src/backend/db/*.db-shm",
+      "!src/backend/db/*.db-wal",
+      "!src/backend/db/*.db-journal",
       "src/frontend/src/shared/**/*",
       "src/frontend/build/**/*",
       "assets/**/*",
