@@ -866,6 +866,25 @@ const UnifiedItemList = () => {
                 )}
               </Row>
 
+              {code === 'INVENTORY_PART' && (viewDetail.availabilityByWarehouse || []).length > 1 && (
+                <Card size="small" title="Availability by Warehouse" style={{ marginBottom: 16 }}>
+                  <Table
+                    size="small"
+                    rowKey={(r) => String(r.warehouseId)}
+                    pagination={false}
+                    dataSource={viewDetail.availabilityByWarehouse}
+                    columns={[
+                      { title: 'Warehouse', dataIndex: 'warehouseName', key: 'w' },
+                      { title: 'On Hand', dataIndex: 'onHand', key: 'oh', align: 'right', width: 100 },
+                      { title: 'On PO', dataIndex: 'onPurchaseOrder', key: 'op', align: 'right', width: 100,
+                        render: (v) => Number(v) > 0 ? <Text strong style={{ color: '#13c2c2' }}>{Number(v)}</Text> : <Text type="secondary">0</Text> },
+                      { title: 'Expected', dataIndex: 'expected', key: 'ex', align: 'right', width: 100,
+                        render: (v) => <Text strong>{Number(v)}</Text> },
+                    ]}
+                  />
+                </Card>
+              )}
+
               <Tabs defaultActiveKey="overview">
                 <Tabs.TabPane tab="Details" key="overview">
                   <Descriptions column={2} bordered size="small" title="Basic Information">

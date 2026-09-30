@@ -53,6 +53,7 @@ const makeLine = (overrides = {}) => ({
   key: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
   itemId: undefined, description: '', itemType: '', unit: '',
   qtyOrdered: 1, unitCost: 0, taxRate: 0, amount: 0,
+  warehouseId: undefined,
   ...overrides,
 });
 
@@ -123,6 +124,10 @@ const PurchaseOrders = () => {
 
   const itemById = useMemo(() => new Map(items.map(i => [Number(i.id), i])), [items]);
   const purchasableItems = useMemo(() => items.filter(i => (i.is_active == null || Number(i.is_active))), [items]);
+  const defaultWarehouseId = useMemo(() => {
+    const def = warehouses.find(w => w.isDefault) || warehouses[0];
+    return def ? Number(def.id) : undefined;
+  }, [warehouses]);
 
   // ── Totals ──
   const subtotal = sumMoney(lines.map(l => Number(l.amount) || 0));
@@ -156,6 +161,7 @@ const PurchaseOrders = () => {
       unit: it.default_purchase_unit || it.unit_of_measure || '',
       unitCost: Number(it.purchase_cost) || 0,
       taxRate: vat ? (Number(vat.vat_percentage) || 0) : 0,
+      warehouseId: l.warehouseId != null ? l.warehouseId : defaultWarehouseId,
     };
     return recalc(next);
   }));
@@ -190,6 +196,7 @@ const PurchaseOrders = () => {
         description: l.description || '', itemType: l.item_type || '', unit: l.unit || '',
         qtyOrdered: Number(l.qty_ordered) || 0, unitCost: Number(l.unit_cost) || 0,
         taxRate: Number(l.tax_rate) || 0, amount: Number(l.amount) || 0,
+        warehouseId: l.warehouse_id != null ? Number(l.warehouse_id) : undefined,
       })));
       setFormOpen(true);
     } catch { message.error('Failed to load Purchase Order'); }
@@ -210,6 +217,7 @@ const PurchaseOrders = () => {
         lines: lines.filter(l => l.itemId != null || Number(l.amount) > 0).map(l => ({
           itemId: l.itemId, description: l.description, itemType: l.itemType, unit: l.unit,
           qtyOrdered: l.qtyOrdered, unitCost: l.unitCost, taxRate: l.taxRate, amount: l.amount,
+          warehouseId: l.warehouseId,
         })),
       };
       if (!payload.lines.length) { message.error('Add at least one line item.'); return; }
@@ -532,6 +540,7 @@ const PurchaseOrders = () => {
                     <th style={{ textAlign: 'left', padding: '6px 8px', width: 90 }}>Unit</th>
                     <th style={{ textAlign: 'right', padding: '6px 8px', width: 110 }}>Cost</th>
                     <th style={{ textAlign: 'right', padding: '6px 8px', width: 90 }}>Tax %</th>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', width: 130 }}>Warehouse</th>
                     <th style={{ textAlign: 'right', padding: '6px 8px', width: 110 }}>Amount</th>
                     <th style={{ width: 36 }} />
                   </tr>
@@ -551,6 +560,13 @@ const PurchaseOrders = () => {
                       <td style={{ padding: '4px 8px' }}><Input size="small" value={l.unit} onChange={e => updateLine(l.key, 'unit', e.target.value)} /></td>
                       <td style={{ padding: '4px 8px' }}><InputNumber size="small" min={0} precision={2} style={{ width: '100%' }} value={l.unitCost} onChange={v => updateLine(l.key, 'unitCost', v || 0)} /></td>
                       <td style={{ padding: '4px 8px' }}><InputNumber size="small" min={0} precision={2} style={{ width: '100%' }} value={l.taxRate} onChange={v => updateLine(l.key, 'taxRate', v || 0)} /></td>
+                      <td style={{ padding: '4px 8px' }}>
+                        <Select size="small" style={{ width: '100%' }} placeholder="Warehouse"
+                          value={l.warehouseId != null ? Number(l.warehouseId) : defaultWarehouseId}
+                          onChange={v => updateLine(l.key, 'warehouseId', v)}>
+                          {warehouses.map(w => <Option key={w.id} value={Number(w.id)}>{w.name}</Option>)}
+                        </Select>
+                      </td>
                       <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 600 }}>{fmtMoney(l.amount)}</td>
                       <td style={{ padding: '4px 8px' }}><Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeLine(l.key)} /></td>
                     </tr>

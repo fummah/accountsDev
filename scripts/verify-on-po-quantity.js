@@ -170,6 +170,28 @@ const addPo = (status, lines) => {
   check('Batch On PO matches per-item for A', eq(batch[Number(A.id)].onPurchaseOrder, Avail.getItemAvailability(A.id).onPurchaseOrder));
   check('Batch nulls for Non-Inventory/Service', batch[Number(NI.id)].onPurchaseOrder === null && batch[Number(SVC.id)].onPurchaseOrder === null);
 
+  console.log('\n=== TEST 28: warehouse-level On PO ===');
+  clearPos();
+  const W1 = Warehouses.getOrCreateDefault();
+  Warehouses.create({ code: `ONPO-W2-${stamp}`, name: 'OnPo W2' });
+  const W2 = db.prepare('SELECT * FROM warehouses WHERE code = ?').get(`ONPO-W2-${stamp}`);
+  const A2 = mkItem('INVENTORY_PART', 'OnPo A2');
+  const a2Item = Inventory.resolveItemId(A2.id);
+  Inventory.receiveStock(a2Item, W1.id, 20, 5, { sourceType: 'receipt', sourceId: 700001 });
+  Inventory.receiveStock(a2Item, W2.id, 10, 5, { sourceType: 'receipt', sourceId: 700002 });
+  const poW = db.prepare("INSERT INTO purchase_orders (po_number, vendor_id, po_date, status, subtotal, tax_total, total, created_by) VALUES (?,?,?,?,?,?,?,?)")
+    .run(`WH-${stamp}`, supplier.id, '2026-09-01', 'OPEN', 0, 0, 0, 't').lastInsertRowid;
+  const insLineW = db.prepare("INSERT INTO purchase_order_lines (purchase_order_id, item_id, warehouse_id, line_no, description, item_type, unit, qty_ordered, qty_received, qty_billed, unit_cost, tax_rate, amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
+  insLineW.run(poW, A2.id, W1.id, 1, 'x', 'INVENTORY_PART', 'Each', 30, 0, 0, 5, 0, 0);
+  insLineW.run(poW, A2.id, W2.id, 2, 'x', 'INVENTORY_PART', 'Each', 20, 0, 0, 5, 0, 0);
+  const byWh = Avail.getAvailabilityByWarehouse(A2.id);
+  const w1 = byWh.find((r) => Number(r.warehouseId) === Number(W1.id));
+  const w2 = byWh.find((r) => Number(r.warehouseId) === Number(W2.id));
+  check('W1 On Hand 20 / On PO 30 / Expected 50', w1 && eq(w1.onHand, 20) && eq(w1.onPurchaseOrder, 30) && eq(w1.expected, 50), JSON.stringify(w1));
+  check('W2 On Hand 10 / On PO 20 / Expected 30', w2 && eq(w2.onHand, 10) && eq(w2.onPurchaseOrder, 20) && eq(w2.expected, 30), JSON.stringify(w2));
+  const overallA2 = Avail.getItemAvailability(A2.id);
+  check('Overall On Hand 30 / On PO 50 / Expected 80', eq(overallA2.onHand, 30) && eq(overallA2.onPurchaseOrder, 50) && eq(overallA2.expected, 80), JSON.stringify(overallA2));
+
   console.log('\n=== UI / wiring static checks ===');
   const fs = require('fs');
   const FE = path.join(ROOT, 'src', 'frontend', 'src');
@@ -183,6 +205,10 @@ const addPo = (status, lines) => {
   check('Products model merges availability (on_po/expected)', /attachAvailability/.test(readBe('models/products.js')));
   check('preload exposes getOnPoLines + getItemAvailability', /getOnPoLines/.test(readBe('preload.js')) && /getItemAvailability/.test(readBe('preload.js')));
   check('dashboard reuses the availability service (single source)', /inventoryAvailabilityService/.test(readBe('services/inventoryDashboardService.js')));
+  check('Item detail shows availability by warehouse', /availabilityByWarehouse/.test(ui));
+  check('PO form has a destination Warehouse column', /Warehouse<\/th>/.test(readFe('components/vendors/purchasing/PurchaseOrders.js')));
+  check('PO model persists line warehouse_id', /warehouse_id/.test(readBe('models/purchaseOrders.js')));
+  check('preload exposes getItemAvailabilityByWarehouse', /getItemAvailabilityByWarehouse/.test(readBe('preload.js')));
 
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

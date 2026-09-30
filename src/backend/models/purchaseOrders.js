@@ -108,6 +108,12 @@ const PurchaseOrders = {
     addExpenseLineCol('purchase_order_id', 'INTEGER');
     addExpenseLineCol('purchase_order_line_id', 'INTEGER');
 
+    // Destination warehouse for a PO line (used for warehouse-level On PO).
+    try {
+      const cols = new Set(db.prepare("PRAGMA table_info('purchase_order_lines')").all().map(r => r.name));
+      if (cols.size && !cols.has('warehouse_id')) db.prepare('ALTER TABLE purchase_order_lines ADD COLUMN warehouse_id INTEGER').run();
+    } catch { /* additive migration */ }
+
     db.prepare('CREATE INDEX IF NOT EXISTS idx_po_lines_po ON purchase_order_lines(purchase_order_id)').run();
     db.prepare('CREATE INDEX IF NOT EXISTS idx_receipt_lines_receipt ON goods_receipt_lines(receipt_id)').run();
   },
@@ -317,6 +323,15 @@ const PurchaseOrders = {
     const lines = Array.isArray(data.lines) ? data.lines.filter(l => l && (l.itemId != null || num(l.qtyOrdered) > 0 || num(l.amount) > 0)) : [];
     if (!lines.length) return { success: false, error: 'Add at least one line item.' };
 
+    // Destination warehouse for lines that do not specify one (warehouse-level
+    // On PO). Falls back to the company default warehouse.
+    let defaultWarehouseId = null;
+    try {
+      const Warehouses = require('./warehouses');
+      const w = Warehouses.getOrCreateDefault();
+      defaultWarehouseId = w && w.id != null ? Number(w.id) : null;
+    } catch { defaultWarehouseId = null; }
+
     // Snapshots: the item's current defaults are stored ON the PO line so later
     // Item master edits never rewrite an existing PO.
     const prepared = lines.map((l, i) => {
@@ -327,6 +342,7 @@ const PurchaseOrders = {
       return {
         line_no: i + 1,
         item_id: l.itemId != null ? Number(l.itemId) : null,
+        warehouse_id: l.warehouseId != null ? Number(l.warehouseId) : defaultWarehouseId,
         description: l.description || '',
         item_type: l.itemType || '',
         unit: l.unit || '',
@@ -360,8 +376,8 @@ const PurchaseOrders = {
           .run(data.poNumber || PurchaseOrders.generateNumber(), vendorId, data.poDate || null, data.expectedDate || null, data.shipTo || null, data.terms || null, data.memo || null, status, subtotal, taxTotal, total, ctx.userId || 'system');
         poId = res.lastInsertRowid;
       }
-      const insLine = db.prepare(`INSERT INTO purchase_order_lines (purchase_order_id, item_id, line_no, description, item_type, unit, qty_ordered, qty_received, qty_billed, unit_cost, tax_rate, amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
-      for (const l of prepared) insLine.run(poId, l.item_id, l.line_no, l.description, l.item_type, l.unit, l.qty_ordered, 0, 0, l.unit_cost, l.tax_rate, l.amount);
+      const insLine = db.prepare(`INSERT INTO purchase_order_lines (purchase_order_id, item_id, warehouse_id, line_no, description, item_type, unit, qty_ordered, qty_received, qty_billed, unit_cost, tax_rate, amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const l of prepared) insLine.run(poId, l.item_id, l.warehouse_id, l.line_no, l.description, l.item_type, l.unit, l.qty_ordered, 0, 0, l.unit_cost, l.tax_rate, l.amount);
       return poId;
     });
 

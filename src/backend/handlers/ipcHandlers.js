@@ -609,6 +609,14 @@ safeHandle('get-on-po-lines', async (event, id) => {
   } catch (error) { return { error: error.message }; }
 });
 
+// Per-warehouse availability for one item (warehouse-level On PO).
+safeHandle('get-item-availability-by-warehouse', async (event, id) => {
+  try {
+    const Availability = require('../services/inventoryAvailabilityService');
+    return Availability.getAvailabilityByWarehouse(id);
+  } catch (error) { return { error: error.message }; }
+});
+
 safeHandle('save-item-master', async (event, data) => {
   try { return Products.saveItemMaster(data || {}, { userId: 'system' }); }
   catch (error) { return { success: false, error: error.message }; }

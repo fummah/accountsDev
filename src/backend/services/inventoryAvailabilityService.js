@@ -154,11 +154,64 @@ const getCompanyInventoryAvailability = () => {
   return getAvailabilityForItems(tracked.map((p) => p.id));
 };
 
+/**
+ * Per-warehouse availability for one item (warehouse-level On PO):
+ *   On Hand  per warehouse  = item_stock(warehouseId)
+ *   On PO    per warehouse  = active PO lines' destination warehouse
+ *   Expected                = On Hand + On PO
+ * Warehouses with no activity are omitted. Legacy PO lines with no warehouse
+ * are reported under warehouseId = null ("Unassigned").
+ */
+const getAvailabilityByWarehouse = (productId) => {
+  const p = db.prepare('SELECT id, type, item_id FROM products WHERE id = ?').get(Number(productId));
+  if (!p || !isTracked(p.type)) return [];
+
+  const onHand = new Map();
+  for (const r of db.prepare('SELECT warehouseId, SUM(quantity) AS q FROM item_stock WHERE itemId = ? GROUP BY warehouseId').all(p.item_id)) {
+    onHand.set(r.warehouseId == null ? null : Number(r.warehouseId), num(r.q));
+  }
+
+  const onPo = new Map();
+  const ph = EXCLUDED_PO_STATUSES.map(() => '?').join(',');
+  const poRows = db.prepare(`
+    SELECT pol.warehouse_id AS warehouse_id,
+           SUM(MAX(pol.qty_ordered - pol.qty_received, 0)) AS q
+    FROM purchase_order_lines pol
+    JOIN purchase_orders po ON po.id = pol.purchase_order_id
+    WHERE po.status NOT IN (${ph})
+      AND MAX(pol.qty_ordered - pol.qty_received, 0) > 0.005
+      AND pol.item_id = ?
+    GROUP BY pol.warehouse_id
+  `).all(...EXCLUDED_PO_STATUSES, Number(productId));
+  for (const r of poRows) onPo.set(r.warehouse_id == null ? null : Number(r.warehouse_id), num(r.q));
+
+  const ids = [...new Set([...onHand.keys(), ...onPo.keys()])];
+  const names = new Map();
+  const realIds = ids.filter((x) => x != null);
+  if (realIds.length) {
+    const ph2 = realIds.map(() => '?').join(',');
+    for (const r of db.prepare(`SELECT id, name FROM warehouses WHERE id IN (${ph2})`).all(...realIds)) names.set(Number(r.id), r.name);
+  }
+
+  return ids.map((wid) => {
+    const oh = onHand.get(wid) || 0;
+    const op = onPo.get(wid) || 0;
+    return {
+      warehouseId: wid,
+      warehouseName: wid == null ? 'Unassigned' : (names.get(Number(wid)) || `Warehouse #${wid}`),
+      onHand: oh,
+      onPurchaseOrder: op,
+      expected: oh + op,
+    };
+  }).sort((a, b) => String(a.warehouseName).localeCompare(String(b.warehouseName)));
+};
+
 module.exports = {
   EXCLUDED_PO_STATUSES,
   getItemAvailability,
   getAvailabilityForItems,
   getCompanyInventoryAvailability,
+  getAvailabilityByWarehouse,
   getActivePoByProduct,
   getOnPoLines,
 };

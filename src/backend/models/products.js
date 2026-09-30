@@ -365,7 +365,12 @@ const Products = {
       salesValue: sum(sales, r => r.amount),
     };
 
-    return { master, itemId, stock, movements, purchases, sales, summary, availability: master.availability || null };
+    let availabilityByWarehouse = [];
+    try {
+      const Availability = require('../services/inventoryAvailabilityService');
+      availabilityByWarehouse = Availability.getAvailabilityByWarehouse(Number(id));
+    } catch { availabilityByWarehouse = []; }
+    return { master, itemId, stock, movements, purchases, sales, summary, availability: master.availability || null, availabilityByWarehouse };
   },
 
   /**
