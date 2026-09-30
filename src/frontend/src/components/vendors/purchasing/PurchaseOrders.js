@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Card, Table, Button, Drawer, Form, Input, InputNumber, Select, Space, message, Tag, Row, Col, Tooltip, Popconfirm, DatePicker, Divider, Typography, Descriptions, Tabs, Statistic, Empty, Dropdown, Menu, Skeleton, Modal } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, ShoppingCartOutlined, InboxOutlined, CheckCircleOutlined, CloseCircleOutlined, PrinterOutlined, MailOutlined, MoreOutlined, DollarOutlined, FileTextOutlined } from '@ant-design/icons';
 import moment from 'moment';
@@ -296,6 +296,24 @@ const PurchaseOrders = () => {
     if (poId) openDetail({ id: Number(poId) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Deep link from Reorder Needed: ?newItem=<productId> opens the New PO drawer
+  // with that item pre-selected (nothing is saved automatically).
+  const newItemHandled = useRef(false);
+  useEffect(() => {
+    if (newItemHandled.current || !items.length) return;
+    const newItemId = new URLSearchParams(location.search).get('newItem');
+    if (!newItemId) return;
+    newItemHandled.current = true;
+    const line = makeLine();
+    setEditing(null);
+    form.resetFields();
+    form.setFieldsValue({ poDate: moment(), expectedDate: moment().add(7, 'days') });
+    setLines([line]);
+    setFormOpen(true);
+    selectItem(line.key, Number(newItemId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   // Create Bill → reuse the existing Enter Bill engine, pre-linked to this PO.
   const createBillFromPO = (po) => {

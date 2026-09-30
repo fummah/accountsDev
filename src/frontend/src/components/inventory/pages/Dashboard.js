@@ -89,8 +89,8 @@ const InventoryDashboard = () => {
   const cards = [
     { key: 'totalInventoryItems', title: 'Total Inventory Items', value: s.totalInventoryItems, icon: <AppstoreOutlined />, color: '#1890ff', target: 'items' },
     { key: 'inStockItems', title: 'In Stock', value: s.inStockItems, icon: <CheckCircleOutlined />, color: '#52c41a', target: 'attention' },
-    { key: 'lowStockItems', title: 'Low Stock', value: s.lowStockItems, icon: <WarningOutlined />, color: '#faad14', target: 'attention' },
-    { key: 'outOfStockItems', title: 'Out of Stock', value: s.outOfStockItems, icon: <StopOutlined />, color: '#f5222d', target: 'attention' },
+    { key: 'lowStockItems', title: 'Low Stock', value: s.lowStockItems, icon: <WarningOutlined />, color: '#faad14', target: 'reorder' },
+    { key: 'outOfStockItems', title: 'Out of Stock', value: s.outOfStockItems, icon: <StopOutlined />, color: '#f5222d', target: 'reorderOut' },
     { key: 'itemsOnPO', title: 'On Purchase Order', value: s.itemsOnPO, icon: <ShoppingCartOutlined />, color: '#13c2c2', target: 'incoming' },
     { key: 'recentlyReceived', title: 'Recently Received', value: s.recentlyReceived, icon: <InboxOutlined />, color: '#722ed1', target: 'activity', helper: `Last ${window} days` },
     { key: 'recentlySold', title: 'Recently Sold', value: s.recentlySold, icon: <LineChartOutlined />, color: '#eb2f96', target: 'activity', helper: `Last ${window} days` },
@@ -99,6 +99,8 @@ const InventoryDashboard = () => {
 
   const onCardClick = (card) => {
     if (card.target === 'items') { history.push('/main/inventory/items'); return; }
+    if (card.target === 'reorder') { history.push('/main/inventory/reorder'); return; }
+    if (card.target === 'reorderOut') { history.push('/main/inventory/reorder?status=OUT_OF_STOCK'); return; }
     if (card.target === 'incoming') { scrollTo(incomingRef); return; }
     if (card.target === 'activity') { scrollTo(activityRef); return; }
     scrollTo(attentionRef);

@@ -91,6 +91,17 @@ function registerInventoryHandlers() {
     }
   });
 
+  // Reorder Needed list (active inventory parts at/below their reorder point).
+  ipcMain.handle('get-reorder-needed', async (_e, filters) => {
+    try {
+      const Reorder = require('../services/inventoryReorderService');
+      return Reorder.getReorderItems(filters || {});
+    } catch (e) {
+      console.error('Error building reorder list:', e);
+      return { error: e.message };
+    }
+  });
+
   // Expiring lots within N days
   ipcMain.handle('list-expiring-lots', async (_e, days) => {
     try {
