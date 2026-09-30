@@ -593,6 +593,14 @@ safeHandle('get-item-history', async (event, id, filters) => {
   try { return Products.getInventoryHistory(id, filters || {}); } catch (error) { return { error: error.message }; }
 });
 
+// Simple Item Profitability (derived; no accounting impact).
+safeHandle('get-item-profitability', async (event, id) => {
+  try { return require('../services/itemProfitabilityService').getItemProfitability(id); } catch (error) { return { error: error.message }; }
+});
+safeHandle('get-item-profitabilities', async (event, filters) => {
+  try { return require('../services/itemProfitabilityService').getItemProfitabilities(filters || {}); } catch (error) { return { error: error.message }; }
+});
+
 // On Hand / On PO / Expected for one item (central availability service).
 safeHandle('get-item-availability', async (event, id) => {
   try {

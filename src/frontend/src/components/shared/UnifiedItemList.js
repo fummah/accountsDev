@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, Table, Button, Modal, Form, Input, InputNumber, Select, Space, message, Tag, Row, Col, Tooltip, Popconfirm, Drawer, Divider, Avatar, Typography, Switch, Descriptions, Tabs, Statistic, Empty, Spin, DatePicker } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, PrinterOutlined, AppstoreOutlined, DollarOutlined, FileTextOutlined, BoxPlotOutlined, ShoppingOutlined, EyeOutlined } from '@ant-design/icons';
-import { useHistory } from 'react-router-dom';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, PrinterOutlined, AppstoreOutlined, DollarOutlined, FileTextOutlined, BoxPlotOutlined, ShoppingOutlined, EyeOutlined, RiseOutlined } from '@ant-design/icons';
+import { useHistory, useLocation } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
 import moment from 'moment';
 import AccountSelect from './AccountSelect';
 import FormSection, { FORM_ITEM_STYLE } from './FormSection';
 import { typeOptions, normalizeTypeCode, itemTypeLabel, capabilities, getSections } from '../../utils/itemTypes';
+import { computeProfitability } from '../../utils/profitability';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -48,6 +49,7 @@ const stockOf = (r) => {
 const UnifiedItemList = () => {
   const { symbol: cSym } = useCurrency();
   const routerHistory = useHistory();
+  const location = useLocation();
   const fmtMoney = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -99,6 +101,11 @@ const UnifiedItemList = () => {
   const sections = useMemo(() => getSections(itemType), [itemType]);
   const showSection = (name) => sections.includes(name);
 
+  // Live read-only profitability preview while editing (backend is authoritative).
+  const watchCost = Form.useWatch('purchaseCost', form);
+  const watchPrice = Form.useWatch('salesPrice', form);
+  const liveProfit = useMemo(() => computeProfitability(watchCost, watchPrice), [watchCost, watchPrice]);
+
   const fetchItems = useCallback(async (page = pagination.current, size = pagination.pageSize, term = search, type = typeFilter, cat = categoryFilter, status = statusFilter) => {
     setLoading(true);
     try {
@@ -148,6 +155,13 @@ const UnifiedItemList = () => {
   }, []);
 
   useEffect(() => { fetchItems(); loadLookups(); loadSubcategories(''); }, [fetchItems, loadLookups, loadSubcategories]);
+
+  // Deep link: /main/inventory/items?item=<id> opens the item detail drawer.
+  useEffect(() => {
+    const itemParam = new URLSearchParams(location.search).get('item');
+    if (itemParam && Number(itemParam)) openView({ id: Number(itemParam) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   const uniqueCategories = useMemo(() => {
     const set = new Set(categories.map(c => c.name));
@@ -774,6 +788,31 @@ const UnifiedItemList = () => {
           </FormSection>
           )}
 
+          {/* ── PROFITABILITY (read-only, derived) ── */}
+          <FormSection title="Profitability" icon={<RiseOutlined />}>
+            <Row gutter={16}>
+              <Col xs={24} md={8}>
+                <Form.Item label="Gross Profit" style={FORM_ITEM_STYLE} extra={<Text type="secondary" style={{ fontSize: 11 }}>Selling Price − Cost</Text>}>
+                  <Text strong style={{ fontSize: 16, color: liveProfit.grossProfit == null ? '#8c8c8c' : liveProfit.grossProfit < 0 ? '#cf1322' : '#3f8600' }}>
+                    {liveProfit.grossProfit == null ? '—' : `${cSym} ${Number(liveProfit.grossProfit).toFixed(2)}`}
+                  </Text>
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={8}>
+                <Form.Item label="Gross Margin" style={FORM_ITEM_STYLE} extra={<Text type="secondary" style={{ fontSize: 11 }}>Gross Profit ÷ Selling Price</Text>}>
+                  <Text strong style={{ fontSize: 16, color: liveProfit.marginPercent == null ? '#8c8c8c' : liveProfit.marginPercent < 0 ? '#cf1322' : '#3f8600' }}>
+                    {liveProfit.marginPercent == null ? '—' : `${Number(liveProfit.marginPercent).toFixed(2)}%`}
+                  </Text>
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={8}>
+                <Form.Item label="Status" style={FORM_ITEM_STYLE} extra={<Text type="secondary" style={{ fontSize: 11 }}>Based on current/default unit cost and configured selling price.</Text>}>
+                  <Text type="secondary">{liveProfit.status === 'MISSING_COST' ? 'Missing Cost' : liveProfit.status === 'MISSING_PRICE' ? 'Missing Selling Price' : liveProfit.status}</Text>
+                </Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
+
           {/* ── INVENTORY INFORMATION (Inventory Part only) ── */}
           {showSection('inventory') && (
             <FormSection title="Inventory Information" icon={<BoxPlotOutlined />}>
@@ -859,6 +898,7 @@ const UnifiedItemList = () => {
           const stockStatus = viewDetail.stock_status;
           const statusLabel = stockStatus === 'OUT_OF_STOCK' ? 'Out of Stock' : stockStatus === 'LOW_STOCK' ? 'Low Stock' : stockStatus === 'IN_STOCK' ? 'In Stock' : '—';
           const statusColor = stockStatus === 'OUT_OF_STOCK' ? '#cf1322' : stockStatus === 'LOW_STOCK' ? '#fa8c16' : '#3f8600';
+          const prof = viewDetail.profitability || null;
           return (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -907,6 +947,25 @@ const UnifiedItemList = () => {
                         render: (v) => <Text strong>{Number(v)}</Text> },
                     ]}
                   />
+                </Card>
+              )}
+
+              {prof && (
+                <Card size="small" title={<Space><RiseOutlined /> Profitability</Space>} style={{ marginBottom: 16 }}>
+                  <Row gutter={16}>
+                    {[
+                      { l: 'Cost', v: prof.cost == null ? '—' : `${cSym} ${Number(prof.cost).toFixed(2)}` },
+                      { l: 'Selling Price', v: prof.sellingPrice == null ? '—' : `${cSym} ${Number(prof.sellingPrice).toFixed(2)}` },
+                      { l: 'Gross Profit', v: prof.grossProfit == null ? '—' : `${cSym} ${Number(prof.grossProfit).toFixed(2)}`, c: prof.grossProfit == null ? undefined : prof.grossProfit < 0 ? '#cf1322' : '#3f8600' },
+                      { l: 'Gross Margin', v: prof.marginPercent == null ? '—' : `${Number(prof.marginPercent).toFixed(2)}%`, c: prof.marginPercent == null ? undefined : prof.marginPercent < 0 ? '#cf1322' : '#3f8600' },
+                    ].map((m) => (
+                      <Col xs={12} md={6} key={m.l}>
+                        <div style={{ color: '#8c8c8c', fontSize: 12 }}>{m.l}</div>
+                        <div style={{ fontWeight: 700, fontSize: 16, color: m.c || '#1f2d3d' }}>{m.v}</div>
+                      </Col>
+                    ))}
+                  </Row>
+                  <div style={{ marginTop: 8 }}><Text type="secondary" style={{ fontSize: 11 }}>Based on current/default unit cost and configured selling price.</Text></div>
                 </Card>
               )}
 

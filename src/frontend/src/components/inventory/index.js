@@ -5,6 +5,7 @@ import Stock from './pages/Stock';
 import Dashboard from './pages/Dashboard';
 import ReorderNeeded from './pages/ReorderNeeded';
 import MovementReport from './pages/MovementReport';
+import ItemProfitability from './pages/ItemProfitability';
 import BOM from './pages/BOM';
 import Serials from './pages/Serials';
 import Barcodes from './pages/Barcodes';
@@ -20,6 +21,7 @@ const InventoryRoutes = ({ match }) => {
       <Route path={`${match.path}/dashboard`} component={Dashboard} />
       <Route path={`${match.path}/reorder`} component={ReorderNeeded} />
       <Route path={`${match.path}/movement-report`} component={MovementReport} />
+      <Route path={`${match.path}/profitability`} component={ItemProfitability} />
       <Route path={`${match.path}/items`} component={UnifiedItemList} />
       <Route path={`${match.path}/warehouses`} component={Warehouses} />
       <Route path={`${match.path}/stock`} component={Stock} />

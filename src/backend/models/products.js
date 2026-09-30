@@ -392,7 +392,12 @@ const Products = {
       const Availability = require('../services/inventoryAvailabilityService');
       availabilityByWarehouse = Availability.getAvailabilityByWarehouse(Number(id));
     } catch { availabilityByWarehouse = []; }
-    return { master, itemId, stock, movements, purchases, sales, summary, availability: master.availability || null, availabilityByWarehouse, stock_status: master.stock_status || null };
+    let profitability = null;
+    try {
+      const ItemProfitability = require('../services/itemProfitabilityService');
+      profitability = ItemProfitability.getItemProfitability(Number(id));
+    } catch { profitability = null; }
+    return { master, itemId, stock, movements, purchases, sales, summary, availability: master.availability || null, availabilityByWarehouse, stock_status: master.stock_status || null, profitability };
   },
 
   /**
