@@ -1,5 +1,6 @@
 const db = require('./dbmgr');
 const { round2 } = require('../services/documentStatus');
+const DeliveryStatus = require('../services/deliveryStatus');
 
 /**
  * purchaseOrders.js — Purchase Orders + Goods Receipts.
@@ -178,12 +179,16 @@ const PurchaseOrders = {
     return rows.map(po => {
       const lines = db.prepare('SELECT * FROM purchase_order_lines WHERE purchase_order_id = ? ORDER BY line_no, id').all(po.id);
       const st = PurchaseOrders.computeStatus(po, lines);
+      const remainingToReceive = round2(Math.max(0, num(st.totalOrdered) - num(st.totalReceived)));
+      const active = po.status !== 'DRAFT' && po.status !== 'CANCELLED' && po.status !== 'CLOSED';
       return {
         ...po,
         ...st,
         received_value: round2(lines.reduce((s, l) => s + num(l.qty_received) * num(l.unit_cost), 0)),
         billed_value: round2(lines.reduce((s, l) => s + num(l.qty_billed) * num(l.unit_cost), 0)),
         line_count: lines.length,
+        remainingToReceive,
+        deliveryStatus: DeliveryStatus.computeDeliveryStatus({ expectedDate: po.expected_date, remainingToReceive, active }),
       };
     });
   },
@@ -197,6 +202,12 @@ const PurchaseOrders = {
     if (!po) return null;
     po.lines = db.prepare('SELECT * FROM purchase_order_lines WHERE purchase_order_id = ? ORDER BY line_no, id').all(po.id);
     Object.assign(po, PurchaseOrders.computeStatus(po, po.lines));
+    po.remainingToReceive = round2(Math.max(0, num(po.totalOrdered) - num(po.totalReceived)));
+    po.deliveryStatus = DeliveryStatus.computeDeliveryStatus({
+      expectedDate: po.expected_date,
+      remainingToReceive: po.remainingToReceive,
+      active: po.status !== 'DRAFT' && po.status !== 'CANCELLED' && po.status !== 'CLOSED',
+    });
     po.receipts = db.prepare(`
       SELECT r.*, (SELECT COUNT(*) FROM goods_receipt_lines rl WHERE rl.receipt_id = r.id) AS line_count
       FROM goods_receipts r WHERE r.purchase_order_id = ? ORDER BY r.id DESC

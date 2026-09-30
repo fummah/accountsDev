@@ -667,6 +667,12 @@ safeHandle('get-purchasing-dashboard', async (event, opts) => {
     return Svc.getPurchasingDashboard(opts || {});
   } catch (error) { return { error: error.message }; }
 });
+safeHandle('get-expected-deliveries', async (event, filters) => {
+  try {
+    const Svc = require('../services/expectedDeliveryService');
+    return Svc.getExpectedDeliveryBoard(filters || {});
+  } catch (error) { return { error: error.message }; }
+});
 safeHandle('receive-purchase-order', async (event, poId, payload) => {
   try { return PurchaseOrders.receive(poId, payload || {}, { userId: 'system' }); }
   catch (error) { return { success: false, error: error.message }; }

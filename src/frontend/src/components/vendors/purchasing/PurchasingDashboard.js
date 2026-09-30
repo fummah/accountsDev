@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Row, Col, Button, Table, Tag, Space, Typography, Empty, Alert, Select, Tooltip } from 'antd';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Card, Row, Col, Button, Table, Tag, Space, Typography, Empty, Alert, Select, DatePicker, Tooltip } from 'antd';
 import {
   ReloadOutlined, ShoppingCartOutlined, InboxOutlined, WarningOutlined,
   FileTextOutlined, DollarOutlined, PlusOutlined, ClockCircleOutlined,
@@ -9,9 +9,12 @@ import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
 
 const { Text } = Typography;
+const { RangePicker } = DatePicker;
 
 const PO_STATUS_COLOR = { DRAFT: 'default', OPEN: 'blue', PARTIALLY_RECEIVED: 'orange', RECEIVED: 'cyan', PARTIALLY_BILLED: 'gold', BILLED: 'green', CLOSED: 'purple', CANCELLED: 'red' };
-const DELIVERY_COLOR = { Overdue: 'red', 'Due Today': 'volcano', 'Partially Received': 'orange', Expected: 'blue' };
+const DELIVERY_LABEL = { OVERDUE: 'Overdue', DUE_TODAY: 'Due Today', EXPECTED: 'Expected', NO_DATE: 'No Date', RECEIVED: 'Received' };
+const DELIVERY_COLOR = { OVERDUE: 'red', DUE_TODAY: 'volcano', EXPECTED: 'blue', NO_DATE: 'default', RECEIVED: 'green' };
+const RECEIVING_LABEL = { NOT_RECEIVED: 'Not Received', PARTIALLY_RECEIVED: 'Partially Received', RECEIVED: 'Received' };
 const BILL_STATUS_COLOR = { Unpaid: 'volcano', 'Partially Paid': 'orange', Paid: 'green' };
 
 const PurchasingDashboard = () => {
@@ -21,9 +24,25 @@ const PurchasingDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [days, setDays] = useState(30);
+  const [deliveries, setDeliveries] = useState(null);
+  const [df, setDf] = useState({ status: '', vendorId: null, range: null });
 
   const fmtDate = (d) => (d ? moment(d).format('MM/DD/YYYY') : '—');
   const money = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const loadDeliveries = useCallback(async (f = df) => {
+    try {
+      const fn = window.electronAPI?.getExpectedDeliveries;
+      if (!fn) return;
+      const res = await fn({
+        status: f.status || null,
+        vendorId: f.vendorId || null,
+        dateFrom: f.range && f.range[0] ? f.range[0].format('YYYY-MM-DD') : null,
+        dateTo: f.range && f.range[1] ? f.range[1].format('YYYY-MM-DD') : null,
+      });
+      setDeliveries(res && !res.error ? res : null);
+    } catch { setDeliveries(null); }
+  }, [df]);
 
   const load = useCallback(async (d = days) => {
     setLoading(true);
@@ -44,17 +63,26 @@ const PurchasingDashboard = () => {
   }, [days]);
 
   useEffect(() => { load(days); /* eslint-disable-next-line */ }, [days]);
+  useEffect(() => { loadDeliveries(df); /* eslint-disable-next-line */ }, [df]);
 
   const s = (data && data.summary) || {};
+  const dSummary = (deliveries && deliveries.summary) || {};
+  const dItems = (deliveries && deliveries.items) || [];
   const openPO = (id) => history.push(`/main/vendors/purchasing/purchase-orders?po=${id}`);
   const openBill = (id) => history.push(`/main/vendors/bills/edit/${id}`);
   const openVendor = (id) => id != null && history.push(`/main/vendors/details/${id}`);
   const payBill = (b) => history.push(`/main/vendors/bills/pay?bill=${b.billId}`);
 
+  const vendorOptions = useMemo(() => {
+    const map = new Map();
+    dItems.forEach((p) => { if (p.vendorId != null && p.vendorName) map.set(p.vendorId, p.vendorName); });
+    return [...map.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [dItems]);
+
   const cards = [
     { key: 'openPOs', title: 'Open POs', value: s.openPOs, icon: <ShoppingCartOutlined />, color: '#1890ff', onClick: () => history.push('/main/vendors/purchasing/purchase-orders') },
     { key: 'partiallyReceivedPOs', title: 'Partially Received', value: s.partiallyReceivedPOs, icon: <InboxOutlined />, color: '#fa8c16', onClick: () => history.push('/main/vendors/purchasing/purchase-orders') },
-    { key: 'overduePOs', title: 'Overdue POs', value: s.overduePOs, icon: <WarningOutlined />, color: '#f5222d', onClick: () => history.push('/main/vendors/purchasing/purchase-orders') },
+    { key: 'overduePOs', title: 'Overdue POs', value: s.overduePOs, icon: <WarningOutlined />, color: '#f5222d', onClick: () => history.push('/main/vendors/purchasing/purchase-orders?delivery=OVERDUE') },
     { key: 'recentlyReceived', title: 'Recently Received', value: s.recentlyReceived, unit: 'receipts', icon: <InboxOutlined />, color: '#722ed1', helper: `Last ${days} days`, onClick: () => history.push('/main/vendors/purchasing/purchase-orders') },
     { key: 'recentlyBilled', title: 'Recently Billed', value: s.recentlyBilled, unit: 'bills', icon: <FileTextOutlined />, color: '#13c2c2', helper: `Last ${days} days`, onClick: () => history.push('/main/vendors/bills/tracker') },
     { key: 'unpaidVendorBills', title: 'Unpaid Vendor Bills', value: s.unpaidVendorBills, icon: <DollarOutlined />, color: '#fa541c', helper: s.unpaidAmount != null ? `${money(s.unpaidAmount)} outstanding` : null, onClick: () => history.push('/main/vendors/bills/tracker') },
@@ -76,8 +104,11 @@ const PurchasingDashboard = () => {
     { title: 'PO #', key: 'po', width: 130, render: (_, r) => <a onClick={() => openPO(r.poId)} style={{ fontWeight: 600 }}>{r.poNumber}</a> },
     { title: 'Vendor', key: 'vendor', ellipsis: true, render: (_, r) => r.vendorId != null ? <a onClick={() => openVendor(r.vendorId)}>{r.vendorName}</a> : <Text>{r.vendorName}</Text> },
     { title: 'Expected Date', key: 'expected', width: 130, render: (_, r) => r.expectedDate ? fmtDate(r.expectedDate) : <Text type="secondary">—</Text> },
-    { title: 'Remaining Qty', dataIndex: 'remainingToReceive', key: 'rem', width: 120, align: 'right', render: (v) => <Text strong>{Number(v)}</Text> },
-    { title: 'Status', dataIndex: 'status', key: 'status', width: 150, render: (v) => <Tag color={DELIVERY_COLOR[v] || 'default'}>{v}</Tag> },
+    { title: 'Ordered', dataIndex: 'orderedQty', key: 'ordered', width: 90, align: 'right' },
+    { title: 'Received', dataIndex: 'receivedQty', key: 'received', width: 90, align: 'right' },
+    { title: 'Remaining', dataIndex: 'remainingQty', key: 'remaining', width: 100, align: 'right', render: (v) => <Text strong style={{ color: '#fa8c16' }}>{Number(v)}</Text> },
+    { title: 'Receiving Status', dataIndex: 'receivingStatus', key: 'receiving', width: 160, render: (v) => <Tag color={v === 'PARTIALLY_RECEIVED' ? 'orange' : v === 'RECEIVED' ? 'green' : 'default'}>{RECEIVING_LABEL[v] || v}</Tag> },
+    { title: 'Delivery Status', dataIndex: 'deliveryStatus', key: 'delivery', width: 140, render: (v) => <Tag color={DELIVERY_COLOR[v] || 'default'}>{DELIVERY_LABEL[v] || v}</Tag> },
   ];
 
   const activityColumns = [
@@ -120,7 +151,7 @@ const PurchasingDashboard = () => {
         <Space className="al-list-toolbar" align="center">
           <Text type="secondary" style={{ fontSize: 12 }}>Recent:</Text>
           <Select value={days} onChange={setDays} style={{ width: 140 }} options={[{ value: 7, label: 'Last 7 Days' }, { value: 30, label: 'Last 30 Days' }, { value: 90, label: 'Last 90 Days' }]} />
-          <Button className="gx-btn-info" icon={<ReloadOutlined />} loading={loading} onClick={() => load(days)}>Refresh</Button>
+          <Button className="gx-btn-info" icon={<ReloadOutlined />} loading={loading} onClick={() => { load(days); loadDeliveries(df); }}>Refresh</Button>
           <Button className="gx-btn-primary" icon={<PlusOutlined />} onClick={() => history.push('/main/vendors/purchasing/purchase-orders?new=1')}>New Purchase Order</Button>
         </Space>
       </div>
@@ -153,9 +184,34 @@ const PurchasingDashboard = () => {
           <Table rowKey="poId" size="small" loading={loading} dataSource={(data && data.attentionPOs) || []} columns={attentionColumns} pagination={{ defaultPageSize: 10, hideOnSinglePage: true }} />}
       </Card>
 
-      <Card title={<Space><ClockCircleOutlined /> Expected Deliveries</Space>} className="al-stat-card" style={{ marginBottom: 20 }}>
-        {!loading && (!data || (data.expectedDeliveries || []).length === 0) ? <Empty description="No expected deliveries." /> :
-          <Table rowKey="poId" size="small" loading={loading} dataSource={(data && data.expectedDeliveries) || []} columns={deliveryColumns} pagination={{ defaultPageSize: 10, hideOnSinglePage: true }} />}
+      {/* Expected Deliveries — central expected-delivery service */}
+      <Card
+        className="al-stat-card"
+        style={{ marginBottom: 20 }}
+        title={<Space><ClockCircleOutlined /> Expected Deliveries
+          <Tag color="red">Overdue {dSummary.overdue != null ? dSummary.overdue : '—'}</Tag>
+          <Tag color="volcano">Due Today {dSummary.dueToday != null ? dSummary.dueToday : '—'}</Tag>
+          <Tag color="blue">Next 7 Days {dSummary.next7Days != null ? dSummary.next7Days : '—'}</Tag>
+        </Space>}
+        extra={
+          <Space wrap size={8}>
+            <Select size="small" style={{ width: 150 }} value={df.status || 'all'} onChange={(v) => setDf((f) => ({ ...f, status: v === 'all' ? '' : v }))}>
+              <Select.Option value="all">All Statuses</Select.Option>
+              <Select.Option value="OVERDUE">Overdue</Select.Option>
+              <Select.Option value="DUE_TODAY">Due Today</Select.Option>
+              <Select.Option value="EXPECTED">Expected</Select.Option>
+              <Select.Option value="NO_DATE">No Date</Select.Option>
+            </Select>
+            <Select size="small" style={{ width: 170 }} value={df.vendorId || 'all'} onChange={(v) => setDf((f) => ({ ...f, vendorId: v === 'all' ? null : v }))}>
+              <Select.Option value="all">All Vendors</Select.Option>
+              {vendorOptions.map((v) => <Select.Option key={v.id} value={v.id}>{v.name}</Select.Option>)}
+            </Select>
+            <RangePicker size="small" value={df.range} onChange={(r) => setDf((f) => ({ ...f, range: r }))} format="MM/DD/YYYY" />
+          </Space>
+        }
+      >
+        {!loading && deliveries && dItems.length === 0 ? <Empty description="No expected deliveries match the selected filters." /> :
+          <Table rowKey="poId" size="small" loading={loading} dataSource={dItems} columns={deliveryColumns} pagination={{ defaultPageSize: 10, hideOnSinglePage: true }} />}
       </Card>
 
       <Card title={<Space><ReloadOutlined /> Recent Purchasing Activity</Space>} className="al-stat-card" style={{ marginBottom: 20 }}>

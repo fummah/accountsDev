@@ -422,6 +422,13 @@ const PurchaseOrders = () => {
     { title: 'Vendor', dataIndex: 'vendor_name', key: 'vendor_name', ellipsis: true, render: v => v || '-' },
     { title: 'PO Date', dataIndex: 'po_date', key: 'po_date', width: 110, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Expected', dataIndex: 'expected_date', key: 'expected_date', width: 110, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
+    { title: 'Delivery', key: 'delivery', width: 130, render: (_, r) => {
+      const d = r.deliveryStatus;
+      if (!d) return <Text type="secondary">—</Text>;
+      const label = { OVERDUE: 'Overdue', DUE_TODAY: 'Due Today', EXPECTED: 'Expected', NO_DATE: 'No Date', RECEIVED: 'Received' }[d] || d;
+      const color = { OVERDUE: 'red', DUE_TODAY: 'volcano', EXPECTED: 'blue', NO_DATE: 'default', RECEIVED: 'green' }[d] || 'default';
+      return <Tag color={color}>{label}</Tag>;
+    } },
     { title: 'Total', dataIndex: 'total', key: 'total', width: 120, align: 'right', render: v => <span style={{ fontWeight: 600 }}>{fmtMoney(v)}</span> },
     { title: 'Received', key: 'received', width: 100, align: 'right', render: (_, r) => `${r.totalReceived || 0}/${r.totalOrdered || 0}` },
     { title: 'Billed', key: 'billed', width: 100, align: 'right', render: (_, r) => `${r.totalBilled || 0}/${r.totalOrdered || 0}` },
@@ -779,6 +786,14 @@ const PurchaseOrders = () => {
                   <Descriptions.Item label={<Text type="secondary">Vendor</Text>}>{detail.vendor_name || '-'}</Descriptions.Item>
                   <Descriptions.Item label={<Text type="secondary">PO Date</Text>}>{detail.po_date ? moment(detail.po_date).format('MM/DD/YYYY') : '-'}</Descriptions.Item>
                   <Descriptions.Item label={<Text type="secondary">Expected</Text>}>{detail.expected_date ? moment(detail.expected_date).format('MM/DD/YYYY') : '-'}</Descriptions.Item>
+              <Descriptions.Item label={<Text type="secondary">Remaining to Receive</Text>}>{detail.remainingToReceive != null ? detail.remainingToReceive : '-'}</Descriptions.Item>
+              <Descriptions.Item label={<Text type="secondary">Delivery Status</Text>}>
+                {detail.deliveryStatus
+                  ? <Tag color={{ OVERDUE: 'red', DUE_TODAY: 'volcano', EXPECTED: 'blue', NO_DATE: 'default', RECEIVED: 'green' }[detail.deliveryStatus] || 'default'}>
+                      {{ OVERDUE: 'Overdue', DUE_TODAY: 'Due Today', EXPECTED: 'Expected', NO_DATE: 'No Date', RECEIVED: 'Received' }[detail.deliveryStatus] || detail.deliveryStatus}
+                    </Tag>
+                  : '-'}
+              </Descriptions.Item>
                   <Descriptions.Item label={<Text type="secondary">Terms</Text>}>{termsLabel(detail.terms) || '-'}</Descriptions.Item>
                   <Descriptions.Item label={<Text type="secondary">Ship To</Text>} span={2}>{detail.ship_to || '-'}</Descriptions.Item>
                   <Descriptions.Item label={<Text type="secondary">Memo</Text>} span={2}>{detail.memo || '-'}</Descriptions.Item>
