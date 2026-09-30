@@ -113,6 +113,19 @@ function registerInventoryHandlers() {
     }
   });
 
+  // Simple Inventory Alerts — derived operational exceptions (Low/Out of Stock,
+  // PO Overdue, Partial Receipt, Bill > Received). Reuses the central stock,
+  // expected-delivery and PO-fulfillment logic; see services/inventoryAlertsService.js.
+  ipcMain.handle('get-inventory-alerts', async (_e, filters) => {
+    try {
+      const Alerts = require('../services/inventoryAlertsService');
+      return Alerts.getAlerts(filters || {});
+    } catch (e) {
+      console.error('Error building inventory alerts:', e);
+      return { error: e.message };
+    }
+  });
+
   // Expiring lots within N days
   ipcMain.handle('list-expiring-lots', async (_e, days) => {
     try {

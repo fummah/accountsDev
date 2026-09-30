@@ -239,7 +239,7 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                   <Link to="/main/inventory/pick-pack-ship"><i className="icon icon-orders"/><span>Pick &#38; Pack &#38; Ship</span></Link>
                 </Menu.Item>
                 <Menu.Item key="main/inventory/alerts">
-                  <Link to="/main/inventory/alerts"><i className="icon icon-alert"/><span>Low Stock Alerts</span></Link>
+                  <Link to="/main/inventory/alerts"><i className="icon icon-alert"/><span>Inventory Alerts</span></Link>
                 </Menu.Item>
               </SubMenu>
 

@@ -8,6 +8,7 @@ import {
 import { useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
+import AlertStrip from '../../shared/AlertStrip';
 
 const { Text } = Typography;
 
@@ -243,6 +244,9 @@ const InventoryDashboard = () => {
           </Col>
         ))}
       </Row>
+
+      {/* Operational alerts — counts from the central inventoryAlertsService */}
+      <AlertStrip alerts={data && data.alerts} only={['lowStock', 'outOfStock']} title="Inventory Alerts" />
 
       {/* Stock Attention */}
       <div ref={attentionRef} style={{ marginBottom: 20 }}>

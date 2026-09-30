@@ -156,10 +156,14 @@ const UnifiedItemList = () => {
 
   useEffect(() => { fetchItems(); loadLookups(); loadSubcategories(''); }, [fetchItems, loadLookups, loadSubcategories]);
 
-  // Deep link: /main/inventory/items?item=<id> opens the item detail drawer.
+  // Deep link: /main/inventory/items?item=<id> opens the item detail drawer;
+  // ?stockStatus=OUT_OF_STOCK|LOW_STOCK|IN_STOCK presets the stock-status filter.
   useEffect(() => {
-    const itemParam = new URLSearchParams(location.search).get('item');
+    const params = new URLSearchParams(location.search);
+    const itemParam = params.get('item');
     if (itemParam && Number(itemParam)) openView({ id: Number(itemParam) });
+    const stockStatus = params.get('stockStatus');
+    if (stockStatus && ['OUT_OF_STOCK', 'LOW_STOCK', 'IN_STOCK'].includes(stockStatus)) handleStatusChange(stockStatus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
 

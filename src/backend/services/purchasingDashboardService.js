@@ -24,6 +24,7 @@
 
 const db = require('../models/dbmgr');
 const PurchaseOrders = require('../models/purchaseOrders');
+const Alerts = require('./inventoryAlertsService');
 
 const RECENT_DAYS = 30;
 const TOLERANCE = 0.005;
@@ -186,6 +187,8 @@ const getPurchasingDashboard = (opts = {}) => {
     expectedDeliveries,
     recentActivity: activity.slice(0, 20),
     unpaidBills: unpaid.sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999'))),
+    // Shared operational-alert counts (same builders as the Alerts page).
+    alerts: Alerts.getAlertSummary(),
   };
 };
 

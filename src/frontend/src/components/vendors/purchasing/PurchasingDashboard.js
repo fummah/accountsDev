@@ -7,6 +7,7 @@ import {
 import { useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
+import AlertStrip from '../../shared/AlertStrip';
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -178,6 +179,9 @@ const PurchasingDashboard = () => {
           </Col>
         ))}
       </Row>
+
+      {/* Operational alerts — counts from the central inventoryAlertsService */}
+      <AlertStrip alerts={data && data.alerts} only={['poOverdue', 'partialReceipt', 'billReceiptMismatch']} title="Purchasing Alerts" />
 
       <Card title={<Space><WarningOutlined /> Purchase Orders Requiring Attention</Space>} className="al-stat-card" style={{ marginBottom: 20 }}>
         {!loading && (!data || (data.attentionPOs || []).length === 0) ? <Empty description="No open purchase orders." /> :

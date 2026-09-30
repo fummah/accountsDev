@@ -164,10 +164,17 @@ const PurchaseOrders = {
   },
 
   getAll: ({ search = '', status = '', vendorId = null } = {}) => {
+    // Stored workflow statuses (DRAFT/OPEN/CLOSED/CANCELLED) filter in SQL.
+    // Computed display statuses (PARTIALLY_RECEIVED/…) are derived per PO, so
+    // they filter after the rows are mapped — same rule as everywhere else.
+    const COMPUTED_STATUSES = new Set(['PARTIALLY_RECEIVED', 'PARTIALLY_BILLED', 'RECEIVED', 'BILLED']);
+    const wanted = status && status.trim() ? status.trim().toUpperCase() : '';
+    const computedFilter = COMPUTED_STATUSES.has(wanted);
+
     let where = '1=1';
     const params = [];
     if (search && search.trim()) { where += ' AND (po.po_number LIKE ? OR s.display_name LIKE ?)'; const q = `%${search.trim()}%`; params.push(q, q); }
-    if (status && status.trim()) { where += ' AND po.status = ?'; params.push(status.trim()); }
+    if (wanted && !computedFilter) { where += ' AND po.status = ?'; params.push(wanted); }
     if (vendorId) { where += ' AND po.vendor_id = ?'; params.push(Number(vendorId)); }
     const rows = db.prepare(`
       SELECT po.*, COALESCE(s.display_name, TRIM(COALESCE(s.first_name,'') || ' ' || COALESCE(s.last_name,'')), '') AS vendor_name
@@ -176,7 +183,7 @@ const PurchaseOrders = {
       WHERE ${where}
       ORDER BY po.id DESC
     `).all(...params);
-    return rows.map(po => {
+    const mapped = rows.map(po => {
       const lines = db.prepare('SELECT * FROM purchase_order_lines WHERE purchase_order_id = ? ORDER BY line_no, id').all(po.id);
       const st = PurchaseOrders.computeStatus(po, lines);
       const remainingToReceive = round2(Math.max(0, num(st.totalOrdered) - num(st.totalReceived)));
@@ -191,6 +198,7 @@ const PurchaseOrders = {
         deliveryStatus: DeliveryStatus.computeDeliveryStatus({ expectedDate: po.expected_date, remainingToReceive, active }),
       };
     });
+    return computedFilter ? mapped.filter(po => po.displayStatus === wanted) : mapped;
   },
 
   getById: (id) => {

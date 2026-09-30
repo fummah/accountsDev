@@ -360,6 +360,7 @@ invoiceRefundCreate:     (payload)    => ipcRenderer.invoke('invoice-refund-crea
   getPurchasingDashboard: (opts) => ipcRenderer.invoke('get-purchasing-dashboard', opts),
   getExpectedDeliveries: (filters) => ipcRenderer.invoke('get-expected-deliveries', filters),
   getInventoryMovementReport: (opts) => ipcRenderer.invoke('get-inventory-movement-report', opts),
+  getInventoryAlerts: (filters) => ipcRenderer.invoke('get-inventory-alerts', filters),
   listExpiringLots: (days) => ipcRenderer.invoke('list-expiring-lots', days),
   adjustInventory: (itemId, warehouseId, quantity, reason) => ipcRenderer.invoke('adjust-inventory', itemId, warehouseId, quantity, reason),
   transferStock: (itemId, fromWarehouseId, toWarehouseId, quantity, refType, refId) => ipcRenderer.invoke('transfer-stock', itemId, fromWarehouseId, toWarehouseId, quantity, refType, refId),

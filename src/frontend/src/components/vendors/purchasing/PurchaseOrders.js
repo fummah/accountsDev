@@ -66,6 +66,7 @@ const PurchaseOrders = () => {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [deliveryFilter, setDeliveryFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState(null);
 
   const [vendors, setVendors] = useState([]);
@@ -291,6 +292,7 @@ const PurchaseOrders = () => {
   };
 
   // Deep links: ?po=<id> opens that PO; ?status=<S> presets the status filter;
+  // ?delivery=<D> presets the delivery filter; ?receive=1 opens Receive Items;
   // ?new=1 opens the New PO drawer.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -298,6 +300,9 @@ const PurchaseOrders = () => {
     if (poId) openDetail({ id: Number(poId) });
     const status = params.get('status');
     if (status) setStatusFilter(status);
+    const delivery = params.get('delivery');
+    if (delivery) setDeliveryFilter(delivery.toUpperCase());
+    if (poId && params.get('receive') === '1') openReceive({ id: Number(poId) });
     if (params.get('new') === '1') openAdd();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -417,6 +422,12 @@ const PurchaseOrders = () => {
     };
   }, [rows]);
 
+  // Delivery-status filter (from the ?delivery= deep link / Overdue drill-down).
+  const visibleRows = useMemo(
+    () => (deliveryFilter ? rows.filter(r => r.deliveryStatus === deliveryFilter) : rows),
+    [rows, deliveryFilter]
+  );
+
   const columns = [
     { title: 'PO #', dataIndex: 'po_number', key: 'po_number', width: 110, render: (v, r) => <a onClick={() => openDetail(r)} style={{ fontWeight: 600 }}>{v || `PO-${r.id}`}</a> },
     { title: 'Vendor', dataIndex: 'vendor_name', key: 'vendor_name', ellipsis: true, render: v => v || '-' },
@@ -486,8 +497,18 @@ const PurchaseOrders = () => {
             <Option value="all">All Statuses</Option>
             <Option value="DRAFT">Draft</Option>
             <Option value="OPEN">Open</Option>
+            <Option value="PARTIALLY_RECEIVED">Partially Received</Option>
+            <Option value="RECEIVED">Received</Option>
+            <Option value="BILLED">Billed</Option>
             <Option value="CLOSED">Closed</Option>
             <Option value="CANCELLED">Cancelled</Option>
+          </Select>
+          <Select value={deliveryFilter || 'all'} onChange={v => setDeliveryFilter(v === 'all' ? '' : v)} style={{ width: 150 }}>
+            <Option value="all">All Deliveries</Option>
+            <Option value="OVERDUE">Overdue</Option>
+            <Option value="DUE_TODAY">Due Today</Option>
+            <Option value="EXPECTED">Expected</Option>
+            <Option value="NO_DATE">No Date</Option>
           </Select>
           <Select value={vendorFilter || 'all'} onChange={v => setVendorFilter(v === 'all' ? null : v)} style={{ width: 200 }} showSearch optionFilterProp="children">
             <Option value="all">All Vendors</Option>
@@ -496,7 +517,7 @@ const PurchaseOrders = () => {
           <Tooltip title="Export CSV"><Button icon={<DownloadOutlined />} onClick={exportCSV} /></Tooltip>
           <Tooltip title="Refresh"><Button icon={<ReloadOutlined />} onClick={load} /></Tooltip>
         </div>
-        <Table columns={columns} dataSource={rows} loading={loading} rowKey="id" size="middle" scroll={{ x: 1150 }}
+        <Table columns={columns} dataSource={visibleRows} loading={loading} rowKey="id" size="middle" scroll={{ x: 1150 }}
           pagination={{ defaultPageSize: 25, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'], showTotal: t => `${t} purchase orders` }} />
       </Card>
 

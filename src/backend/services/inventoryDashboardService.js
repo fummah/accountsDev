@@ -36,6 +36,7 @@ const ItemTypes = require('./itemTypes');
 const Valuation = require('./inventoryValuation');
 const Availability = require('./inventoryAvailabilityService');
 const ItemStatus = require('./inventoryStockStatus');
+const Alerts = require('./inventoryAlertsService');
 
 const RECENT_DAYS = 30; // documented default window for "recently"
 
@@ -232,6 +233,8 @@ const getDashboard = ({ days } = {}) => {
     stockAttention,
     incomingStock,
     recentActivity,
+    // Shared operational-alert counts (same builders as the Alerts page).
+    alerts: Alerts.getAlertSummary(),
   };
 };
 
