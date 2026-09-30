@@ -683,6 +683,12 @@ safeHandle('get-goods-receipt', async (event, id) => {
 safeHandle('get-vendor-activity', async (event, vendorId) => {
   try { return PurchaseOrders.getVendorActivity(vendorId); } catch (error) { return { error: error.message }; }
 });
+safeHandle('get-vendor-purchasing-summary', async (event, vendorId) => {
+  try {
+    const Svc = require('../services/vendorPurchasingSummaryService');
+    return Svc.getVendorPurchasingSummary(vendorId);
+  } catch (error) { return { error: error.message }; }
+});
 
 // Handler to get all Vat
 safeHandle('get-vat', async () => {
