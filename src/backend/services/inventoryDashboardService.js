@@ -35,6 +35,7 @@ const db = require('../models/dbmgr');
 const ItemTypes = require('./itemTypes');
 const Valuation = require('./inventoryValuation');
 const Availability = require('./inventoryAvailabilityService');
+const ItemStatus = require('./inventoryStockStatus');
 
 const RECENT_DAYS = 30; // documented default window for "recently"
 
@@ -153,12 +154,12 @@ const getDashboard = ({ days } = {}) => {
   const tracked = loadTrackedItems();
   const trackedIds = new Set(tracked.map((r) => Number(r.id)));
 
+  // One status helper drives Low Stock / Out of Stock everywhere.
+  const statusOf = (r) => ItemStatus.computeStatus(true, r.on_hand, r.reorder_point);
   const totalInventoryItems = tracked.length;
   const inStockItems = tracked.filter((r) => num(r.on_hand) > 0).length;
-  const outOfStockItems = tracked.filter((r) => num(r.on_hand) <= 0).length;
-  const lowStockItems = tracked.filter(
-    (r) => num(r.on_hand) > 0 && num(r.reorder_point) > 0 && num(r.on_hand) <= num(r.reorder_point)
-  ).length;
+  const lowStockItems = tracked.filter((r) => statusOf(r) === ItemStatus.STATUS.LOW_STOCK).length;
+  const outOfStockItems = tracked.filter((r) => statusOf(r) === ItemStatus.STATUS.OUT_OF_STOCK).length;
 
   const openPoByProduct = loadOpenPoByProduct();
   const itemsOnPO = [...openPoByProduct.keys()].filter((id) => trackedIds.has(id)).length;
@@ -195,9 +196,10 @@ const getDashboard = ({ days } = {}) => {
 
   // Stock Attention: Low Stock + Out of Stock (+ Negative), with on-PO qty.
   const stockAttention = tracked
-    .filter((r) => num(r.on_hand) <= 0 || (num(r.reorder_point) > 0 && num(r.on_hand) <= num(r.reorder_point)))
+    .filter((r) => statusOf(r) !== ItemStatus.STATUS.IN_STOCK)
     .map((r) => {
       const onHand = num(r.on_hand);
+      const st = statusOf(r);
       return {
         productId: Number(r.id),
         itemName: r.name || r.sku || `Item #${r.id}`,
@@ -205,7 +207,7 @@ const getDashboard = ({ days } = {}) => {
         onHand,
         reorderPoint: num(r.reorder_point),
         onPo: openPoByProduct.get(Number(r.id)) || 0,
-        status: onHand < 0 ? 'Negative Stock' : onHand === 0 ? 'Out of Stock' : 'Low Stock',
+        status: onHand < 0 ? 'Negative Stock' : st === ItemStatus.STATUS.OUT_OF_STOCK ? 'Out of Stock' : 'Low Stock',
       };
     })
     .sort((a, b) => a.onHand - b.onHand);

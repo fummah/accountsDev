@@ -501,9 +501,9 @@ safeHandle('get-products', async () => {
   }
 });
 
-safeHandle('get-products-paginated', async (event, page, pageSize, search, typeFilter, categoryFilter) => {
+safeHandle('get-products-paginated', async (event, page, pageSize, search, typeFilter, categoryFilter, statusFilter) => {
   try {
-    return await Products.getPaginated(page, pageSize, search || '', typeFilter || '', categoryFilter || '');
+    return await Products.getPaginated(page, pageSize, search || '', typeFilter || '', categoryFilter || '', statusFilter || '');
   } catch (error) {
     console.error('Error fetching products (paginated):', error);
     return { error: error.message };

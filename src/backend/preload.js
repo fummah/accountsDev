@@ -82,7 +82,7 @@ updateInvoice: (invoiceData) => ipcRenderer.invoke('updateinvoice',invoiceData),
 insertInvoice: (customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines) => ipcRenderer.invoke('insert-invoice', customer,customer_email,islater, billing_address, terms,start_date,last_date,message,statement_message,number,entered_by,vat,status,invoiceLines),
 //Products
 getAllProducts: () => ipcRenderer.invoke('get-products'),
-getProductsPaginated: (page, pageSize, search, typeFilter, categoryFilter) => ipcRenderer.invoke('get-products-paginated', page, pageSize, search, typeFilter, categoryFilter),
+  getProductsPaginated: (page, pageSize, search, typeFilter, categoryFilter, statusFilter) => ipcRenderer.invoke('get-products-paginated', page, pageSize, search, typeFilter, categoryFilter, statusFilter),
 updateProduct: (productData) => ipcRenderer.invoke('updateproduct',productData),
   insertProduct: (type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock, income_account_id) => ipcRenderer.invoke('insert-product', type, name, sku, category, description, price, income_account, tax_inclusive, tax, isfromsupplier, entered_by, stock, income_account_id),
 //Product Categories

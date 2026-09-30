@@ -57,6 +57,7 @@ const UnifiedItemList = () => {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [pagination, setPagination] = useState({ current: 1, pageSize: 25, total: 0 });
   const [form] = Form.useForm();
   const [itemType, setItemType] = useState('INVENTORY_PART');
@@ -98,10 +99,10 @@ const UnifiedItemList = () => {
   const sections = useMemo(() => getSections(itemType), [itemType]);
   const showSection = (name) => sections.includes(name);
 
-  const fetchItems = useCallback(async (page = pagination.current, size = pagination.pageSize, term = search, type = typeFilter, cat = categoryFilter) => {
+  const fetchItems = useCallback(async (page = pagination.current, size = pagination.pageSize, term = search, type = typeFilter, cat = categoryFilter, status = statusFilter) => {
     setLoading(true);
     try {
-      const data = await window.electronAPI.getProductsPaginated?.(page, size, term || '', type === 'all' ? '' : type, cat === 'all' ? '' : cat);
+      const data = await window.electronAPI.getProductsPaginated?.(page, size, term || '', type === 'all' ? '' : type, cat === 'all' ? '' : cat, status === 'all' ? '' : status);
       if (data && Array.isArray(data.data)) {
         setItems(data.data);
         setPagination(p => ({ ...p, current: page, total: data.total || data.data.length }));
@@ -116,7 +117,7 @@ const UnifiedItemList = () => {
       setItems([]);
     }
     setLoading(false);
-  }, [pagination.current, pagination.pageSize, search, typeFilter, categoryFilter]);
+  }, [pagination.current, pagination.pageSize, search, typeFilter, categoryFilter, statusFilter]);
 
   const loadLookups = useCallback(async () => {
     try {
@@ -348,6 +349,7 @@ const UnifiedItemList = () => {
   const handleSearch = () => fetchItems(1, pagination.pageSize, search, typeFilter, categoryFilter);
   const handleTypeChange = (v) => { setTypeFilter(v || 'all'); fetchItems(1, pagination.pageSize, search, v || 'all', categoryFilter); };
   const handleCategoryChange = (v) => { setCategoryFilter(v || 'all'); fetchItems(1, pagination.pageSize, search, typeFilter, v || 'all'); };
+  const handleStatusChange = (v) => { setStatusFilter(v || 'all'); fetchItems(1, pagination.pageSize, search, typeFilter, categoryFilter, v || 'all'); };
   const handleRefresh = () => fetchItems(pagination.current, pagination.pageSize, search, typeFilter, categoryFilter);
 
   const handleAddCategory = async () => {
@@ -489,6 +491,17 @@ const UnifiedItemList = () => {
       },
     },
     {
+      title: 'Status', key: 'stockStatus', width: 120,
+      render: (_, r) => {
+        if (normalizeTypeCode(r.type) !== 'INVENTORY_PART') return <Text type="secondary">—</Text>;
+        const s = r.stock_status;
+        if (!s) return <Text type="secondary">—</Text>;
+        const color = s === 'OUT_OF_STOCK' ? 'red' : s === 'LOW_STOCK' ? 'orange' : 'green';
+        const label = s === 'OUT_OF_STOCK' ? 'Out of Stock' : s === 'LOW_STOCK' ? 'Low Stock' : 'In Stock';
+        return <Tag color={color} style={{ borderRadius: 20, padding: '1px 10px' }}>{label}</Tag>;
+      },
+    },
+    {
       title: 'Actions', key: 'actions', width: 130, align: 'center',
       render: (_, r) => (
         <Space size={4}>
@@ -578,6 +591,12 @@ const UnifiedItemList = () => {
           <Select value={categoryFilter} onChange={handleCategoryChange} style={{ width: 160, borderRadius: 8 }} placeholder="Category">
             <Option value="all">All Categories</Option>
             {uniqueCategories.map(c => <Option key={c} value={c}>{c}</Option>)}
+          </Select>
+          <Select value={statusFilter} onChange={handleStatusChange} style={{ width: 150, borderRadius: 8 }} placeholder="Stock Status">
+            <Option value="all">All Statuses</Option>
+            <Option value="IN_STOCK">In Stock</Option>
+            <Option value="LOW_STOCK">Low Stock</Option>
+            <Option value="OUT_OF_STOCK">Out of Stock</Option>
           </Select>
           <Tooltip title="Refresh"><Button icon={<ReloadOutlined />} style={{ borderRadius: 8 }} onClick={handleRefresh} /></Tooltip>
           <Tooltip title="Print"><Button icon={<PrinterOutlined />} style={{ borderRadius: 8 }} onClick={handlePrint} /></Tooltip>
@@ -783,7 +802,8 @@ const UnifiedItemList = () => {
               </Row>
               <Row gutter={16}>
                 <Col xs={24} md={8}>
-                  <Form.Item name="reorderPoint" label="Reorder Point" style={FORM_ITEM_STYLE}>
+                  <Form.Item name="reorderPoint" label="Reorder Point" style={FORM_ITEM_STYLE}
+                    tooltip="Low Stock is shown when Quantity On Hand is at or below the Reorder Point.">
                     <InputNumber style={{ width: '100%' }} min={0} placeholder="e.g. 10" />
                   </Form.Item>
                 </Col>
@@ -836,6 +856,9 @@ const UnifiedItemList = () => {
           const cap = capabilities(code) || {};
           const s = viewDetail.summary || {};
           const av = viewDetail.availability || null;
+          const stockStatus = viewDetail.stock_status;
+          const statusLabel = stockStatus === 'OUT_OF_STOCK' ? 'Out of Stock' : stockStatus === 'LOW_STOCK' ? 'Low Stock' : stockStatus === 'IN_STOCK' ? 'In Stock' : '—';
+          const statusColor = stockStatus === 'OUT_OF_STOCK' ? '#cf1322' : stockStatus === 'LOW_STOCK' ? '#fa8c16' : '#3f8600';
           return (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -853,9 +876,11 @@ const UnifiedItemList = () => {
               <Row gutter={12} style={{ marginBottom: 16 }}>
                 {code === 'INVENTORY_PART' && av ? (
                   <>
-                    <Col span={8}><Card size="small"><Statistic title="On Hand" value={av.onHand || 0} precision={0} valueStyle={{ color: '#1890ff' }} /></Card></Col>
-                    <Col span={8}><Card size="small"><Statistic title="On Purchase Order" value={av.onPurchaseOrder || 0} precision={0} valueStyle={{ color: '#13c2c2' }} /></Card></Col>
-                    <Col span={8}><Card size="small"><Statistic title="Expected" value={av.expected || 0} precision={0} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+                    <Col flex="1"><Card size="small"><Statistic title="On Hand" value={av.onHand || 0} precision={0} valueStyle={{ color: '#1890ff' }} /></Card></Col>
+                    <Col flex="1"><Card size="small"><Statistic title="On Purchase Order" value={av.onPurchaseOrder || 0} precision={0} valueStyle={{ color: '#13c2c2' }} /></Card></Col>
+                    <Col flex="1"><Card size="small"><Statistic title="Expected" value={av.expected || 0} precision={0} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+                    <Col flex="1"><Card size="small"><Statistic title="Reorder Point" value={m.reorder_point != null ? Number(m.reorder_point) : 0} precision={0} valueStyle={{ color: '#595959' }} /></Card></Col>
+                    <Col flex="1"><Card size="small"><Statistic title="Status" value={statusLabel} valueStyle={{ color: statusColor, fontSize: 16 }} /></Card></Col>
                   </>
                 ) : (
                   <>

@@ -240,11 +240,17 @@ const Products = {
     const list = Array.isArray(rows) ? rows : [];
     try {
       const Availability = require('../services/inventoryAvailabilityService');
+      const ItemStatus = require('../services/inventoryStockStatus');
       const avail = Availability.getAvailabilityForItems(list.map((r) => r.id));
       return list.map((r) => {
         const a = avail[Number(r.id)];
-        if (!a) return r;
-        return { ...r, on_po: a.onPurchaseOrder, expected: a.expected };
+        const onHand = a && a.onHand != null ? a.onHand : (r.inventory_stock != null ? Number(r.inventory_stock) : 0);
+        return {
+          ...r,
+          on_po: a ? a.onPurchaseOrder : null,
+          expected: a ? a.expected : null,
+          stock_status: ItemStatus.computeStatus(ItemTypes.tracksInventory(r.type), onHand, r.reorder_point),
+        };
       });
     } catch (e) {
       console.error('[products] availability merge failed:', e.message);
@@ -252,12 +258,13 @@ const Products = {
     }
   },
 
-  getPaginated: (page = 1, pageSize = 25, search = '', typeFilter = '', categoryFilter = '') => {
+  getPaginated: (page = 1, pageSize = 25, search = '', typeFilter = '', categoryFilter = '', statusFilter = '') => {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
     const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
     const typeParam = typeFilter && typeFilter.trim() ? typeFilter.trim() : null;
     const catParam = categoryFilter && categoryFilter.trim() ? categoryFilter.trim() : null;
+    const statusParam = statusFilter && statusFilter.trim() ? statusFilter.trim().toUpperCase() : null;
     let total;
     let data;
     const whereParts = [];
@@ -273,6 +280,15 @@ const Products = {
     if (catParam) {
       whereParts.push('p.category = ?');
       params.push(catParam);
+    }
+    if (statusParam) {
+      // Stock-status filter (inventory-tracked items only), using the SAME
+      // On-Hand expression and the same <= rule as the central status helper.
+      const stock = INVENTORY_STOCK_SQL;
+      whereParts.push("LOWER(p.type) IN ('inventory_part','inventory part','product','raw material','asset','bundle')");
+      if (statusParam === 'OUT_OF_STOCK') whereParts.push(`(${stock}) <= 0`);
+      else if (statusParam === 'LOW_STOCK') whereParts.push(`(${stock}) > 0 AND p.reorder_point IS NOT NULL AND (${stock}) <= p.reorder_point`);
+      else if (statusParam === 'IN_STOCK') whereParts.push(`(${stock}) > 0 AND (p.reorder_point IS NULL OR (${stock}) > p.reorder_point)`);
     }
     const whereClause = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
     const selectSql = `SELECT p.*, ${INVENTORY_STOCK_SQL} AS inventory_stock FROM products p${whereClause}`;
@@ -299,10 +315,16 @@ const Products = {
         row.preferred_vendor_name = v ? (v.display_name || [v.first_name, v.last_name].filter(Boolean).join(' ') || v.company_name || '') : '';
       }
     } catch { /* vendor lookup optional */ }
-    // Derived availability (On Hand / On PO / Expected) — read-only.
+    // Derived availability (On Hand / On PO / Expected) + stock status — read-only.
     try {
       const Availability = require('../services/inventoryAvailabilityService');
+      const ItemStatus = require('../services/inventoryStockStatus');
       row.availability = Availability.getItemAvailability(Number(id));
+      row.stock_status = ItemStatus.computeStatus(
+        ItemTypes.tracksInventory(row.type),
+        row.availability ? row.availability.onHand : 0,
+        row.reorder_point
+      );
     } catch { /* availability optional */ }
     return row;
   },
@@ -370,7 +392,7 @@ const Products = {
       const Availability = require('../services/inventoryAvailabilityService');
       availabilityByWarehouse = Availability.getAvailabilityByWarehouse(Number(id));
     } catch { availabilityByWarehouse = []; }
-    return { master, itemId, stock, movements, purchases, sales, summary, availability: master.availability || null, availabilityByWarehouse };
+    return { master, itemId, stock, movements, purchases, sales, summary, availability: master.availability || null, availabilityByWarehouse, stock_status: master.stock_status || null };
   },
 
   /**
