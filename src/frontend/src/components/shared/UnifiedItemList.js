@@ -85,6 +85,9 @@ const UnifiedItemList = () => {
   // On-PO drill-down (active PO lines contributing to an item's On-PO qty)
   const [onPoModal, setOnPoModal] = useState({ open: false, item: null, loading: false, lines: [] });
 
+  // Physical returns (customer restock / vendor return) — central engine.
+  const [returnModal, setReturnModal] = useState({ open: false, kind: 'customer', productId: null, name: '', qty: 1, reason: '', saving: false });
+
   // Lookups
   const [accounts, setAccounts] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -448,6 +451,26 @@ const UnifiedItemList = () => {
   };
   const hasActiveFilters = search !== '' || typeFilter !== 'all' || categoryFilter !== 'all'
     || statusFilter !== 'all' || vendorFilter !== 'all' || onPoFilter !== 'all';
+
+  const submitReturn = async () => {
+    const { kind, productId, qty, reason } = returnModal;
+    if (!(Number(qty) > 0)) { message.warning('Enter a quantity to return'); return; }
+    setReturnModal((m) => ({ ...m, saving: true }));
+    try {
+      const fn = kind === 'customer' ? window.electronAPI?.restockCustomerReturn : window.electronAPI?.vendorReturn;
+      if (!fn) throw new Error('Returns are unavailable — restart the app so the latest backend (preload) loads.');
+      const res = await fn({ productId, quantity: Number(qty), reason });
+      if (!res || res.success === false || res.error) throw new Error((res && res.error) || 'Return failed');
+      message.success(kind === 'customer' ? 'Customer return restocked into inventory' : 'Vendor return posted');
+      const reopenId = productId;
+      setReturnModal({ open: false, kind: 'customer', productId: null, name: '', qty: 1, reason: '', saving: false });
+      fetchItems();
+      if (reopenId) openView({ id: reopenId });
+    } catch (e) {
+      message.error(e?.message || 'Return failed');
+      setReturnModal((m) => ({ ...m, saving: false }));
+    }
+  };
 
   const handleAddCategory = async () => {
     try {
@@ -1006,7 +1029,21 @@ const UnifiedItemList = () => {
         visible={viewOpen}
         onClose={() => { setViewOpen(false); setViewDetail(null); }}
         destroyOnClose
-        extra={viewDetail?.master ? <Button icon={<EditOutlined />} onClick={() => { const m = viewDetail.master; setViewOpen(false); openEdit(m); }}>Edit</Button> : null}
+        extra={viewDetail?.master ? (
+          <Space size={6}>
+            {normalizeTypeCode(viewDetail.master.type) === 'INVENTORY_PART' && (
+              <>
+                <Tooltip title="Restock returned goods at the original sale cost (reverses COGS)">
+                  <Button size="small" onClick={() => setReturnModal({ open: true, kind: 'customer', productId: viewDetail.master.id, name: viewDetail.master.name, qty: 1, reason: '', saving: false })}>Customer Return</Button>
+                </Tooltip>
+                <Tooltip title="Return goods to the vendor (removes stock at carrying cost)">
+                  <Button size="small" onClick={() => setReturnModal({ open: true, kind: 'vendor', productId: viewDetail.master.id, name: viewDetail.master.name, qty: 1, reason: '', saving: false })}>Vendor Return</Button>
+                </Tooltip>
+              </>
+            )}
+            <Button icon={<EditOutlined />} onClick={() => { const m = viewDetail.master; setViewOpen(false); openEdit(m); }}>Edit</Button>
+          </Space>
+        ) : null}
       >
         {viewLoading ? (
           <div style={{ textAlign: 'center', padding: 48 }}><Spin tip="Loading item..." /></div>
@@ -1324,6 +1361,31 @@ const UnifiedItemList = () => {
             <Descriptions.Item label="Unit Cost">{adjDetail.unitCost == null ? '-' : fmtMoney(adjDetail.unitCost)}</Descriptions.Item>
           </Descriptions>
         )}
+      </Modal>
+
+      {/* Physical returns — central engine */}
+      <Modal
+        title={returnModal.kind === 'customer' ? `Customer Return (Restock) — ${returnModal.name}` : `Vendor Return — ${returnModal.name}`}
+        visible={returnModal.open}
+        onCancel={() => setReturnModal((m) => ({ ...m, open: false }))}
+        onOk={submitReturn}
+        confirmLoading={returnModal.saving}
+        okText={returnModal.kind === 'customer' ? 'Restock' : 'Return'}
+        destroyOnClose
+      >
+        <p style={{ color: '#8c8c8c', fontSize: 12 }}>
+          {returnModal.kind === 'customer'
+            ? 'Restocks goods at the original sale cost basis and reverses COGS (Dr Inventory Asset / Cr COGS). A financial refund on its own never restocks.'
+            : 'Removes goods from inventory at the central carrying cost and relieves Inventory Asset.'}
+        </p>
+        <Form layout="vertical">
+          <Form.Item label="Quantity">
+            <InputNumber min={0.0001} value={returnModal.qty} onChange={(v) => setReturnModal((m) => ({ ...m, qty: v }))} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item label="Reason">
+            <Input value={returnModal.reason} onChange={(e) => setReturnModal((m) => ({ ...m, reason: e.target.value }))} placeholder="e.g. damaged, wrong item" />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

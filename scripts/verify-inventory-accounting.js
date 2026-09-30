@@ -187,11 +187,16 @@ const money = (n) => Math.round(Number(n || 0) * 100) / 100;
   console.log('\n=== TEST 17-23: adjustment / valuation ===');
   const P17 = mkProduct('ZZ Acc Adjust'); const po17 = addPo(P17.id, 20, 20); await receivePO(ev, po17.poId, { receiptDate: '2026-06-02', lines: [{ purchaseOrderLineId: po17.lineId, qtyReceived: 20 }] });
   const valBefore17 = Valuation.currentValue(itemIdOf(P17.id), 'FIFO');
-  Inventory.adjustStock(itemIdOf(P17.id), W.id, -5, 'damaged');
+  const invBalBefore17 = glBalance(invAsset.id);
+  const adj17 = Inventory.adjustStock(itemIdOf(P17.id), W.id, -5, 'damaged');
   check('TEST 17 a -5 adjustment reduces QOH and value', qoh(P17.id) === 15 && near(Valuation.currentValue(itemIdOf(P17.id), 'FIFO'), valBefore17 - 5 * 20), `qoh=${qoh(P17.id)}`);
-  Inventory.adjustStock(itemIdOf(P17.id), W.id, 5, 'count gain');
-  check('TEST 18 a +5 adjustment restores QOH (20)', qoh(P17.id) === 20);
-  note('TEST 17/18 adjustment accounting: adjustStock now records a COST BASIS (negative valued from the layers, positive at current carrying cost), so quantity and value stay consistent; it still posts NO journal and the resulting subledger/GL difference is surfaced by the reconciliation report.');
+  const adjGl = glFor('adjustment', adj17.adjustmentId);
+  const adjOffset = COA.getSystemAccount('Inventory Adjustment');
+  check('TEST 17 the adjustment POSTS a journal (Dr offset / Cr Inventory Asset)', !!adjOffset && near(glAcct(adjGl, adjOffset.id, 'debit'), 100) && near(glAcct(adjGl, invAsset.id, 'credit'), 100), JSON.stringify(adjGl));
+  check('TEST 17 Inventory Asset GL fell by the adjustment cost', near(glBalance(invAsset.id) - invBalBefore17, -100));
+  const adj18 = Inventory.adjustStock(itemIdOf(P17.id), W.id, 5, 'count gain');
+  check('TEST 18 a +5 adjustment restores QOH (20) and posts Dr Inventory Asset / Cr offset', qoh(P17.id) === 20 && near(glAcct(glFor('adjustment', adj18.adjustmentId), invAsset.id, 'debit'), 100));
+  note('TEST 17/18 adjustment accounting: adjustStock records a COST BASIS AND posts a balanced journal against the item Inventory Asset account and the configured system "Inventory Adjustment" offset — atomic with the stock movement.');
 
   const FIFO = mkProduct('ZZ Acc FIFO'); const iF = itemIdOf(FIFO.id);
   Inventory.receiveStock(iF, W.id, 3, 10, { sourceType: 'receipt', sourceId: ++seq + 600000 });
@@ -300,7 +305,7 @@ const money = (n) => Math.round(Number(n || 0) * 100) / 100;
   const after60 = Recon.getInventoryReconciliation();
   check('TEST 60 QOH reconciles to the movement ledger after the full chain', near(db.prepare('SELECT SUM(quantityChange) q FROM stock_movements WHERE itemId=?').get(i60).q, qoh(P60.id)));
   // The adjustment is the ONLY unbalanced step (no GL), so the difference moves by its value.
-  check('TEST 29 the reconciled difference equals exactly the un-posted adjustment value', near(acctDiff(after60, invAsset.id) - acctDiff(before60, invAsset.id), -1 * 20), `??=${money(acctDiff(after60, invAsset.id) - acctDiff(before60, invAsset.id))}`);
+  check('TEST 29/60 the full chain (receipt + bill + sale + adjustment) leaves the Inventory Asset difference UNCHANGED (delta 0)', near(acctDiff(after60, invAsset.id) - acctDiff(before60, invAsset.id), 0), `delta=${money(acctDiff(after60, invAsset.id) - acctDiff(before60, invAsset.id))}`);
   check('TEST 60 subledger total ??? GL total equals the sum of per-account differences', near(totalDiff(after60), money(after60.accounts.reduce((s, a) => s + a.difference, 0))));
 
   console.log('\n=== UI wiring ===');

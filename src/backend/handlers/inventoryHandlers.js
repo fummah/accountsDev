@@ -137,6 +137,16 @@ function registerInventoryHandlers() {
     }
   });
 
+  // Physical returns that move stock (reuse the central engine + valuation + GL).
+  ipcMain.handle('customer-return-restock', async (_e, payload) => {
+    try { return require('../services/inventoryReturnsService').restockCustomerReturn(payload || {}); }
+    catch (e) { console.error('Error restocking customer return:', e); return { success: false, error: e.message }; }
+  });
+  ipcMain.handle('vendor-return', async (_e, payload) => {
+    try { return require('../services/inventoryReturnsService').vendorReturn(payload || {}); }
+    catch (e) { console.error('Error posting vendor return:', e); return { success: false, error: e.message }; }
+  });
+
   // Expiring lots within N days
   ipcMain.handle('list-expiring-lots', async (_e, days) => {
     try {

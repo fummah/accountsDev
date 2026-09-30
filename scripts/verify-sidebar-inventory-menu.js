@@ -38,7 +38,7 @@ check('sub-inventory comes before sub-more (own menu, not the catch-all)',
 console.log('\n=== Inventory items live under the new menu ===');
 const inventoryMenu = src.slice(src.indexOf('key="sub-inventory"'), src.indexOf('key="sub-accounting"'));
 for (const label of ['Products &amp; Services', 'Stock Levels', 'Warehouses', 'Bill of Materials',
-  'Serial Numbers', 'Barcodes', 'Adjustments', 'Pricing Rules', 'Pick &#38; Pack &#38; Ship', 'Low Stock Alerts']) {
+'Serial Numbers', 'Barcodes', 'Adjustments', 'Pricing Rules', 'Pick &#38; Pack &#38; Ship', 'Inventory Alerts', 'Inventory Reconciliation']) {
   check(`Inventory menu contains "${label.replace(/&amp;/g, '&').replace(/&#38;/g, '&')}"`,
     inventoryMenu.includes(label));
 }

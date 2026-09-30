@@ -164,20 +164,22 @@ const Inventory = {
   },
 
   adjustStock: (itemId, warehouseId, quantity, reason) => {
-    // Upsert stock and add movement and adjustment records atomically
-    db.prepare('BEGIN').run();
-    try {
+    const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    // ONE transaction: stock upsert + movement + adjustment row + GL posting,
+    // so quantity, value and accounting commit or roll back together.
+    const tx = db.transaction(() => {
       // A manual adjustment must carry a COST BASIS so quantity and value stay
       // consistent: removing stock values it from the central valuation layers,
       // and a positive adjustment values the gain at the item's current carrying
-      // cost (never a silent $0). No journal is posted here — the reconciliation
-      // report surfaces the resulting subledger↔GL difference for review.
+      // cost (never a silent $0).
       let unitCost = 0;
+      let invAccountId = null;
       try {
         const Valuation = require('../services/inventoryValuation');
-        const p = db.prepare('SELECT valuation_method, purchase_cost FROM products WHERE item_id = ? LIMIT 1').get(Number(itemId));
+        const p = db.prepare('SELECT inventory_asset_account_id, valuation_method, purchase_cost FROM products WHERE item_id = ? LIMIT 1').get(Number(itemId));
         const method = (p && p.valuation_method) || 'FIFO';
         const standardCost = p ? Number(p.purchase_cost) || 0 : 0;
+        invAccountId = p && p.inventory_asset_account_id != null ? Number(p.inventory_asset_account_id) : null;
         if (Number(quantity) < 0) {
           unitCost = Valuation.costOfRemoval(itemId, -Number(quantity), method, { standardCost }).unitCost || 0;
         } else if (Number(quantity) > 0) {
@@ -198,15 +200,43 @@ const Inventory = {
         VALUES (?, ?, ?, ?, 'ADJUSTMENT', NULL, ?, datetime('now'))
       `).run(itemId, warehouseId, quantity, reason || null, unitCost);
 
-      db.prepare(`
+      const adj = db.prepare(`
         INSERT INTO inventory_adjustments (itemId, warehouseId, quantity, reason, createdAt)
         VALUES (?, ?, ?, ?, datetime('now'))
       `).run(itemId, warehouseId, quantity, reason || null);
+      const adjId = Number(adj.lastInsertRowid);
 
-      db.prepare('COMMIT').run();
-      return { success: true };
+      // Accounting: post against the item's Inventory Asset account and a
+      // CONFIGURED offset (system "Inventory Adjustment"). Shrink: Dr offset /
+      // Cr Inventory Asset. Gain: Dr Inventory Asset / Cr offset. Accounts are
+      // resolved by configured id/system lookup, never hardcoded by name.
+      const amount = round2(Math.abs(Number(quantity)) * unitCost);
+      if (amount > 0) {
+        const COA = require('./chartOfAccounts');
+        const JournalEntries = require('./journalEntries');
+        const invAcct = invAccountId || ((COA.getSystemAccount('Inventory Asset') || {}).id);
+        const offset = (COA.getSystemAccount('Inventory Adjustment') || {}).id;
+        if (!invAcct || !offset) {
+          throw new Error('Inventory adjustment cannot post: an Inventory Asset / Inventory Adjustment account is missing.');
+        }
+        const lines = Number(quantity) < 0
+          ? [{ account_id: offset, debit: amount, credit: 0, description: 'Inventory shrinkage' },
+             { account_id: invAcct, debit: 0, credit: amount, description: 'Inventory adjusted down' }]
+          : [{ account_id: invAcct, debit: amount, credit: 0, description: 'Inventory adjusted up' },
+             { account_id: offset, debit: 0, credit: amount, description: 'Inventory gain' }];
+        const res = JournalEntries.post({
+          date: new Date().toISOString().slice(0, 10),
+          reference: `ADJ-${adjId}`,
+          description: `Inventory adjustment: ${reason || 'manual'}`,
+          source_type: 'adjustment', source_id: adjId, lines,
+        });
+        if (res && res.error) throw new Error(res.error);
+      }
+      return { success: true, adjustmentId: adjId };
+    });
+    try {
+      return tx();
     } catch (e) {
-      db.prepare('ROLLBACK').run();
       return { success: false, error: e.message };
     }
   },

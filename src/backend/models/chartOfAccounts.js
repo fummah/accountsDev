@@ -33,6 +33,7 @@ const SYSTEM_ACCOUNTS = [
   { name: 'Sales Revenue',          type: 'Income',    subType: 'Sales',                 number: '4000', isSystem: 0 },
   { name: 'Service Revenue',        type: 'Income',    subType: 'Service Income',        number: '4100', isSystem: 0 },
   { name: 'Cost of Goods Sold',     type: 'Cost of Goods Sold', subType: 'Cost of Goods Sold', number: '5000', isSystem: 0 },
+  { name: 'Inventory Adjustment',   type: 'Expense',   subType: 'Inventory Adjustment',  number: '6100', isSystem: 1 },
   { name: 'Payroll Expenses',       type: 'Expense',   subType: 'Salaries & Wages',      number: '6000', isSystem: 0 },
   { name: 'Payroll Liabilities',    type: 'Liability', subType: 'Payroll Liability',     number: '2200', isSystem: 0 },
 ];
