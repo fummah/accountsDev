@@ -121,4 +121,22 @@ const costOfRemoval = (itemId, qty, method, opts = {}) => {
 /** Current on-hand value for one item (for the Inventory Asset ↔ subledger test). */
 const currentValue = (itemId, method) => replay(itemId, method).value;
 
-module.exports = { costOfRemoval, currentValue, replay, normMethod };
+/**
+ * Total value of inventory on hand across the whole ledger (all items).
+ *
+ * Because every issue records the valuation cost it consumed, the running
+ * (in − out) value at recorded cost equals the sum of the current cost layers
+ * for BOTH FIFO and weighted average. One aggregate query — no per-item replay
+ * — so the dashboard stays O(1) in the number of items.
+ */
+const totalValue = () => {
+  try {
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(m.quantityChange * COALESCE(m.unitCost, 0)), 0) AS v
+      FROM stock_movements m
+    `).get();
+    return Math.round((Number(row && row.v) || 0) * 100) / 100;
+  } catch { return 0; }
+};
+
+module.exports = { costOfRemoval, currentValue, totalValue, replay, normMethod };

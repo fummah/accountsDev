@@ -2,6 +2,7 @@ import React from 'react';
 import { Route, Switch } from 'react-router-dom';
 import Warehouses from './pages/Warehouses';
 import Stock from './pages/Stock';
+import Dashboard from './pages/Dashboard';
 import BOM from './pages/BOM';
 import Serials from './pages/Serials';
 import Barcodes from './pages/Barcodes';
@@ -14,6 +15,7 @@ import PickPackShip from './PickPackShip';
 const InventoryRoutes = ({ match }) => {
   return (
     <Switch>
+      <Route path={`${match.path}/dashboard`} component={Dashboard} />
       <Route path={`${match.path}/items`} component={UnifiedItemList} />
       <Route path={`${match.path}/warehouses`} component={Warehouses} />
       <Route path={`${match.path}/stock`} component={Stock} />

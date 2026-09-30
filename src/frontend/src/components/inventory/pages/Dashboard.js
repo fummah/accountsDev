@@ -1,0 +1,294 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Card, Row, Col, Button, Table, Space, Typography, Empty, Alert, Modal } from 'antd';
+import {
+  ReloadOutlined, AppstoreOutlined, CheckCircleOutlined, WarningOutlined,
+  StopOutlined, ShoppingCartOutlined, InboxOutlined,
+  LineChartOutlined, WalletOutlined, HistoryOutlined,
+} from '@ant-design/icons';
+import { useHistory } from 'react-router-dom';
+import moment from 'moment';
+import Widget from '../../Widget';
+import { useCurrency } from '../../../utils/currency';
+
+const { Text } = Typography;
+
+const PO_STATUS_LABEL = {
+  DRAFT: 'Draft', OPEN: 'Open', PARTIALLY_RECEIVED: 'Partially Received',
+  RECEIVED: 'Received', PARTIALLY_BILLED: 'Partially Billed', BILLED: 'Billed',
+  CLOSED: 'Closed', CANCELLED: 'Cancelled',
+};
+const PO_STATUS_BADGE = {
+  DRAFT: 'grey', OPEN: 'blue', PARTIALLY_RECEIVED: 'orange', RECEIVED: 'cyan',
+  PARTIALLY_BILLED: 'yellow', BILLED: 'green', CLOSED: 'purple', CANCELLED: 'red',
+};
+
+// Wieldy badge (matches components/MailNotification/NotificationItem.js).
+const GxBadge = ({ color = 'grey', children }) => (
+  <span className={`gx-badge gx-text-white gx-badge-${color}`} style={{ margin: 0 }}>{children}</span>
+);
+
+const InventoryDashboard = () => {
+  const history = useHistory();
+  const { symbol: cSym } = useCurrency();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [historyModal, setHistoryModal] = useState({ open: false, itemId: null, itemName: '', loading: false, data: null });
+
+  const attentionRef = useRef(null);
+  const incomingRef = useRef(null);
+  const activityRef = useRef(null);
+
+  const fmtMoney = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtDate = (d) => (d ? moment(d).format('MM/DD/YYYY') : '—');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await window.electronAPI?.getInventoryDashboard?.();
+      if (!res || res.error) throw new Error((res && res.error) || 'No data returned');
+      setData(res);
+    } catch (e) {
+      console.error('[inventory dashboard] load failed:', e);
+      setError(e?.message || String(e));
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const scrollTo = (ref) => { if (ref && ref.current) ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+
+  const openItemHistory = async (productId, itemName) => {
+    setHistoryModal({ open: true, itemId: productId, itemName, loading: true, data: null });
+    try {
+      const res = await window.electronAPI?.getItemHistory?.(productId, {});
+      setHistoryModal((m) => ({ ...m, loading: false, data: res && !res.error ? res : null }));
+    } catch {
+      setHistoryModal((m) => ({ ...m, loading: false, data: null }));
+    }
+  };
+
+  const s = (data && data.summary) || {};
+  const window = (data && data.window) || 30;
+
+  const cards = [
+    { key: 'totalInventoryItems', title: 'Total Inventory Items', value: s.totalInventoryItems, icon: <AppstoreOutlined />, color: 'primary', target: 'items' },
+    { key: 'inStockItems', title: 'In Stock', value: s.inStockItems, icon: <CheckCircleOutlined />, color: 'success', target: 'attention' },
+    { key: 'lowStockItems', title: 'Low Stock', value: s.lowStockItems, icon: <WarningOutlined />, color: 'warning', target: 'attention' },
+    { key: 'outOfStockItems', title: 'Out of Stock', value: s.outOfStockItems, icon: <StopOutlined />, color: 'danger', target: 'attention' },
+    { key: 'itemsOnPO', title: 'On Purchase Order', value: s.itemsOnPO, icon: <ShoppingCartOutlined />, color: 'cyan', target: 'incoming' },
+    { key: 'recentlyReceived', title: 'Recently Received', value: s.recentlyReceived, icon: <InboxOutlined />, color: 'purple', target: 'activity', helper: `Last ${window} days` },
+    { key: 'recentlySold', title: 'Recently Sold', value: s.recentlySold, icon: <LineChartOutlined />, color: 'pink', target: 'activity', helper: `Last ${window} days` },
+    { key: 'inventoryValue', title: 'Inventory Value', value: s.inventoryValue, money: true, icon: <WalletOutlined />, color: 'orange', target: 'attention' },
+  ];
+
+  const onCardClick = (card) => {
+    if (card.target === 'items') { history.push('/main/inventory/items'); return; }
+    if (card.target === 'incoming') { scrollTo(incomingRef); return; }
+    if (card.target === 'activity') { scrollTo(activityRef); return; }
+    scrollTo(attentionRef);
+  };
+
+  const cardValue = (card) => {
+    if (loading) return '—';
+    if (card.money) return fmtMoney(card.value);
+    return Number(card.value || 0).toLocaleString('en-US');
+  };
+
+  const attentionColumns = [
+    { title: 'Item', key: 'item', render: (_, r) => (
+      <a onClick={() => openItemHistory(r.productId, r.itemName)} style={{ fontWeight: 600 }}>{r.itemName}</a>
+    ) },
+    { title: 'SKU', dataIndex: 'sku', key: 'sku', width: 130, render: (v) => v || <Text type="secondary">—</Text> },
+    { title: 'On Hand', dataIndex: 'onHand', key: 'onHand', width: 100, align: 'right',
+      render: (v) => <Text strong style={{ color: Number(v) <= 0 ? '#cf1322' : '#fa8c16' }}>{Number(v)}</Text> },
+    { title: 'Reorder Point', dataIndex: 'reorderPoint', key: 'reorderPoint', width: 120, align: 'right' },
+    { title: 'On PO', dataIndex: 'onPo', key: 'onPo', width: 90, align: 'right',
+      render: (v) => Number(v) > 0 ? <GxBadge color="cyan">+{Number(v)}</GxBadge> : <Text type="secondary">0</Text> },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 150,
+      render: (v) => <GxBadge color={v === 'Negative Stock' ? 'red' : v === 'Out of Stock' ? 'danger' : 'warning'}>{v}</GxBadge> },
+  ];
+
+  const incomingColumns = [
+    { title: 'Item', key: 'item', render: (_, r) => (
+      <a onClick={() => openItemHistory(r.productId, r.itemName)} style={{ fontWeight: 600 }}>{r.itemName}</a>
+    ) },
+    { title: 'Vendor', key: 'vendor', render: (_, r) => (
+      r.vendorId != null
+        ? <a onClick={() => history.push(`/main/vendors/details/${r.vendorId}`)}>{r.vendorName}</a>
+        : <Text>{r.vendorName}</Text>
+    ) },
+    { title: 'PO #', key: 'po', width: 140, render: (_, r) => (
+      <a onClick={() => history.push(`/main/vendors/purchasing/purchase-orders?po=${r.poId}`)} style={{ fontWeight: 600 }}>{r.poNumber}</a>
+    ) },
+    { title: 'Remaining Qty', dataIndex: 'remaining', key: 'remaining', width: 130, align: 'right',
+      render: (v) => <Text strong>{Number(v)}</Text> },
+    { title: 'Expected Date', dataIndex: 'expectedDate', key: 'expectedDate', width: 130, render: (d) => fmtDate(d) },
+    { title: 'PO Status', dataIndex: 'poStatus', key: 'poStatus', width: 160,
+      render: (v) => <GxBadge color={PO_STATUS_BADGE[v] || 'grey'}>{PO_STATUS_LABEL[v] || v}</GxBadge> },
+  ];
+
+  const activityColumns = [
+    { title: 'Date', dataIndex: 'date', key: 'date', width: 110, render: (d) => fmtDate(d) },
+    { title: 'Item', key: 'item', render: (_, r) => (
+      r.productId != null
+        ? <a onClick={() => openItemHistory(r.productId, r.itemName)}>{r.itemName}</a>
+        : <Text>{r.itemName}</Text>
+    ) },
+    { title: 'Transaction', dataIndex: 'transaction', key: 'transaction', width: 120,
+      render: (v) => <GxBadge color={v === 'Receipt' ? 'success' : v === 'Invoice' ? 'blue' : v === 'Bill' ? 'purple' : v === 'Adjustment' ? 'orange' : 'grey'}>{v}</GxBadge> },
+    { title: 'Reference', key: 'reference', width: 150, render: (_, r) => {
+      if (!r.reference) return <Text type="secondary">—</Text>;
+      if (r.sourceType === 'invoice' && r.sourceId != null) return <a onClick={() => history.push(`/main/customers/invoices/edit/${r.sourceId}`)}>{r.reference}</a>;
+      if (r.sourceType === 'bill' && r.sourceId != null) return <a onClick={() => history.push(`/main/vendors/bills/edit/${r.sourceId}`)}>{r.reference}</a>;
+      if (r.sourceType === 'receipt' && r.sourceId != null) return <a onClick={() => history.push('/main/vendors/purchasing/purchase-orders')}>{r.reference}</a>;
+      return <Text>{r.reference}</Text>;
+    } },
+    { title: 'Qty In', dataIndex: 'qtyIn', key: 'qtyIn', width: 90, align: 'right',
+      render: (v) => Number(v) > 0 ? <Text style={{ color: '#52c41a' }}>+{Number(v)}</Text> : <Text type="secondary">—</Text> },
+    { title: 'Qty Out', dataIndex: 'qtyOut', key: 'qtyOut', width: 90, align: 'right',
+      render: (v) => Number(v) > 0 ? <Text style={{ color: '#cf1322' }}>-{Number(v)}</Text> : <Text type="secondary">—</Text> },
+  ];
+
+  const historyRows = (historyModal.data && historyModal.data.rows) || [];
+  const historyColumns = [
+    { title: 'Date', dataIndex: 'movedAt', key: 'date', width: 120, render: (d) => fmtDate(d) },
+    { title: 'Transaction', key: 'txn', render: (_, r) => r.sourceLabel || r.source || r.reason || 'Movement' },
+    { title: 'Reference', key: 'ref', render: (_, r) => r.source || '—' },
+    { title: 'Qty In', key: 'in', width: 90, align: 'right', render: (_, r) => Number(r.quantityChange) > 0 ? <Text style={{ color: '#52c41a' }}>+{Number(r.quantityChange)}</Text> : <Text type="secondary">—</Text> },
+    { title: 'Qty Out', key: 'out', width: 90, align: 'right', render: (_, r) => Number(r.quantityChange) < 0 ? <Text style={{ color: '#cf1322' }}>{Number(r.quantityChange)}</Text> : <Text type="secondary">—</Text> },
+    { title: 'Balance', dataIndex: 'balance', key: 'balance', width: 100, align: 'right' },
+  ];
+
+  return (
+    <div className="al-modern-page" style={{ padding: 24 }}>
+      <div className="al-page-head" style={{ marginBottom: 16 }}>
+        <div className="al-modern-head">
+          <div className="al-modern-badge" style={{ background: 'linear-gradient(135deg, #13c2c2, #5cdbd3)' }}><AppstoreOutlined /></div>
+          <div>
+            <h3 style={{ margin: 0 }}>Inventory</h3>
+            <span style={{ color: '#667085' }}>Simple stock, purchasing and movement overview</span>
+          </div>
+        </div>
+        <Space className="al-list-toolbar" align="center">
+          <Button className="gx-btn-primary" icon={<AppstoreOutlined />} onClick={() => history.push('/main/inventory/items')}>View Items</Button>
+          <Button className="gx-btn-info" icon={<ReloadOutlined />} loading={loading} onClick={load}>Refresh</Button>
+        </Space>
+      </div>
+
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 16, borderRadius: 10 }}
+          message="Unable to load inventory summary."
+          description={error}
+          action={<Button size="small" onClick={load}>Retry</Button>}
+        />
+      )}
+
+      {/* Wieldy-style colored stat cards */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
+        {cards.map((card) => (
+          <Col xs={24} sm={12} lg={6} key={card.key}>
+            <Widget styleName={`gx-card-full gx-p-3 gx-bg-${card.color} gx-text-white`}>
+              <div
+                className="gx-media gx-align-items-center gx-flex-nowrap"
+                style={{ cursor: 'pointer' }}
+                onClick={() => onCardClick(card)}
+              >
+                <div className="gx-mr-2 gx-mr-xxl-3">
+                  <span className="gx-fs-icon-lg" style={{ fontSize: 26, lineHeight: 1 }}>{card.icon}</span>
+                </div>
+                <div className="gx-media-body">
+                  <h1 className="gx-fs-xxl gx-font-weight-semi-bold gx-mb-1 gx-text-white" style={{ color: '#fff' }}>{cardValue(card)}</h1>
+                  <p className="gx-mb-0" style={{ color: 'rgba(255,255,255,0.92)' }}>{card.title}</p>
+                  {card.helper && <span style={{ fontSize: 11, opacity: 0.85 }}>{card.helper}</span>}
+                </div>
+              </div>
+            </Widget>
+          </Col>
+        ))}
+      </Row>
+
+      {/* Stock Attention */}
+      <div ref={attentionRef} style={{ marginBottom: 20 }}>
+        <Card title={<Space><WarningOutlined /> Stock Attention</Space>} className="al-stat-card">
+          {!loading && (!data || (data.stockAttention || []).length === 0) ? (
+            <Empty description="No low-stock items. Inventory levels are currently above their reorder points." />
+          ) : (
+            <Table
+              rowKey="productId"
+              size="small"
+              loading={loading}
+              dataSource={(data && data.stockAttention) || []}
+              columns={attentionColumns}
+              pagination={{ defaultPageSize: 10, hideOnSinglePage: true }}
+            />
+          )}
+        </Card>
+      </div>
+
+      {/* Incoming Stock */}
+      <div ref={incomingRef} style={{ marginBottom: 20 }}>
+        <Card title={<Space><InboxOutlined /> Incoming Stock</Space>} className="al-stat-card">
+          {!loading && (!data || (data.incomingStock || []).length === 0) ? (
+            <Empty description="No incoming inventory. There are no open purchase-order quantities." />
+          ) : (
+            <Table
+              rowKey={(r) => `${r.poId}-${r.productId}-${r.remaining}`}
+              size="small"
+              loading={loading}
+              dataSource={(data && data.incomingStock) || []}
+              columns={incomingColumns}
+              pagination={{ defaultPageSize: 10, hideOnSinglePage: true }}
+            />
+          )}
+        </Card>
+      </div>
+
+      {/* Recent Inventory Activity */}
+      <div ref={activityRef}>
+        <Card title={<Space><HistoryOutlined /> Recent Inventory Activity <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>Last {window} days</Text></Space>} className="al-stat-card">
+          {!loading && (!data || (data.recentActivity || []).length === 0) ? (
+            <Empty description="No recent inventory activity." />
+          ) : (
+            <Table
+              rowKey="id"
+              size="small"
+              loading={loading}
+              dataSource={(data && data.recentActivity) || []}
+              columns={activityColumns}
+              pagination={{ defaultPageSize: 10, hideOnSinglePage: true }}
+            />
+          )}
+        </Card>
+      </div>
+
+      <Modal
+        title={historyModal.itemName ? `Inventory History — ${historyModal.itemName}` : 'Inventory History'}
+        visible={historyModal.open}
+        onCancel={() => setHistoryModal({ open: false, itemId: null, itemName: '', loading: false, data: null })}
+        footer={null}
+        width={820}
+        destroyOnClose
+      >
+        <Table
+          rowKey={(r) => r.id}
+          size="small"
+          loading={historyModal.loading}
+          dataSource={historyRows}
+          columns={historyColumns}
+          pagination={{ defaultPageSize: 10, hideOnSinglePage: true }}
+          locale={{ emptyText: <Empty description="No inventory movements for this item." /> }}
+        />
+      </Modal>
+    </div>
+  );
+};
+
+export default InventoryDashboard;

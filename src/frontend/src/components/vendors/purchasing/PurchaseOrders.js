@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, Table, Button, Drawer, Form, Input, InputNumber, Select, Space, message, Tag, Row, Col, Tooltip, Popconfirm, DatePicker, Divider, Typography, Descriptions, Tabs, Statistic, Empty, Dropdown, Menu, Skeleton, Modal } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, SearchOutlined, ReloadOutlined, DownloadOutlined, ShoppingCartOutlined, InboxOutlined, CheckCircleOutlined, CloseCircleOutlined, PrinterOutlined, MailOutlined, MoreOutlined, DollarOutlined, FileTextOutlined } from '@ant-design/icons';
 import moment from 'moment';
-import { useHistory } from 'react-router-dom';
+import { useHistory, useLocation } from 'react-router-dom';
 import { useCurrency } from '../../../utils/currency';
 import { sumMoney } from '../../../utils/money';
 import { itemTypeLabel, capabilities, normalizeTypeCode } from '../../../utils/itemTypes';
@@ -90,6 +90,7 @@ const PurchaseOrders = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const location = useLocation();
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptDetail, setReceiptDetail] = useState(null);
 
@@ -280,6 +281,13 @@ const PurchaseOrders = () => {
     } finally { setDetailLoading(false); }
     load();
   };
+
+  // Deep link: /main/vendors/purchasing/purchase-orders?po=<id> opens that PO.
+  useEffect(() => {
+    const poId = new URLSearchParams(location.search).get('po');
+    if (poId) openDetail({ id: Number(poId) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Create Bill → reuse the existing Enter Bill engine, pre-linked to this PO.
   const createBillFromPO = (po) => {

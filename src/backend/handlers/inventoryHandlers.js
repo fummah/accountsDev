@@ -79,6 +79,18 @@ function registerInventoryHandlers() {
     }
   });
 
+  // Simple Inventory Dashboard — one aggregated payload from the central
+  // inventory/purchasing/sales data (see services/inventoryDashboardService.js).
+  ipcMain.handle('get-inventory-dashboard', async (_e, opts) => {
+    try {
+      const Dashboard = require('../services/inventoryDashboardService');
+      return Dashboard.getDashboard(opts || {});
+    } catch (e) {
+      console.error('Error building inventory dashboard:', e);
+      return { error: e.message };
+    }
+  });
+
   // Expiring lots within N days
   ipcMain.handle('list-expiring-lots', async (_e, days) => {
     try {

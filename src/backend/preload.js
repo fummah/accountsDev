@@ -349,6 +349,7 @@ invoiceRefundCreate:     (payload)    => ipcRenderer.invoke('invoice-refund-crea
   getItemMovements: (itemId, limit) => ipcRenderer.invoke('get-item-movements', itemId, limit),
   setReorderPoint: (itemId, warehouseId, reorderPoint) => ipcRenderer.invoke('set-reorder-point', itemId, warehouseId, reorderPoint),
   getReorderList: () => ipcRenderer.invoke('get-reorder-list'),
+  getInventoryDashboard: (opts) => ipcRenderer.invoke('get-inventory-dashboard', opts),
   listExpiringLots: (days) => ipcRenderer.invoke('list-expiring-lots', days),
   adjustInventory: (itemId, warehouseId, quantity, reason) => ipcRenderer.invoke('adjust-inventory', itemId, warehouseId, quantity, reason),
   transferStock: (itemId, fromWarehouseId, toWarehouseId, quantity, refType, refId) => ipcRenderer.invoke('transfer-stock', itemId, fromWarehouseId, toWarehouseId, quantity, refType, refId),
