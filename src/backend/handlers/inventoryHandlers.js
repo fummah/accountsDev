@@ -126,6 +126,17 @@ function registerInventoryHandlers() {
     }
   });
 
+  // Inventory subledger ↔ Inventory Asset GL reconciliation (read-only).
+  ipcMain.handle('get-inventory-reconciliation', async () => {
+    try {
+      const Recon = require('../services/inventoryReconciliationService');
+      return Recon.getInventoryReconciliation();
+    } catch (e) {
+      console.error('Error building inventory reconciliation:', e);
+      return { error: e.message };
+    }
+  });
+
   // Expiring lots within N days
   ipcMain.handle('list-expiring-lots', async (_e, days) => {
     try {

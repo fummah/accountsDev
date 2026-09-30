@@ -167,6 +167,25 @@ const Inventory = {
     // Upsert stock and add movement and adjustment records atomically
     db.prepare('BEGIN').run();
     try {
+      // A manual adjustment must carry a COST BASIS so quantity and value stay
+      // consistent: removing stock values it from the central valuation layers,
+      // and a positive adjustment values the gain at the item's current carrying
+      // cost (never a silent $0). No journal is posted here — the reconciliation
+      // report surfaces the resulting subledger↔GL difference for review.
+      let unitCost = 0;
+      try {
+        const Valuation = require('../services/inventoryValuation');
+        const p = db.prepare('SELECT valuation_method, purchase_cost FROM products WHERE item_id = ? LIMIT 1').get(Number(itemId));
+        const method = (p && p.valuation_method) || 'FIFO';
+        const standardCost = p ? Number(p.purchase_cost) || 0 : 0;
+        if (Number(quantity) < 0) {
+          unitCost = Valuation.costOfRemoval(itemId, -Number(quantity), method, { standardCost }).unitCost || 0;
+        } else if (Number(quantity) > 0) {
+          const state = Valuation.replay(itemId, method);
+          unitCost = state.qtyOn > 0 ? state.value / state.qtyOn : standardCost;
+        }
+      } catch { unitCost = 0; }
+
       const upsert = db.prepare(`
         INSERT INTO item_stock (itemId, warehouseId, quantity, reorderPoint)
         VALUES (?, ?, ?, 0)
@@ -175,9 +194,9 @@ const Inventory = {
       upsert.run(itemId, warehouseId, quantity);
 
       db.prepare(`
-        INSERT INTO stock_movements (itemId, warehouseId, quantityChange, reason, refType, refId, movedAt)
-        VALUES (?, ?, ?, ?, 'ADJUSTMENT', NULL, datetime('now'))
-      `).run(itemId, warehouseId, quantity, reason || null);
+        INSERT INTO stock_movements (itemId, warehouseId, quantityChange, reason, refType, refId, unitCost, movedAt)
+        VALUES (?, ?, ?, ?, 'ADJUSTMENT', NULL, ?, datetime('now'))
+      `).run(itemId, warehouseId, quantity, reason || null, unitCost);
 
       db.prepare(`
         INSERT INTO inventory_adjustments (itemId, warehouseId, quantity, reason, createdAt)

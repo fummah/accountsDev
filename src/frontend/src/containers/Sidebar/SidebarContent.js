@@ -241,6 +241,9 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
                 <Menu.Item key="main/inventory/alerts">
                   <Link to="/main/inventory/alerts"><i className="icon icon-alert"/><span>Inventory Alerts</span></Link>
                 </Menu.Item>
+                <Menu.Item key="main/inventory/reconciliation">
+                  <Link to="/main/inventory/reconciliation"><i className="icon icon-chart"/><span>Inventory Reconciliation</span></Link>
+                </Menu.Item>
               </SubMenu>
 
               {/* Accounting sub-group */}
