@@ -121,6 +121,12 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
               <SubMenu key="sub-expenses" popupClassName="gx-menu-horizontal" title={
                 <span><i className="icon icon-contacts"/><span>Expenses</span></span>
               }>
+                <Menu.Item key="main/vendors/purchasing/dashboard">
+                  <Link to="/main/vendors/purchasing/dashboard">
+                    <i className="icon icon-listing-dbrd"/>
+                    <span>Purchasing Dashboard</span>
+                  </Link>
+                </Menu.Item>
                 <Menu.Item key="main/vendors/bills/tracker">
                   <Link to="/main/vendors/bills/tracker">
                     <i className="icon icon-contacts"/>

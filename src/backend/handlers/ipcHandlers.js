@@ -661,6 +661,12 @@ safeHandle('set-purchase-order-status', async (event, id, status) => {
 safeHandle('get-open-purchase-orders', async (event, vendorId) => {
   try { return PurchaseOrders.getOpenForVendor(vendorId); } catch (error) { return { error: error.message }; }
 });
+safeHandle('get-purchasing-dashboard', async (event, opts) => {
+  try {
+    const Svc = require('../services/purchasingDashboardService');
+    return Svc.getPurchasingDashboard(opts || {});
+  } catch (error) { return { error: error.message }; }
+});
 safeHandle('receive-purchase-order', async (event, poId, payload) => {
   try { return PurchaseOrders.receive(poId, payload || {}, { userId: 'system' }); }
   catch (error) { return { success: false, error: error.message }; }

@@ -290,10 +290,15 @@ const PurchaseOrders = () => {
     load();
   };
 
-  // Deep link: /main/vendors/purchasing/purchase-orders?po=<id> opens that PO.
+  // Deep links: ?po=<id> opens that PO; ?status=<S> presets the status filter;
+  // ?new=1 opens the New PO drawer.
   useEffect(() => {
-    const poId = new URLSearchParams(location.search).get('po');
+    const params = new URLSearchParams(location.search);
+    const poId = params.get('po');
     if (poId) openDetail({ id: Number(poId) });
+    const status = params.get('status');
+    if (status) setStatusFilter(status);
+    if (params.get('new') === '1') openAdd();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
