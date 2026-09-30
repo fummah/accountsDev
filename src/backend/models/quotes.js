@@ -512,12 +512,17 @@ const Quotes = {
         if (s === QUOTE_STATUS.CONVERTED || fresh.linked_invoice) throw Object.assign(new Error('ALREADY_CONVERTED'), { code: 'ALREADY_CONVERTED', invoiceId: fresh.linked_invoice || null });
         if (s === QUOTE_STATUS.DECLINED) throw Object.assign(new Error('DECLINED'), { code: 'DECLINED' });
 
-        const invoice_stmt = db.prepare(`
-          INSERT INTO invoices (customer, customer_email, islater, billing_address, terms, start_date, last_date, message, statement_message, number, entered_by, vat, status, linked_quote)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        const result = invoice_stmt.run(
+        // Reuse the CENTRAL invoice engine — NOT a raw INSERT. A raw insert
+        // bypassed the line accounting snapshots, the stock reconciliation and
+        // the GL posting, so a converted quote produced an invoice that never
+        // reduced inventory. insertInvoice() now owns all of that atomically,
+        // so a quote → invoice behaves exactly like a hand-entered invoice.
+        const Invoices = require('./invoices');
+        const invoiceLines = quote_lines.map((l) => ({
+          product_id: l.product, product: l.product,
+          description: l.description, quantity: l.quantity, rate: l.rate, amount: l.amount,
+        }));
+        const invRes = Invoices.insertInvoice(
           Number(fresh.customer) || 0,
           String(fresh.customer_email || ''),
           fresh.islater ? 1 : 0,
@@ -530,28 +535,16 @@ const Quotes = {
           '',
           fresh.entered_by != null ? String(fresh.entered_by) : null,
           Number(fresh.vat) || 0,
-          INVOICE_STATUS.OPEN,      // provisional — recalculated from real money below
-          Number(fresh.id)
+          undefined, // financial status is derived by the engine
+          invoiceLines
         );
-
-        const invoice_id = Number(result.lastInsertRowid);
-        const formatted_invoice_number = `INV-${String(invoice_id).padStart(5, '0')}`;
-        db.prepare(`UPDATE invoices SET number = ? WHERE id = ?`).run(formatted_invoice_number, invoice_id);
-
-        const invoice_lines_stmt = db.prepare(`
-          INSERT INTO invoice_lines (invoice_id, product, description, quantity, rate, amount) VALUES (?, ?, ?, ?, ?, ?)`);
-        for (const line of quote_lines) {
-          invoice_lines_stmt.run(
-            invoice_id,
-            line.product,
-            line.description,
-            Number(line.quantity) || 1,
-            Number(line.rate) || 0,
-            Number(line.amount) || 0
-          );
+        if (!invRes || invRes.success === false || !(invRes.invoiceId || invRes.id)) {
+          throw new Error((invRes && invRes.error) || 'Invoice creation failed');
         }
+        const invoice_id = Number(invRes.invoiceId || invRes.id);
+        const formatted_invoice_number = `INV-${String(invoice_id).padStart(5, '0')}`;
+        db.prepare('UPDATE invoices SET linked_quote = ? WHERE id = ?').run(Number(fresh.id), invoice_id);
 
-        // Automatic invoice status: Open when there is a positive balance.
         const financials = recalcInvoiceFinancials(invoice_id);
 
         db.prepare(`UPDATE quotes SET linked_invoice = ?, status = ?, converted_at = datetime('now') WHERE id = ?`)
@@ -561,23 +554,6 @@ const Quotes = {
       });
 
       const out = tx();
-
-      // Best-effort GL posting for the new invoice (DR AR / CR income per line).
-      // postInvoice() carries its own has-posting guard, so this is idempotent.
-      try {
-        const JournalEntries = require('./journalEntries');
-        const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(out.invoice_id);
-        if (inv) {
-          JournalEntries.postInvoice({
-            id: out.invoice_id,
-            date: inv.start_date || new Date().toISOString().slice(0, 10),
-            number: inv.number,
-            customerName: '',
-          });
-        }
-      } catch (glErr) {
-        console.warn('[quotes] GL post on conversion failed (non-fatal):', glErr.message);
-      }
 
       console.log(`Quote ${id} successfully converted to Invoice ${out.formatted_invoice_number}.`);
       return {

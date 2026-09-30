@@ -299,11 +299,30 @@ const Invoices = {
         if (stock && stock.errors && stock.errors.length) {
           throw new Error(`Invoice stock could not be issued — ${stock.errors.join('; ')}`);
         }
-      }
 
-      // Note: The authoritative GL journal entry (DR AR / CR Income per line) is posted by
-      // JournalEntries.postInvoice() called from invoiceHandlers.js after this insert returns.
-      // computedBalance() in chartOfAccounts.getAllAccounts() reads those journal_lines live.
+        // ── Post the GL in the SAME transaction: an ATOMIC sale + stock + GL ──
+        // The handler used to post this AFTER the insert returned, so a GL
+        // failure left the invoice and its stock movement committed with no
+        // journal entry — a half-posted sale. Posting here means the header,
+        // its lines, the stock issue and the journal entry commit or roll back
+        // together. The handler's later postInvoice() is now a no-op
+        // (hasPosting guards it), so there is still exactly one posting.
+        const JournalEntries = require('./journalEntries');
+        const posted = db.prepare('SELECT number FROM invoices WHERE id = ?').get(Number(invoiceId));
+        const cust = db.prepare(
+          "SELECT COALESCE(NULLIF(display_name,''), NULLIF(company_name,''), NULLIF(TRIM(COALESCE(first_name,'')||' '||COALESCE(last_name,'')),''),'') AS name FROM customers WHERE id = ?"
+        ).get(Number(customer) || 0);
+        const post = JournalEntries.postInvoice({
+          id: Number(invoiceId),
+          date: String(start_date || new Date().toISOString().slice(0, 10)),
+          number: (posted && posted.number) || String(invoiceId),
+          total: (financials && financials.invoiceTotal) || 0,
+          customerName: cust ? cust.name : '',
+        });
+        if (post && post.error) {
+          throw new Error(`Invoice journal posting failed — ${post.error}`);
+        }
+      }
 
       return { success: true, invoiceId: Number(invoiceId), id: Number(invoiceId), invoice_id: Number(invoiceId), financials };
     });
@@ -1074,7 +1093,9 @@ const Invoices = {
       // Void old journal entries then re-post using per-line income accounts.
       // A voided invoice contributes $0 — void the old postings but do NOT
       // create a fresh full-amount entry (keeps GL/AR consistent with the register).
-      try {
+      // This is INSIDE the transaction and FATAL on failure, so the line rewrite,
+      // the stock reconcile and the GL re-post roll back together (atomic edit).
+      {
         const JournalEntries = require('./journalEntries');
         const oldEntries = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted'").all(Number(id));
         for (const oe of oldEntries) {
@@ -1084,15 +1105,15 @@ const Invoices = {
         if (nextStatus === 'void' || nextStatus === 'voided' || nextStatus === 'cancelled' || nextStatus === 'canceled' || nextStatus === 'draft') {
           return { success: true, message: 'Invoice updated successfully.', financials, previous };
         }
-        // postInvoice has a hasPosting guard, but we just voided all old entries so it will proceed
-        JournalEntries.postInvoice({
+        const post = JournalEntries.postInvoice({
           id: Number(id),
           date: String(invoiceDetails.start_date || new Date().toISOString().slice(0, 10)),
           number: String(invoiceDetails.number || id),
           customerName: invoiceDetails.customerName || '',
         });
-      } catch (glUpdateErr) {
-        console.error('[invoices] GL re-post on update failed (non-fatal):', glUpdateErr);
+        if (post && post.error) {
+          throw new Error(`Invoice journal posting failed — ${post.error}`);
+        }
       }
 
       return { success: true, message: 'Invoice updated successfully.', financials, previous };
@@ -1107,17 +1128,15 @@ const Invoices = {
   },
   deleteInvoice: async (id) => {
     try {
-      // Void journal entries so computedBalance() stops counting them (excludes non-'Posted' entries)
-      try {
+      const transaction = db.transaction((invoiceId) => {
+        // Void the journal entries so computedBalance() stops counting them
+        // (it excludes non-'Posted' entries). Inside the transaction so the GL
+        // void and the stock reversal commit or roll back together.
         const JournalEntries = require('./journalEntries');
-        const oldEntries = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted'").all(Number(id));
+        const oldEntries = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'invoice' AND source_id = ? AND status = 'Posted'").all(Number(invoiceId));
         for (const oe of oldEntries) {
           JournalEntries.voidEntry(oe.id);
         }
-      } catch (glErr) {
-        console.error('[invoices] GL void on delete failed (non-fatal):', glErr);
-      }
-      const transaction = db.transaction((invoiceId) => {
         // Put back the stock this invoice issued, BEFORE its lines are torn
         // down. Without this a deleted invoice would leave the shelf empty
         // forever — goods gone with no document to explain them.
