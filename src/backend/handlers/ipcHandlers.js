@@ -593,6 +593,22 @@ safeHandle('get-item-history', async (event, id, filters) => {
   try { return Products.getInventoryHistory(id, filters || {}); } catch (error) { return { error: error.message }; }
 });
 
+// On Hand / On PO / Expected for one item (central availability service).
+safeHandle('get-item-availability', async (event, id) => {
+  try {
+    const Availability = require('../services/inventoryAvailabilityService');
+    return Availability.getItemAvailability(id);
+  } catch (error) { return { error: error.message }; }
+});
+
+// The active PO lines contributing to an item's On-PO quantity (drill-down).
+safeHandle('get-on-po-lines', async (event, id) => {
+  try {
+    const Availability = require('../services/inventoryAvailabilityService');
+    return Availability.getOnPoLines(id);
+  } catch (error) { return { error: error.message }; }
+});
+
 safeHandle('save-item-master', async (event, data) => {
   try { return Products.saveItemMaster(data || {}, { userId: 'system' }); }
   catch (error) { return { success: false, error: error.message }; }

@@ -31,6 +31,12 @@ const VALUATION_METHODS = [
   { value: 'STANDARD_COST', label: 'Standard Cost' },
 ];
 
+const PO_STATUS_LABEL = {
+  DRAFT: 'Draft', OPEN: 'Open', PARTIALLY_RECEIVED: 'Partially Received',
+  RECEIVED: 'Received', PARTIALLY_BILLED: 'Partially Billed', BILLED: 'Billed',
+  CLOSED: 'Closed', CANCELLED: 'Cancelled',
+};
+
 // The REAL on-hand quantity, sourced from the inventory engine's single source
 // of truth (`item_stock`) and delivered by the backend as `inventory_stock`.
 const stockOf = (r) => {
@@ -66,6 +72,9 @@ const UnifiedItemList = () => {
   const [historyData, setHistoryData] = useState(null);
   const [historyFilters, setHistoryFilters] = useState({ from: null, to: null, type: null });
   const [adjDetail, setAdjDetail] = useState(null);
+
+  // On-PO drill-down (active PO lines contributing to an item's On-PO qty)
+  const [onPoModal, setOnPoModal] = useState({ open: false, item: null, loading: false, lines: [] });
 
   // Lookups
   const [accounts, setAccounts] = useState([]);
@@ -251,6 +260,18 @@ const UnifiedItemList = () => {
     setHistoryData(null); setHistoryOpen(true);
     setHistoryFilters({ from: null, to: null, type: null });
     await loadHistory(record.id, { from: null, to: null, type: null });
+  };
+
+  // On-PO drill-down: the active PO lines whose remaining-to-receive sums to the
+  // item's On-PO quantity (same availability service as everywhere else).
+  const openOnPo = async (record) => {
+    setOnPoModal({ open: true, item: record, loading: true, lines: [] });
+    try {
+      const lines = await window.electronAPI.getOnPoLines?.(record.id);
+      setOnPoModal({ open: true, item: record, loading: false, lines: Array.isArray(lines) ? lines : [] });
+    } catch {
+      setOnPoModal({ open: true, item: record, loading: false, lines: [] });
+    }
   };
 
   const historyRefCell = (m) => {
@@ -442,11 +463,29 @@ const UnifiedItemList = () => {
       render: (_, r) => <span style={{ fontWeight: 600 }}>{cSym} {Number(r.price || 0).toFixed(2)}</span>,
     },
     {
-      title: 'Stock', key: 'stock', width: 90, align: 'right',
+      title: 'On Hand', key: 'onHand', width: 90, align: 'right',
+      sorter: (a, b) => stockOf(a) - stockOf(b),
       render: (_, r) => {
         if (normalizeTypeCode(r.type) !== 'INVENTORY_PART') return <Text type="secondary">—</Text>;
         const s = stockOf(r);
         return <span style={{ fontWeight: 600, color: s <= 0 ? '#cf1322' : s < 10 ? '#fa8c16' : '#3f8600' }}>{s}</span>;
+      },
+    },
+    {
+      title: 'On PO', key: 'onPo', width: 80, align: 'right',
+      render: (_, r) => {
+        if (normalizeTypeCode(r.type) !== 'INVENTORY_PART') return <Text type="secondary">—</Text>;
+        const v = Number(r.on_po || 0);
+        if (v <= 0) return <Text type="secondary">0</Text>;
+        return <Tooltip title="View open purchase orders"><a onClick={() => openOnPo(r)} style={{ fontWeight: 600, color: '#13c2c2' }}>{v}</a></Tooltip>;
+      },
+    },
+    {
+      title: 'Expected', key: 'expected', width: 90, align: 'right',
+      render: (_, r) => {
+        if (normalizeTypeCode(r.type) !== 'INVENTORY_PART') return <Text type="secondary">—</Text>;
+        const e = r.expected != null ? Number(r.expected) : stockOf(r);
+        return <Tooltip title="Expected = On Hand + outstanding quantity on active Purchase Orders"><span style={{ fontWeight: 600 }}>{e}</span></Tooltip>;
       },
     },
     {
@@ -731,10 +770,14 @@ const UnifiedItemList = () => {
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={8}>
-                  <Form.Item label="Quantity on Hand" style={FORM_ITEM_STYLE}
-                    tooltip="Derived from inventory transactions (purchases, sales, adjustments)."
-                    extra={<Text type="secondary" style={{ fontSize: 11 }}>Quantity is managed through inventory transactions / stock adjustments.</Text>}>
-                    <InputNumber style={{ width: '100%' }} value={stockOf(editingItem)} disabled />
+                  <Form.Item label="Stock Availability" style={FORM_ITEM_STYLE}
+                    tooltip="On Hand comes from inventory movements. On Purchase Order is the outstanding quantity on active POs. Expected = On Hand + On PO."
+                    extra={<Text type="secondary" style={{ fontSize: 11 }}>Read-only — managed through inventory transactions and Purchase Orders.</Text>}>
+                    <div style={{ display: 'flex', gap: 14, alignItems: 'baseline' }}>
+                      <span><Text type="secondary" style={{ fontSize: 11 }}>On Hand </Text><Text strong>{stockOf(editingItem)}</Text></span>
+                      <span><Text type="secondary" style={{ fontSize: 11 }}>On PO </Text><Text strong style={{ color: '#13c2c2' }}>{Number((editingItem && editingItem.availability && editingItem.availability.onPurchaseOrder) || 0)}</Text></span>
+                      <span><Text type="secondary" style={{ fontSize: 11 }}>Expected </Text><Text strong style={{ color: '#52c41a' }}>{Number((editingItem && editingItem.availability && editingItem.availability.expected) != null ? editingItem.availability.expected : stockOf(editingItem))}</Text></span>
+                    </div>
                   </Form.Item>
                 </Col>
               </Row>
@@ -792,6 +835,7 @@ const UnifiedItemList = () => {
           const code = normalizeTypeCode(m.type);
           const cap = capabilities(code) || {};
           const s = viewDetail.summary || {};
+          const av = viewDetail.availability || null;
           return (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -807,9 +851,19 @@ const UnifiedItemList = () => {
               </div>
 
               <Row gutter={12} style={{ marginBottom: 16 }}>
-                <Col span={8}><Card size="small"><Statistic title="Quantity on Hand" value={s.onHand || 0} precision={0} /></Card></Col>
-                <Col span={8}><Card size="small"><Statistic title="Purchased" value={s.purchaseValue || 0} precision={2} prefix={cSym} /></Card></Col>
-                <Col span={8}><Card size="small"><Statistic title="Sold" value={s.salesValue || 0} precision={2} prefix={cSym} /></Card></Col>
+                {code === 'INVENTORY_PART' && av ? (
+                  <>
+                    <Col span={8}><Card size="small"><Statistic title="On Hand" value={av.onHand || 0} precision={0} valueStyle={{ color: '#1890ff' }} /></Card></Col>
+                    <Col span={8}><Card size="small"><Statistic title="On Purchase Order" value={av.onPurchaseOrder || 0} precision={0} valueStyle={{ color: '#13c2c2' }} /></Card></Col>
+                    <Col span={8}><Card size="small"><Statistic title="Expected" value={av.expected || 0} precision={0} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+                  </>
+                ) : (
+                  <>
+                    <Col span={8}><Card size="small"><Statistic title="Purchased" value={s.purchaseValue || 0} precision={2} prefix={cSym} /></Card></Col>
+                    <Col span={8}><Card size="small"><Statistic title="Sold" value={s.salesValue || 0} precision={2} prefix={cSym} /></Card></Col>
+                    <Col span={8}><Card size="small"><Statistic title="Purchased Qty" value={s.purchaseQty || 0} precision={0} /></Card></Col>
+                  </>
+                )}
               </Row>
 
               <Tabs defaultActiveKey="overview">
@@ -900,6 +954,39 @@ const UnifiedItemList = () => {
           );
         })()}
       </Drawer>
+
+      {/* On-PO drill-down: active PO lines contributing to the item's On-PO qty */}
+      <Modal
+        title={onPoModal.item ? `On Purchase Order — ${onPoModal.item.name || onPoModal.item.sku || ''}` : 'On Purchase Order'}
+        visible={onPoModal.open}
+        onCancel={() => setOnPoModal({ open: false, item: null, loading: false, lines: [] })}
+        footer={null}
+        width={760}
+        destroyOnClose
+      >
+        <Table
+          rowKey={(r) => `${r.poId}-${r.remaining}-${r.poNumber}`}
+          size="small"
+          loading={onPoModal.loading}
+          dataSource={onPoModal.lines || []}
+          pagination={false}
+          locale={{ emptyText: <Empty description="No open purchase orders for this item." /> }}
+          columns={[
+            { title: 'PO #', key: 'po', width: 130, render: (_, r) => <a onClick={() => { setOnPoModal({ open: false, item: null, loading: false, lines: [] }); routerHistory.push(`/main/vendors/purchasing/purchase-orders?po=${r.poId}`); }} style={{ fontWeight: 600 }}>{r.poNumber}</a> },
+            { title: 'Vendor', key: 'vendor', render: (_, r) => r.vendorId != null ? <a onClick={() => { setOnPoModal({ open: false, item: null, loading: false, lines: [] }); routerHistory.push(`/main/vendors/details/${r.vendorId}`); }}>{r.vendorName}</a> : <Text>{r.vendorName}</Text> },
+            { title: 'Ordered', dataIndex: 'qtyOrdered', key: 'o', width: 90, align: 'right' },
+            { title: 'Received', dataIndex: 'qtyReceived', key: 'r', width: 90, align: 'right' },
+            { title: 'Remaining', dataIndex: 'remaining', key: 'rem', width: 100, align: 'right', render: (v) => <Text strong style={{ color: '#13c2c2' }}>{Number(v)}</Text> },
+            { title: 'Expected Date', dataIndex: 'expectedDate', key: 'exp', width: 120, render: (d) => d ? moment(d).format('MM/DD/YYYY') : '—' },
+            { title: 'Status', dataIndex: 'poStatus', key: 'st', width: 120, render: (v) => <Tag>{PO_STATUS_LABEL[v] || v}</Tag> },
+          ]}
+        />
+        {!onPoModal.loading && (onPoModal.lines || []).length > 0 && (
+          <div style={{ textAlign: 'right', marginTop: 12 }}>
+            <Text strong>Total On PO: {Number((onPoModal.lines || []).reduce((s, r) => s + Number(r.remaining || 0), 0))}</Text>
+          </div>
+        )}
+      </Modal>
 
       {/* Add Category Modal */}
       <Modal title="Add New Category" visible={catModalOpen} onOk={handleAddCategory} onCancel={() => setCatModalOpen(false)} okText="Add" destroyOnClose>

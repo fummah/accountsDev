@@ -146,7 +146,7 @@ check('drawer uses the wide responsive class', /className="app-item-drawer"/.tes
 check('drawer has all four boxed sections', ['Basic Information', 'Purchase Information', 'Sales Information', 'Inventory Information'].every(t => ui.includes(t)));
 check('uses the shared FormSection component', /FormSection/.test(ui) && /from '\.\/FormSection'/.test(ui));
 check('inventory section is conditional on the capability', (/showSection\('inventory'\)/.test(ui) || /caps\.needsInventoryAsset/.test(ui)) && /Item Type/.test(ui));
-check('Quantity on Hand is read-only', /Quantity on Hand[\s\S]{0,600}?disabled/.test(ui) && /Quantity is managed through inventory transactions/.test(ui));
+check('Stock availability (On Hand / On PO / Expected) is read-only', /Stock Availability/.test(ui) && /On PO /.test(ui) && /Expected /.test(ui) && /Read-only/.test(ui));
 check('account selectors filter by real account type (allowedTypes)',
   /allowedTypes=\{INCOME_ACCOUNT_TYPES\}/.test(ui) && /allowedTypes=\{EXPENSE_ACCOUNT_TYPES\}/.test(ui) &&
   /allowedTypes=\{INVENTORY_ASSET_ACCOUNT_TYPES\}/.test(ui) && /allowedTypes=\{COGS_ACCOUNT_TYPES\}/.test(ui));

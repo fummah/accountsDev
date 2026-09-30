@@ -229,7 +229,27 @@ const Products = {
     const stmt = db.prepare(
       `SELECT p.*, ${INVENTORY_STOCK_SQL} AS inventory_stock FROM products p ORDER BY p.id DESC`
     );
-    return stmt.all();
+    return Products.attachAvailability(stmt.all());
+  },
+
+  /**
+   * Merge derived availability (on PO / expected) onto product rows using the
+   * ONE availability service — a single batch query, never per item.
+   */
+  attachAvailability: (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    try {
+      const Availability = require('../services/inventoryAvailabilityService');
+      const avail = Availability.getAvailabilityForItems(list.map((r) => r.id));
+      return list.map((r) => {
+        const a = avail[Number(r.id)];
+        if (!a) return r;
+        return { ...r, on_po: a.onPurchaseOrder, expected: a.expected };
+      });
+    } catch (e) {
+      console.error('[products] availability merge failed:', e.message);
+      return list;
+    }
   },
 
   getPaginated: (page = 1, pageSize = 25, search = '', typeFilter = '', categoryFilter = '') => {
@@ -263,7 +283,7 @@ const Products = {
       total = db.prepare('SELECT COUNT(*) AS total FROM products p').get().total;
       data = db.prepare(`${selectSql} ORDER BY p.id DESC LIMIT ? OFFSET ?`).all(limit, offset);
     }
-    return { data, total };
+    return { data: Products.attachAvailability(data), total };
   },
 
   getById: (id) => db.prepare('SELECT * FROM products WHERE id = ?').get(Number(id)),
@@ -279,6 +299,11 @@ const Products = {
         row.preferred_vendor_name = v ? (v.display_name || [v.first_name, v.last_name].filter(Boolean).join(' ') || v.company_name || '') : '';
       }
     } catch { /* vendor lookup optional */ }
+    // Derived availability (On Hand / On PO / Expected) — read-only.
+    try {
+      const Availability = require('../services/inventoryAvailabilityService');
+      row.availability = Availability.getItemAvailability(Number(id));
+    } catch { /* availability optional */ }
     return row;
   },
 
@@ -340,7 +365,7 @@ const Products = {
       salesValue: sum(sales, r => r.amount),
     };
 
-    return { master, itemId, stock, movements, purchases, sales, summary };
+    return { master, itemId, stock, movements, purchases, sales, summary, availability: master.availability || null };
   },
 
   /**

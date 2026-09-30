@@ -34,6 +34,7 @@
 const db = require('../models/dbmgr');
 const ItemTypes = require('./itemTypes');
 const Valuation = require('./inventoryValuation');
+const Availability = require('./inventoryAvailabilityService');
 
 const RECENT_DAYS = 30; // documented default window for "recently"
 
@@ -55,51 +56,43 @@ const loadTrackedItems = () => {
   return rows.filter((r) => ItemTypes.tracksInventory(r.type));
 };
 
-/** productId -> remaining-to-receive, across open (non-closed/cancelled) POs. */
+/** productId -> remaining-to-receive. Reuses the ONE availability service. */
 const loadOpenPoByProduct = () => {
-  const rows = db.prepare(`
-    SELECT pol.item_id AS product_id,
-           SUM(MAX(pol.qty_ordered - pol.qty_received, 0)) AS remaining
-    FROM purchase_order_lines pol
-    JOIN purchase_orders po ON po.id = pol.purchase_order_id
-    WHERE po.status NOT IN ('CLOSED', 'CANCELLED')
-    GROUP BY pol.item_id
-    HAVING remaining > 0.005
-  `).all();
   const map = new Map();
-  for (const r of rows) map.set(Number(r.product_id), num(r.remaining));
+  for (const [pid, entry] of Availability.getActivePoByProduct()) {
+    map.set(Number(pid), entry.onPurchaseOrder);
+  }
   return map;
 };
 
-const loadIncomingStock = (trackedIds) => {
-  const rows = db.prepare(`
-    SELECT pol.id AS line_id, pol.item_id AS product_id,
-           p.name AS item_name, p.sku,
-           po.id AS po_id, po.po_number, po.expected_date, po.status AS po_status,
-           po.vendor_id, s.display_name AS vendor_name,
-           (pol.qty_ordered - pol.qty_received) AS remaining
-    FROM purchase_order_lines pol
-    JOIN purchase_orders po ON po.id = pol.purchase_order_id
-    LEFT JOIN suppliers s ON s.id = po.vendor_id
-    LEFT JOIN products p ON p.id = pol.item_id
-    WHERE po.status NOT IN ('CLOSED', 'CANCELLED')
-      AND (pol.qty_ordered - pol.qty_received) > 0.005
-    ORDER BY (po.expected_date IS NULL), date(po.expected_date) ASC, po.id DESC
-  `).all();
-  return rows
-    .filter((r) => trackedIds.has(Number(r.product_id)))
-    .map((r) => ({
-      productId: Number(r.product_id),
-      itemName: r.item_name || r.sku || `Item #${r.product_id}`,
-      sku: r.sku || '',
-      poId: Number(r.po_id),
-      poNumber: r.po_number || `PO-${r.po_id}`,
-      vendorId: r.vendor_id != null ? Number(r.vendor_id) : null,
-      vendorName: r.vendor_name || '—',
-      remaining: num(r.remaining),
-      expectedDate: r.expected_date || null,
-      poStatus: r.po_status || 'OPEN',
-    }));
+const loadIncomingStock = (tracked) => {
+  const byId = new Map(tracked.map((t) => [Number(t.id), t]));
+  const out = [];
+  for (const [pid, entry] of Availability.getActivePoByProduct()) {
+    const t = byId.get(Number(pid));
+    if (!t) continue; // non-tracked / unknown item
+    for (const l of entry.lines) {
+      out.push({
+        productId: Number(pid),
+        itemName: t.name || t.sku || `Item #${pid}`,
+        sku: t.sku || '',
+        poId: l.poId,
+        poNumber: l.poNumber,
+        vendorId: l.vendorId,
+        vendorName: l.vendorName,
+        remaining: l.remaining,
+        expectedDate: l.expectedDate,
+        poStatus: l.poStatus,
+      });
+    }
+  }
+  out.sort((a, b) => {
+    const da = a.expectedDate || '9999-12-31';
+    const db2 = b.expectedDate || '9999-12-31';
+    if (da !== db2) return da < db2 ? -1 : 1;
+    return b.poId - a.poId;
+  });
+  return out;
 };
 
 const loadRecentActivity = (limit = 25) => {
@@ -210,7 +203,7 @@ const getDashboard = ({ days } = {}) => {
     })
     .sort((a, b) => a.onHand - b.onHand);
 
-  const incomingStock = loadIncomingStock(trackedIds);
+  const incomingStock = loadIncomingStock(tracked);
   const recentActivity = loadRecentActivity(25);
 
   return {
