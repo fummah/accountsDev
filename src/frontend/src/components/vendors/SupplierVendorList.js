@@ -1,21 +1,21 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useHistory } from 'react-router-dom';
-import { Card, Table, Button, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Tabs, Popconfirm, Avatar, Typography, Descriptions, Empty, Divider } from 'antd';
-import { PlusOutlined, SearchOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, DollarOutlined, ClockCircleOutlined, FileTextOutlined, FileAddOutlined, ShopOutlined, TeamOutlined, UsergroupAddOutlined, PhoneOutlined, EnvironmentOutlined, TagsOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Form, Input, Select, Space, message, Tag, Tooltip, Row, Col, Drawer, Popconfirm, Avatar, Typography } from 'antd';
+import { PlusOutlined, EditOutlined, EyeOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined, DollarOutlined, ClockCircleOutlined, FileTextOutlined, FileAddOutlined, ShopOutlined, TeamOutlined, UsergroupAddOutlined, PhoneOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { formatPhone, phoneInputHandler } from '../../utils/phone';
 import COUNTRIES from '../../utils/countries';
 import FormSection, { FORM_ITEM_STYLE } from '../shared/FormSection';
 import ContactIdentityNote from '../shared/ContactIdentityNote';
+import VendorDetailsContent from './VendorDetailsContent';
 import TaxSettingsSection from '../shared/TaxSettingsSection';
 import ListToolbar from '../shared/ListToolbar';
 import { toCsv, downloadCsv, csvDate } from '../../utils/csv';
 import { deriveDisplayName, identityRule } from '../../utils/contactIdentity';
-import { resolveTaxRateFields, taxRateFormValue, describeTaxRate } from '../../utils/taxRate';
+import { resolveTaxRateFields, taxRateFormValue } from '../../utils/taxRate';
 
 const { Option } = Select;
-const { TabPane } = Tabs;
 const { TextArea } = Input;
 const { Title, Text } = Typography;
 
@@ -40,7 +40,6 @@ const SupplierVendorList = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [form] = Form.useForm();
   const [billStats, setBillStats] = useState({ totalPayables: 0, overdueAmount: 0, unpaidBills: 0 });
-  const [detailTab, setDetailTab] = useState('1');
   const [vatRates, setVatRates] = useState([]);
 
   const loadBillStats = useCallback(async () => {
@@ -122,36 +121,11 @@ const SupplierVendorList = () => {
     setDrawerOpen(true);
   };
 
-  const openDetail = async (record) => {
-    let detail = null;
-    try {
-      detail = await window.electronAPI.getSingleSupplier(record.id);
-      setViewingSupplier(detail || record);
-    } catch (_) {
-      setViewingSupplier(record);
-    }
-    const base = detail && !detail.error ? detail : record;
-    try {
-      const allExp = await window.electronAPI.getAllExpenses();
-      const list = Array.isArray(allExp) ? allExp : (allExp?.data || allExp?.all || []);
-      const mine = list.filter(e => Number(e.payee) === Number(record.id)
-        && ['supplier', 'bill'].includes((e.category || '').toLowerCase()));
-      const bills = (Array.isArray(mine) && mine.length) ? mine
-        : (Array.isArray(base.expenses) && base.expenses.length ? base.expenses : []);
-      setViewingSupplier(prev => {
-        const b = prev || base;
-        return { ...b, bills };
-      });
-    } catch (_) { /* keep whatever getSingleSupplier returned */ }
-    try {
-      const openBills = await window.electronAPI.getOpenBills(record.id);
-      setViewingSupplier(prev => {
-        const b = prev || base;
-        return { ...b, openBills: Array.isArray(openBills) ? openBills : [] };
-      });
-    } catch (_) { /* keep whatever we have */ }
+  const openDetail = (record) => {
+    // The SHARED VendorDetailsContent loads everything by vendorId, so the
+    // drawer only needs the stable id. No duplicated vendor/bill fetching.
+    setViewingSupplier(record);
     setDetailDrawerOpen(true);
-    setDetailTab('1');
   };
 
   const handleSave = async () => {
@@ -539,123 +513,22 @@ const SupplierVendorList = () => {
         </Form>
       </Drawer>}
 
-      {/* Detail Drawer */}
-        <Drawer title={null} closable width={760} visible={detailDrawerOpen} onClose={() => setDetailDrawerOpen(false)} className="gx-profile-drawer">
+      {/* Detail Drawer — SHARED VendorDetailsContent (identical to PO -> View Vendor) */}
+      <Drawer
+        title={viewingSupplier ? `Vendor: ${viewingSupplier.display_name || `${viewingSupplier.first_name || ''} ${viewingSupplier.last_name || ''}`.trim() || 'Supplier'}` : 'Vendor'}
+        closable
+        width={Math.min(Math.max(1000, Math.round((typeof window !== 'undefined' ? window.innerWidth : 1400) * 0.9)), 1600)}
+        visible={detailDrawerOpen}
+        onClose={() => setDetailDrawerOpen(false)}
+        destroyOnClose
+        className="gx-profile-drawer"
+      >
         {viewingSupplier && (
-          <div>
-            {(() => {
-              const nm = viewingSupplier.display_name || `${viewingSupplier.first_name || ''} ${viewingSupplier.last_name || ''}`.trim() || 'Supplier';
-              const initials = nm.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-              const active = (viewingSupplier.status || 'Active') === 'Active';
-              const addr = [viewingSupplier.address1, viewingSupplier.address2, viewingSupplier.city, viewingSupplier.state, viewingSupplier.postal_code, viewingSupplier.country].filter(Boolean).join(', ') || '—';
-              const pendingAmount = Number(viewingSupplier?.due_amount?.due_amount ?? viewingSupplier?.due_amount ?? 0) || 0;
-              const allBills = Array.isArray(viewingSupplier.bills) ? viewingSupplier.bills : [];
-              const openBills = Array.isArray(viewingSupplier.openBills) ? viewingSupplier.openBills : [];
-              const fromAll = allBills.filter(b => {
-                const st = (b.approval_status || '').toLowerCase();
-                return st !== 'paid' && st !== 'cancelled' && st !== 'void' && st !== 'draft';
-              });
-              const pendingBills = openBills.length ? openBills : fromAll;
-              const vendorColor = viewingSupplier.vendor_type === '1099' ? 'red' : viewingSupplier.vendor_type === 'Contractor' ? 'blue' : viewingSupplier.vendor_type === 'Credit Card' ? 'purple' : viewingSupplier.vendor_type === 'Loan Lender' ? 'volcano' : 'default';
-              return (
-                <div>
-                  {/* Header */}
-                  <div style={{ textAlign: 'center', padding: '24px 16px 20px' }}>
-                    <Avatar size={72} style={{ background: 'linear-gradient(135deg,#722ed1,#b37feb)', fontSize: 26, fontWeight: 700, marginBottom: 12 }}>{initials || 'S'}</Avatar>
-                    <div style={{ fontSize: 20, fontWeight: 700 }}>{nm}</div>
-                    {viewingSupplier.company_name && <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 8 }}>{viewingSupplier.company_name}</div>}
-                    <div>
-                      <Tag color={active ? 'green' : 'red'} style={{ borderRadius: 20, paddingInline: 12 }}>{viewingSupplier.status || 'Active'}</Tag>
-                      <Tag color={vendorColor} style={{ borderRadius: 20, paddingInline: 12 }}>{viewingSupplier.vendor_type || 'Regular'}</Tag>
-                    </div>
-                  </div>
-
-                  {/* Stat tiles */}
-                  <Row gutter={12} style={{ marginBottom: 20 }}>
-                    <Col span={8}>
-                      <div style={{ backgroundColor: '#fff7e6', border: '1px solid #ffd591', borderRadius: 10, padding: '12px 8px', textAlign: 'center' }}>
-                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Amount Pending</Text>
-                        <Text strong style={{ fontSize: 16, color: '#d46b08' }}>{cSym}{pendingAmount.toFixed(2)}</Text>
-                      </div>
-                    </Col>
-                    <Col span={8}>
-                      <div style={{ borderRadius: 10, border: '1px solid #f0f0f0', padding: '12px 8px', textAlign: 'center' }}>
-                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Open Bills</Text>
-                        <Text strong style={{ fontSize: 16 }}>{pendingBills.length}</Text>
-                      </div>
-                    </Col>
-                    <Col span={8}>
-                      <div style={{ borderRadius: 10, border: '1px solid #f0f0f0', padding: '12px 8px', textAlign: 'center' }}>
-                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Bills</Text>
-                        <Text strong style={{ fontSize: 16 }}>{allBills.length}</Text>
-                      </div>
-                    </Col>
-                  </Row>
-
-                  <Tabs activeKey={detailTab} onChange={setDetailTab} type="card" tabBarStyle={{ marginBottom: 12 }}>
-                    <TabPane tab={<span><TagsOutlined /> Info</span>} key="1">
-                      <Descriptions column={1} size="small" labelStyle={{ width: 110, color: 'rgba(0,0,0,0.45)' }} contentStyle={{ paddingBottom: 8 }}>
-                        <Descriptions.Item label="Display Name">{nm}</Descriptions.Item>
-                        <Descriptions.Item label="Company">{viewingSupplier.company_name || '—'}</Descriptions.Item>
-                        {viewingSupplier.first_name && <Descriptions.Item label="First Name">{viewingSupplier.first_name}</Descriptions.Item>}
-                        {viewingSupplier.last_name && <Descriptions.Item label="Last Name">{viewingSupplier.last_name}</Descriptions.Item>}
-                        <Descriptions.Item label="Date Entered">{viewingSupplier.date_entered ? moment(viewingSupplier.date_entered).format('MM/DD/YYYY') : '—'}</Descriptions.Item>
-                        <Descriptions.Item label="Email">{viewingSupplier.email ? <a href={`mailto:${viewingSupplier.email}`}>{viewingSupplier.email}</a> : '—'}</Descriptions.Item>
-                        <Descriptions.Item label="Phone">{formatPhone(viewingSupplier.phone_number) || '—'}</Descriptions.Item>
-                        {viewingSupplier.mobile_number && <Descriptions.Item label="Mobile">{formatPhone(viewingSupplier.mobile_number)}</Descriptions.Item>}
-                        {viewingSupplier.website && <Descriptions.Item label="Website">{viewingSupplier.website}</Descriptions.Item>}
-                        <Descriptions.Item label="Address">{addr}</Descriptions.Item>
-                        <Descriptions.Item label="Terms">{viewingSupplier.supplier_terms || '—'}</Descriptions.Item>
-                        <Descriptions.Item label="Tax Status">{viewingSupplier.taxable != null ? (Number(viewingSupplier.taxable) ? 'Taxable' : 'Non-Taxable') : 'Taxable'}</Descriptions.Item>
-                        <Descriptions.Item label="Default Tax Rate">{describeTaxRate(viewingSupplier, vatRates)}</Descriptions.Item>
-                        {viewingSupplier.business_number && <Descriptions.Item label="Business #">{viewingSupplier.business_number}</Descriptions.Item>}
-                        {viewingSupplier.account_number && <Descriptions.Item label="Account #">{viewingSupplier.account_number}</Descriptions.Item>}
-                        {viewingSupplier.expense_category && <Descriptions.Item label="Expense Cat."><Tag>{viewingSupplier.expense_category}</Tag></Descriptions.Item>}
-                        {viewingSupplier.opening_balance ? (
-                          <Descriptions.Item label="Opening Balance">
-                            {cSym}{Number(viewingSupplier.opening_balance).toFixed(2)}
-                            {viewingSupplier.as_of ? <span style={{ color: 'rgba(0,0,0,0.45)' }}> as of {moment(viewingSupplier.as_of).format('MM/DD/YYYY')}</span> : null}
-                          </Descriptions.Item>
-                        ) : null}
-                      </Descriptions>
-                      {(viewingSupplier.notes && viewingSupplier.notes !== 'null') && (
-                        <>
-                          <Divider style={{ margin: '12px 0' }} />
-                          <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 6 }}>Notes</div>
-                          <div>{viewingSupplier.notes}</div>
-                        </>
-                      )}
-                    </TabPane>
-                    <TabPane tab={<span><FileTextOutlined /> Bills</span>} key="2">
-                      {allBills.length > 0 ? (
-                        <>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                            <Text type="secondary">{pendingBills.length} open / {allBills.length} total bills</Text>
-                            <Space size={6}>
-                              <Button size="small" icon={<FileAddOutlined />} onClick={() => history.push(`/main/vendors/bills/enter?vendor=${viewingSupplier.id}`)}>Enter Bill</Button>
-                              <Button size="small" icon={<SearchOutlined />} onClick={() => history.push('/main/vendors/bills/tracker')}>Get Bills</Button>
-                            </Space>
-                          </div>
-                          <Table size="small" dataSource={allBills} rowKey={(r) => r.id} pagination={false} scroll={{ x: 520 }}
-                            columns={[
-                              { title: '#', dataIndex: 'id', width: 50 },
-                              { title: 'Ref #', dataIndex: 'ref_no', width: 100, ellipsis: true, render: v => v || '—' },
-                              { title: 'Date', dataIndex: 'payment_date', width: 95, render: v => v ? moment(v).format('MM/DD/YYYY') : '—' },
-                              { title: 'Due', dataIndex: 'due_date', width: 95, render: (v, r) => { const d = v || r.payment_date; return d ? moment(d).format('MM/DD/YYYY') : '—'; } },
-                              { title: 'Amount', dataIndex: 'amount', width: 90, align: 'right', render: v => `${cSym} ${Number(v || 0).toFixed(2)}` },
-                              { title: 'Pending', key: 'pending', width: 90, align: 'right',
-                                render: (_, r) => { const p = (Number(r.amount) || 0) - (Number(r.paid_amount) || 0); return p > 0 ? <Text strong style={{ color: '#fa541c' }}>{cSym} {p.toFixed(2)}</Text> : <Text type="secondary">—</Text>; } },
-                              { title: 'Status', dataIndex: 'approval_status', width: 90,
-                                render: v => { const s = (v || '').toLowerCase(); return <Tag color={s === 'paid' ? 'green' : s === 'overdue' ? 'red' : s === 'pending' ? 'orange' : 'default'}>{v}</Tag>; } },
-                            ]} />
-                        </>
-                      ) : <Empty description="No bills for this supplier" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-                    </TabPane>
-                  </Tabs>
-                </div>
-              );
-            })()}
-          </div>
+          <VendorDetailsContent
+            vendorId={viewingSupplier.id}
+            mode="drawer"
+            onNavigate={(path) => { setDetailDrawerOpen(false); history.push(path); }}
+          />
         )}
       </Drawer>
     </div>

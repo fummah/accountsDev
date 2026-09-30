@@ -1,194 +1,26 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Card, Descriptions, message, Button, Tabs, Table, Tag, Empty, Spin, Row, Col, Space, Typography, Alert } from 'antd';
-import { ArrowLeftOutlined, ReloadOutlined, ShoppingCartOutlined, InboxOutlined, FileTextOutlined, DollarOutlined, WalletOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
+import { Card, Button } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useParams, useHistory } from 'react-router-dom';
-import moment from 'moment';
-import { formatPhone } from '../../utils/phone';
-import { useCurrency } from '../../utils/currency';
+import VendorDetailsContent from './VendorDetailsContent';
 
-const { Text } = Typography;
-
+/**
+ * VendorDetails — PAGE shell for the shared Vendor detail content.
+ * Reached from Purchase Order → View Vendor (route /main/vendors/details/:id).
+ * The content itself lives in VendorDetailsContent (shared with the drawer).
+ */
 const VendorDetails = ({ match }) => {
   const params = useParams();
   const history = useHistory();
-  const { symbol: cSym } = useCurrency();
-  const [vendor, setVendor] = useState(null);
-  const [activity, setActivity] = useState(null);
-  const [activityLoading, setActivityLoading] = useState(false);
-  const [summary, setSummary] = useState(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState(null);
-  const [activeTab, setActiveTab] = useState('pos');
-
   const id = params?.id || match?.params?.id;
-
-  useEffect(() => {
-    if (id) { loadVendor(id); loadActivity(id); loadSummary(id); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  const loadVendor = async (vendorId) => {
-    try {
-      const res = await window.electronAPI.getSingleSupplier(vendorId);
-      setVendor(res || null);
-    } catch (err) {
-      console.error('Failed to load vendor', err);
-      message.error('Failed to load vendor');
-    }
-  };
-
-  const loadActivity = async (vendorId) => {
-    setActivityLoading(true);
-    try {
-      const res = await window.electronAPI.getVendorActivity?.(Number(vendorId));
-      setActivity(res && !res.error ? res : { purchaseOrders: [], receipts: [], bills: [], payments: [], credits: [] });
-    } catch { setActivity({ purchaseOrders: [], receipts: [], bills: [], payments: [], credits: [] }); }
-    finally { setActivityLoading(false); }
-  };
-
-  const loadSummary = useCallback(async (vendorId) => {
-    setSummaryLoading(true);
-    setSummaryError(null);
-    try {
-      const fn = window.electronAPI?.getVendorPurchasingSummary;
-      if (!fn) throw new Error('Vendor Purchasing Summary is unavailable — restart the app so the latest backend (preload) loads.');
-      const res = await fn(Number(vendorId));
-      if (!res || res.error) throw new Error((res && res.error) || 'No data returned');
-      setSummary(res);
-    } catch (e) {
-      console.error('[vendor summary] load failed:', e);
-      setSummaryError(e?.message || String(e));
-      setSummary(null);
-    } finally { setSummaryLoading(false); }
-  }, []);
-
-  if (!vendor) return <Card title="Vendor Details" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => history.goBack()}>Back</Button>}>Loading...</Card>;
-
-  const fullAddr = [vendor.address1, vendor.address2, vendor.city, vendor.state, vendor.postal_code, vendor.country].filter(Boolean).join(', ');
-  const money = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const a = activity || { purchaseOrders: [], receipts: [], bills: [], payments: [], credits: [] };
-  const s = summary || {};
-
-  const summaryCards = [
-    { key: 'openPurchaseOrders', label: 'Open Purchase Orders', data: s.openPurchaseOrders, icon: <ShoppingCartOutlined />, color: '#1890ff', tab: 'pos' },
-    { key: 'received', label: 'Received', data: s.received, icon: <InboxOutlined />, color: '#13c2c2', tab: 'receipts' },
-    { key: 'bills', label: 'Billed', data: s.bills, icon: <FileTextOutlined />, color: '#722ed1', tab: 'bills' },
-    { key: 'paid', label: 'Paid', data: s.paid, icon: <DollarOutlined />, color: '#52c41a', tab: 'payments' },
-    { key: 'outstanding', label: 'Outstanding', data: s.outstanding, icon: <WalletOutlined />, color: '#fa541c', tab: 'bills' },
-  ];
-
-  const tabTable = (dataSource, columns, emptyText) => (
-    <Table size="small" rowKey="id" dataSource={dataSource || []} columns={columns} pagination={{ pageSize: 10 }}
-      locale={{ emptyText }} />
-  );
+  const [vendorName, setVendorName] = useState('');
 
   return (
     <Card
-      title={`Vendor: ${vendor.display_name || vendor.first_name}`}
+      title={vendorName ? `Vendor: ${vendorName}` : 'Vendor Details'}
       extra={<Button icon={<ArrowLeftOutlined />} onClick={() => history.goBack()}>Back</Button>}
     >
-      <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
-        <Descriptions.Item label="Name" span={2}>{vendor.display_name || `${vendor.first_name} ${vendor.last_name}`}</Descriptions.Item>
-        <Descriptions.Item label="Company">{vendor.company_name || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Email">{vendor.email || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Phone">{formatPhone(vendor.phone_number) || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Mobile">{formatPhone(vendor.mobile_number) || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Fax">{vendor.fax || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Address" span={2}>{fullAddr || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Opening Balance">{money(vendor.opening_balance)}</Descriptions.Item>
-        <Descriptions.Item label="Due Amount">{vendor.due_amount ? money(vendor.due_amount.due_amount) : money(0)}</Descriptions.Item>
-        <Descriptions.Item label="Notes" span={2}>{vendor.notes || '-'}</Descriptions.Item>
-      </Descriptions>
-
-      {/* ── Purchasing Summary ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <strong>Purchasing Summary</strong>
-        <Button size="small" icon={<ReloadOutlined />} loading={summaryLoading} onClick={() => loadSummary(id)}>Refresh</Button>
-      </div>
-      {summaryError && (
-        <Alert type="error" showIcon style={{ marginBottom: 12, borderRadius: 8 }}
-          message="Unable to load Vendor Purchasing Summary." description={summaryError}
-          action={<Button size="small" onClick={() => loadSummary(id)}>Retry</Button>} />
-      )}
-      <Row gutter={[12, 12]} style={{ marginBottom: 8 }}>
-        {summaryCards.map((card) => (
-          <Col xs={24} sm={12} lg={8} xl={card.key === 'outstanding' ? 8 : 4} key={card.key} flex="1 1 0">
-            <Card hoverable className="al-stat-card" loading={summaryLoading} style={{ cursor: 'pointer', borderTop: `3px solid ${card.color}`, borderRadius: 12 }}
-              onClick={() => setActiveTab(card.tab)}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: '#fff', background: `linear-gradient(135deg, ${card.color}, ${card.color}cc)` }}>{card.icon}</div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: '#667085', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap' }}>{card.label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: '#1f2d3d' }}>{summaryLoading || !card.data ? '—' : money(card.data.amount)}</div>
-                  {card.data && card.data.count != null && (
-                    <div style={{ fontSize: 11, color: '#98a2b3' }}>{card.key === 'outstanding' ? `${card.data.billCount} bill(s)` : `${card.data.count} record(s)`}</div>
-                  )}
-                </div>
-              </div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-      {s.credits && s.credits.availableAmount > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>Available Vendor Credits: {money(s.credits.availableAmount)}</Text>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 8 }}>
-        <strong>Vendor Activity</strong>
-        <Button size="small" icon={<ReloadOutlined />} loading={activityLoading} onClick={() => loadActivity(id)}>Refresh</Button>
-      </div>
-
-      {activityLoading && !activity ? (
-        <div style={{ textAlign: 'center', padding: 32 }}><Spin tip="Loading vendor activity..." /></div>
-      ) : (
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          <Tabs.TabPane tab={`Purchase Orders (${a.purchaseOrders.length})`} key="pos">
-            {tabTable(a.purchaseOrders, [
-              { title: 'PO #', dataIndex: 'po_number', render: (v, r) => <a onClick={() => history.push(`/main/vendors/purchasing/purchase-orders?po=${r.id}`)}>{v || `PO-${r.id}`}</a> },
-              { title: 'Date', dataIndex: 'po_date', render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
-              { title: 'Total', dataIndex: 'total', align: 'right', render: v => money(v) },
-              { title: 'Status', dataIndex: 'status', render: v => <Tag>{v || 'DRAFT'}</Tag> },
-            ], 'No purchase orders.')}
-          </Tabs.TabPane>
-          <Tabs.TabPane tab={`Receipts (${a.receipts.length})`} key="receipts">
-            {tabTable(a.receipts, [
-              { title: 'Receipt #', dataIndex: 'receipt_number' },
-              { title: 'Date', dataIndex: 'receipt_date', render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
-              { title: 'Reference', dataIndex: 'reference', render: v => v || '-' },
-            ], 'No receipts.')}
-          </Tabs.TabPane>
-          <Tabs.TabPane tab={`Bills (${a.bills.length})`} key="bills">
-            {tabTable(a.bills, [
-              { title: 'Bill', dataIndex: 'ref_no', render: (v, r) => <a onClick={() => history.push(`/main/vendors/bills/edit/${r.id}`)}>{v || `#${r.id}`}</a> },
-              { title: 'Date', dataIndex: 'date', render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
-              { title: 'Status', dataIndex: 'status', render: v => <Tag>{v || '-'}</Tag> },
-              { title: 'Amount', dataIndex: 'amount', align: 'right', render: v => money(v) },
-            ], 'No bills.')}
-          </Tabs.TabPane>
-          <Tabs.TabPane tab={`Payments (${a.payments.length})`} key="payments">
-            {tabTable(a.payments, [
-              { title: 'Date', dataIndex: 'date', render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
-              { title: 'Bill', dataIndex: 'ref_no', render: (v, r) => <a onClick={() => history.push(`/main/vendors/bills/edit/${r.expense_id}`)}>{v || `#${r.expense_id}`}</a> },
-              { title: 'Amount', dataIndex: 'amount', align: 'right', render: v => money(v) },
-              { title: 'Status', dataIndex: 'status', render: v => <Tag color={String(v || '').toLowerCase() === 'active' ? 'green' : 'default'}>{v || 'Active'}</Tag> },
-            ], 'No payments.')}
-          </Tabs.TabPane>
-          <Tabs.TabPane tab={`Credits (${a.credits.length})`} key="credits">
-            {tabTable(a.credits, [
-              { title: 'Date', dataIndex: 'date', render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
-              { title: 'Reference', dataIndex: 'reference', render: v => v || '-' },
-              { title: 'Amount', dataIndex: 'amount', align: 'right', render: v => money(v) },
-              { title: 'Remaining', dataIndex: 'remaining_amount', align: 'right', render: v => money(v) },
-              { title: 'Status', dataIndex: 'status', render: v => <Tag>{v || 'Active'}</Tag> },
-            ], 'No vendor credits.')}
-          </Tabs.TabPane>
-        </Tabs>
-      )}
-      {!activityLoading && !a.purchaseOrders.length && !a.receipts.length && !a.bills.length && !a.payments.length && !a.credits.length && (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No purchasing activity for this Vendor yet." style={{ marginTop: 8 }} />
-      )}
+      <VendorDetailsContent vendorId={id} mode="page" onVendorLoaded={(v) => setVendorName(v.display_name || `${v.first_name || ''} ${v.last_name || ''}`.trim())} />
     </Card>
   );
 };

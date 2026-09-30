@@ -249,7 +249,7 @@ check('billed PO-line helper exists for the Bill engine',
     Array.isArray(act.payments) && Array.isArray(act.credits),
     JSON.stringify(Object.keys(act || {})));
   check('vendor activity includes this vendor\'s POs', (act.purchaseOrders || []).length >= 1);
-  const vd = fs.readFileSync(path.join(FE, 'components/vendors/VendorDetails.js'), 'utf8');
+  const vd = fs.readFileSync(path.join(FE, 'components/vendors/VendorDetailsContent.js'), 'utf8');
   check('Vendor Details shows activity tabs', /Purchase Orders \(/.test(vd) && /Receipts \(/.test(vd) && /Bills \(/.test(vd) && /Payments \(/.test(vd) && /Credits \(/.test(vd));
   check('Vendor Details loads vendor activity', /getVendorActivity/.test(vd));
   check('IPC + preload expose vendor activity',

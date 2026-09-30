@@ -204,7 +204,7 @@ const addCredit = (vendorId, amount, applyToBillId = null) => {
   console.log('\n=== UI / wiring static checks ===');
   const fs = require('fs');
   const FE = path.join(ROOT, 'src', 'frontend', 'src');
-  const page = fs.readFileSync(path.join(FE, 'components/vendors/VendorDetails.js'), 'utf8');
+  const page = fs.readFileSync(path.join(FE, 'components/vendors/VendorDetailsContent.js'), 'utf8');
   check('Vendor Details shows Purchasing Summary with 5 cards', ['Open Purchase Orders', 'Received', 'Billed', 'Paid', 'Outstanding'].every((c) => page.includes(c)));
   check('cards drill into activity tabs', /setActiveTab\(card\.tab\)/.test(page));
   check('uses the backend summary service', /getVendorPurchasingSummary/.test(page));
