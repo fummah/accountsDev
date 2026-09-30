@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Row, Col, Button, Table, Space, Typography, Empty, Alert, Modal } from 'antd';
+import { Card, Row, Col, Button, Table, Space, Typography, Empty, Alert, Modal, Statistic } from 'antd';
 import {
   ReloadOutlined, AppstoreOutlined, CheckCircleOutlined, WarningOutlined,
   StopOutlined, ShoppingCartOutlined, InboxOutlined,
@@ -7,7 +7,6 @@ import {
 } from '@ant-design/icons';
 import { useHistory } from 'react-router-dom';
 import moment from 'moment';
-import Widget from '../../Widget';
 import { useCurrency } from '../../../utils/currency';
 
 const { Text } = Typography;
@@ -39,14 +38,15 @@ const InventoryDashboard = () => {
   const incomingRef = useRef(null);
   const activityRef = useRef(null);
 
-  const fmtMoney = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtDate = (d) => (d ? moment(d).format('MM/DD/YYYY') : '—');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await window.electronAPI?.getInventoryDashboard?.();
+      const fn = window.electronAPI?.getInventoryDashboard;
+      if (!fn) throw new Error('Inventory Dashboard is unavailable — restart the app so the latest backend (preload) loads.');
+      const res = await fn();
       if (!res || res.error) throw new Error((res && res.error) || 'No data returned');
       setData(res);
     } catch (e) {
@@ -76,14 +76,14 @@ const InventoryDashboard = () => {
   const window = (data && data.window) || 30;
 
   const cards = [
-    { key: 'totalInventoryItems', title: 'Total Inventory Items', value: s.totalInventoryItems, icon: <AppstoreOutlined />, color: 'primary', target: 'items' },
-    { key: 'inStockItems', title: 'In Stock', value: s.inStockItems, icon: <CheckCircleOutlined />, color: 'success', target: 'attention' },
-    { key: 'lowStockItems', title: 'Low Stock', value: s.lowStockItems, icon: <WarningOutlined />, color: 'warning', target: 'attention' },
-    { key: 'outOfStockItems', title: 'Out of Stock', value: s.outOfStockItems, icon: <StopOutlined />, color: 'danger', target: 'attention' },
-    { key: 'itemsOnPO', title: 'On Purchase Order', value: s.itemsOnPO, icon: <ShoppingCartOutlined />, color: 'cyan', target: 'incoming' },
-    { key: 'recentlyReceived', title: 'Recently Received', value: s.recentlyReceived, icon: <InboxOutlined />, color: 'purple', target: 'activity', helper: `Last ${window} days` },
-    { key: 'recentlySold', title: 'Recently Sold', value: s.recentlySold, icon: <LineChartOutlined />, color: 'pink', target: 'activity', helper: `Last ${window} days` },
-    { key: 'inventoryValue', title: 'Inventory Value', value: s.inventoryValue, money: true, icon: <WalletOutlined />, color: 'orange', target: 'attention' },
+    { key: 'totalInventoryItems', title: 'Total Inventory Items', value: s.totalInventoryItems, icon: <AppstoreOutlined />, color: '#1890ff', target: 'items' },
+    { key: 'inStockItems', title: 'In Stock', value: s.inStockItems, icon: <CheckCircleOutlined />, color: '#52c41a', target: 'attention' },
+    { key: 'lowStockItems', title: 'Low Stock', value: s.lowStockItems, icon: <WarningOutlined />, color: '#faad14', target: 'attention' },
+    { key: 'outOfStockItems', title: 'Out of Stock', value: s.outOfStockItems, icon: <StopOutlined />, color: '#f5222d', target: 'attention' },
+    { key: 'itemsOnPO', title: 'On Purchase Order', value: s.itemsOnPO, icon: <ShoppingCartOutlined />, color: '#13c2c2', target: 'incoming' },
+    { key: 'recentlyReceived', title: 'Recently Received', value: s.recentlyReceived, icon: <InboxOutlined />, color: '#722ed1', target: 'activity', helper: `Last ${window} days` },
+    { key: 'recentlySold', title: 'Recently Sold', value: s.recentlySold, icon: <LineChartOutlined />, color: '#eb2f96', target: 'activity', helper: `Last ${window} days` },
+    { key: 'inventoryValue', title: 'Inventory Value', value: s.inventoryValue, money: true, icon: <WalletOutlined />, color: '#fa8c16', target: 'attention' },
   ];
 
   const onCardClick = (card) => {
@@ -91,12 +91,6 @@ const InventoryDashboard = () => {
     if (card.target === 'incoming') { scrollTo(incomingRef); return; }
     if (card.target === 'activity') { scrollTo(activityRef); return; }
     scrollTo(attentionRef);
-  };
-
-  const cardValue = (card) => {
-    if (loading) return '—';
-    if (card.money) return fmtMoney(card.value);
-    return Number(card.value || 0).toLocaleString('en-US');
   };
 
   const attentionColumns = [
@@ -191,26 +185,27 @@ const InventoryDashboard = () => {
         />
       )}
 
-      {/* Wieldy-style colored stat cards */}
+      {/* Stat cards — white cards with a colored border */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
         {cards.map((card) => (
           <Col xs={24} sm={12} lg={6} key={card.key}>
-            <Widget styleName={`gx-card-full gx-p-3 gx-bg-${card.color} gx-text-white`}>
-              <div
-                className="gx-media gx-align-items-center gx-flex-nowrap"
-                style={{ cursor: 'pointer' }}
-                onClick={() => onCardClick(card)}
-              >
-                <div className="gx-mr-2 gx-mr-xxl-3">
-                  <span className="gx-fs-icon-lg" style={{ fontSize: 26, lineHeight: 1 }}>{card.icon}</span>
-                </div>
-                <div className="gx-media-body">
-                  <h1 className="gx-fs-xxl gx-font-weight-semi-bold gx-mb-1 gx-text-white" style={{ color: '#fff' }}>{cardValue(card)}</h1>
-                  <p className="gx-mb-0" style={{ color: 'rgba(255,255,255,0.92)' }}>{card.title}</p>
-                  {card.helper && <span style={{ fontSize: 11, opacity: 0.85 }}>{card.helper}</span>}
-                </div>
-              </div>
-            </Widget>
+            <Card
+              hoverable
+              className="al-stat-card"
+              loading={loading}
+              onClick={() => onCardClick(card)}
+              style={{ cursor: 'pointer', borderTop: `3px solid ${card.color}` }}
+            >
+              <Statistic
+                title={<Space size={6}><span style={{ color: card.color }}>{card.icon}</span>{card.title}</Space>}
+                value={Number(card.value || 0)}
+                precision={card.money ? 2 : 0}
+                prefix={card.money ? cSym : undefined}
+                valueStyle={{ fontSize: 22, color: card.color }}
+                formatter={card.money ? undefined : (v) => Number(v).toLocaleString('en-US')}
+              />
+              {card.helper && <div style={{ marginTop: 4 }}><Text type="secondary" style={{ fontSize: 11 }}>{card.helper}</Text></div>}
+            </Card>
           </Col>
         ))}
       </Row>
