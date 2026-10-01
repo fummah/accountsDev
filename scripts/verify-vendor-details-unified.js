@@ -53,8 +53,15 @@ check('Bill references are clickable and use billId', /bills\/edit\/\$\{r\.id\}/
 check('content has loading skeleton (no zero flash)', /Spin tip="Loading vendor/.test(content));
 check('content has controlled error + Retry', /Unable to load vendor details\./.test(content) && /onClick=\{\(\) => loadVendor\(id\)\}/.test(content));
 
-console.log('\n=== drawer width / scrolling ===');
-check('drawer uses a wide responsive width (90vw, capped 1600, min 1000)', /Math\.min\(Math\.max\(1000, Math\.round\([\s\S]{0,80}\* 0\.9\)\), 1600\)/.test(list));
+console.log('\n=== drawer width / layout ===');
+check('drawer uses the shared responsive wide-drawer width util', /getWideDrawerWidth/.test(list) && /from '\.\.\/\.\.\/utils\/drawerWidth'/.test(list));
+const widthUtil = fs.readFileSync(path.join(FE, 'utils', 'drawerWidth.js'), 'utf8');
+check('wide-drawer util: 80vw large, cap 1400, floor 950', /w \* 0\.8/.test(widthUtil) && /1400/.test(widthUtil) && /950/.test(widthUtil));
+check('summary uses a responsive auto-fit grid (min 190px)', /repeat\(auto-fit, minmax\(190px, 1fr\)\)/.test(content));
+check('vendor info uses a responsive Descriptions column', /column=\{\{ xs: 1, sm: 1, md: 2 \}\}/.test(content));
+const css = fs.readFileSync(path.join(ROOT, 'src', 'frontend', 'public', 'css', 'custom.css'), 'utf8');
+check('drawer body CSS hides horizontal overflow (vertical scroll only)', /\.gx-profile-drawer \.ant-drawer-body[\s\S]{0,140}overflow-x: hidden/.test(css));
+check('vendor info values do not break mid-word (word-break normal)', /\.gx-vendor-info \.ant-descriptions-item-content[\s\S]{0,80}word-break: normal/.test(css));
 check('drawer destroys on close so reopening refetches (no stale vendor)', /destroyOnClose/.test(list));
 check('drawer header shows "Vendor: <name>"', /Vendor: \$\{viewingSupplier/.test(list));
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Card, Descriptions, Button, Tabs, Table, Tag, Empty, Spin, Row, Col, Typography, Alert } from 'antd';
+import { Card, Descriptions, Button, Tabs, Table, Tag, Empty, Spin, Typography, Alert } from 'antd';
 import { ReloadOutlined, ShoppingCartOutlined, InboxOutlined, FileTextOutlined, DollarOutlined, WalletOutlined } from '@ant-design/icons';
 import { useHistory } from 'react-router-dom';
 import moment from 'moment';
@@ -117,7 +117,7 @@ const VendorDetailsContent = ({ vendorId, mode = 'page', onNavigate, onVendorLoa
 
   return (
     <>
-      <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
+      <Descriptions className="gx-vendor-info" column={{ xs: 1, sm: 1, md: 2 }} bordered size="small" style={{ marginBottom: 16 }}>
         <Descriptions.Item label="Name" span={2}>{vendor.display_name || `${vendor.first_name || ''} ${vendor.last_name || ''}`.trim()}</Descriptions.Item>
         <Descriptions.Item label="Company">{vendor.company_name || '-'}</Descriptions.Item>
         <Descriptions.Item label="Email">{vendor.email || '-'}</Descriptions.Item>
@@ -140,25 +140,23 @@ const VendorDetailsContent = ({ vendorId, mode = 'page', onNavigate, onVendorLoa
           message="Unable to load Vendor Purchasing Summary." description={summaryError}
           action={<Button size="small" onClick={() => loadSummary(id)}>Retry</Button>} />
       )}
-      <Row gutter={[12, 12]} style={{ marginBottom: 8 }}>
+      <div className="gx-vendor-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 8 }}>
         {summaryCards.map((card) => (
-          <Col xs={24} sm={12} lg={8} xl={4} key={card.key}>
-            <Card hoverable className="al-stat-card" loading={summaryLoading} style={{ cursor: 'pointer', borderTop: `3px solid ${card.color}`, borderRadius: 12 }}
-              onClick={() => setActiveTab(card.tab)}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: '#fff', background: `linear-gradient(135deg, ${card.color}, ${card.color}cc)` }}>{card.icon}</div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: '#667085', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap' }}>{card.label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: '#1f2d3d' }}>{summaryLoading || !card.data ? '—' : money(card.data.amount)}</div>
-                  {card.data && card.data.count != null && (
-                    <div style={{ fontSize: 11, color: '#98a2b3' }}>{card.key === 'outstanding' ? `${card.data.billCount} bill(s)` : `${card.data.count} record(s)`}</div>
-                  )}
-                </div>
+          <Card key={card.key} hoverable className="al-stat-card" loading={summaryLoading} style={{ cursor: 'pointer', borderTop: `3px solid ${card.color}`, borderRadius: 12 }}
+            onClick={() => setActiveTab(card.tab)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: '#fff', background: `linear-gradient(135deg, ${card.color}, ${card.color}cc)` }}>{card.icon}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: '#667085', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap' }}>{card.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: '#1f2d3d' }}>{summaryLoading || !card.data ? '—' : money(card.data.amount)}</div>
+                {card.data && card.data.count != null && (
+                  <div style={{ fontSize: 11, color: '#98a2b3' }}>{card.key === 'outstanding' ? `${card.data.billCount} bill(s)` : `${card.data.count} record(s)`}</div>
+                )}
               </div>
-            </Card>
-          </Col>
+            </div>
+          </Card>
         ))}
-      </Row>
+      </div>
       {s.credits && s.credits.availableAmount > 0 && (
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>Available Vendor Credits: {money(s.credits.availableAmount)}</Text>
@@ -174,7 +172,7 @@ const VendorDetailsContent = ({ vendorId, mode = 'page', onNavigate, onVendorLoa
       {activityLoading && !activity ? (
         <div style={{ textAlign: 'center', padding: 32 }}><Spin tip="Loading vendor activity..." /></div>
       ) : (
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
+        <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ width: '100%' }}>
           <Tabs.TabPane tab={`Purchase Orders (${a.purchaseOrders.length})`} key="pos">
             {tabTable(a.purchaseOrders, [
               { title: 'PO #', dataIndex: 'po_number', render: (v, r) => <a onClick={() => nav(`/main/vendors/purchasing/purchase-orders?po=${r.id}`)}>{v || `PO-${r.id}`}</a> },

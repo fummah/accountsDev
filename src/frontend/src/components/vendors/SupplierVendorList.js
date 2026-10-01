@@ -9,6 +9,7 @@ import COUNTRIES from '../../utils/countries';
 import FormSection, { FORM_ITEM_STYLE } from '../shared/FormSection';
 import ContactIdentityNote from '../shared/ContactIdentityNote';
 import VendorDetailsContent from './VendorDetailsContent';
+import { getWideDrawerWidth } from '../../utils/drawerWidth';
 import TaxSettingsSection from '../shared/TaxSettingsSection';
 import ListToolbar from '../shared/ListToolbar';
 import { toCsv, downloadCsv, csvDate } from '../../utils/csv';
@@ -517,7 +518,7 @@ const SupplierVendorList = () => {
       <Drawer
         title={viewingSupplier ? `Vendor: ${viewingSupplier.display_name || `${viewingSupplier.first_name || ''} ${viewingSupplier.last_name || ''}`.trim() || 'Supplier'}` : 'Vendor'}
         closable
-        width={Math.min(Math.max(1000, Math.round((typeof window !== 'undefined' ? window.innerWidth : 1400) * 0.9)), 1600)}
+        width={getWideDrawerWidth()}
         visible={detailDrawerOpen}
         onClose={() => setDetailDrawerOpen(false)}
         destroyOnClose
