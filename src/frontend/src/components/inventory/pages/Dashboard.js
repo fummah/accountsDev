@@ -8,6 +8,7 @@ import {
 import { useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
+import { getInventoryApi } from '../../../utils/inventoryBridge';
 import AlertStrip from '../../shared/AlertStrip';
 
 const { Text } = Typography;
@@ -56,25 +57,15 @@ const InventoryDashboard = () => {
     setLoading(true);
     setError(null);
     try {
-      const api = window.electronAPI || {};
-      const fn = api.getInventoryDashboard;
-      if (typeof fn !== 'function') {
-        // The preload bridge did not expose the method. Log exactly what IS
-        // available so a stale / partial preload is immediately diagnosable.
-        console.error('[inventory dashboard] window.electronAPI.getInventoryDashboard is not a function.', {
-          electronAPIPresent: !!window.electronAPI,
-          bridgeMethodCount: Object.keys(api).length,
-          hasInventoryAlerts: typeof api.getInventoryAlerts,
-          hasReorderNeeded: typeof api.getReorderNeeded,
-        });
-        throw new Error('The inventory dashboard API (getInventoryDashboard) is not exposed by the preload bridge in this build.');
-      }
-      const res = await fn();
+      // Validated bridge (src/shared/inventoryBridge.json contract). Throws ONE
+      // clean error (logged with technical detail) if the loaded preload is
+      // stale — never returns fake data.
+      const res = await getInventoryApi().getInventoryDashboard();
       if (!res || res.error) throw new Error((res && res.error) || 'No data returned');
       setData(res);
     } catch (e) {
       console.error('[inventory dashboard] load failed:', e);
-      setError(e?.message || String(e));
+      setError(e?.message || 'Unable to load inventory summary.');
       setData(null);
     } finally {
       setLoading(false);

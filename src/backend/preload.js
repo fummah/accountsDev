@@ -763,8 +763,11 @@ billCreditApplications: (expenseId) => ipcRenderer.invoke('bill-credit-applicati
   vendorCreditsUpdate: (id, data) => ipcRenderer.invoke('vendor-credits-update', id, data),
 
   // Bridge self-description — lets the renderer detect a STALE preload build.
+  // inventoryApiVersion must equal src/frontend/src/shared/inventoryBridge.json
+  // ("version"), enforced by scripts/verify-inventory-bridge-contract.js.
   getBridgeInfo: () => ({
     preloadVersion: PRELOAD_VERSION,
+    inventoryApiVersion: 2,
     methodCount: Object.keys(api).length,
     hasInventoryDashboard: typeof api.getInventoryDashboard === 'function',
     hasReorderNeeded: typeof api.getReorderNeeded === 'function',

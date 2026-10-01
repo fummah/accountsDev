@@ -107,7 +107,9 @@ const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
   check('error message is "Unable to load inventory summary."', /Unable to load inventory summary\./.test(page));
   check('no "restart the app" instruction remains', !/restart the app/i.test(page));
   check('Retry re-runs the dashboard query (onClick={load})', /onClick=\{load\}/.test(page));
-  check('missing-bridge failure is self-diagnosing (logs bridge keys)', /getInventoryDashboard is not a function/.test(page));
+  const wrapper = fs.readFileSync(path.join(FE, 'utils', 'inventoryBridge.js'), 'utf8');
+  check('Dashboard uses the shared validated bridge wrapper', /getInventoryApi/.test(page) && /import \{ getInventoryApi \}/.test(page));
+  check('missing-bridge failure is self-diagnosing (logs missing methods + bridge info)', /missingInventoryMethods/.test(wrapper) && /missingMethods/.test(wrapper) && /bridgeInfo/.test(wrapper));
 
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
