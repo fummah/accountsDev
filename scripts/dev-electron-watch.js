@@ -61,7 +61,24 @@ const restart = async () => {
   console.log('\n[dev-electron-watch] backend changed — restarting Electron to reload main + preload...');
   await killChild();
   restarting = false;
-  start();
+/**
+ * Kill any OTHER Electron instance belonging to THIS project before starting.
+ * A leftover process holds the OLD preload (Electron loads preload once per
+ * process), which is exactly why the renderer can be current while the bridge
+ * is stale. Scoped to electron.exe whose command line points at this repo.
+ */
+const killLeftovers = () => {
+  if (process.platform !== 'win32') return;
+  try {
+    const pattern = `*${ROOT}*`;
+    const script = `Get-CimInstance Win32_Process -Filter "Name='electron.exe'" | Where-Object { $_.CommandLine -like '${pattern}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+    const ps = spawn('powershell', ['-NoProfile', '-Command', script], { stdio: 'ignore' });
+    ps.on('exit', () => {});
+  } catch { /* best effort */ }
+};
+
+killLeftovers();
+setTimeout(start, 400);
 };
 
 start();
