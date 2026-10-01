@@ -9,7 +9,9 @@
   "description": "AccuLedger",
   "main": "src/backend/main.js",
   "scripts": {
-    "start": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
+    "start": "concurrently \"npm start --prefix src/frontend\" \"node scripts/dev-electron-watch.js\"",
+    "dev": "npm start",
+    "start:no-watch": "concurrently \"npm start --prefix src/frontend\" \"electron .\"",
     "rebuild": "electron-rebuild -f -w sqlite3",
     "test": "",
     "build": "npm run build-react && npm run build-electron",
