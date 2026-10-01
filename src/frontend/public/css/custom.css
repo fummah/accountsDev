@@ -556,3 +556,41 @@
     padding-bottom: 10px !important;
     border-bottom-color: #eef1f5 !important;
 }
+
+/* ── Sidebar: clear route-based ACTIVE state ──────────────────────────────
+   The active item is driven by the current route (see utils/sidebarActive.js).
+   Accent #F5C542 on text + icon, subtle row tint, and a left indicator. */
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected {
+    background-color: rgba(245, 197, 66, 0.12) !important;
+    box-shadow: inset 3px 0 0 0 #F5C542;
+    font-weight: 600 !important;
+}
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected > a,
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected > a span,
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected > a i,
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected > a .icon {
+    color: #F5C542 !important;
+}
+/* active must stay visible on hover */
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected:hover,
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected:hover > a,
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected:hover > a span,
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-item-selected:hover > a i {
+    color: #F5C542 !important;
+    background-color: rgba(245, 197, 66, 0.16) !important;
+}
+/* parent SubMenu reflects that a child is active (also covers collapsed mode) */
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-submenu-selected > .ant-menu-submenu-title,
+.gx-sidebar-nav-menu.ant-menu-dark .ant-menu-submenu-selected > .ant-menu-submenu-title i {
+    color: #F5C542 !important;
+}
+/* collapsed mode: the selected child lives in a hover popup */
+.ant-menu-submenu-popup .ant-menu-item-selected,
+.ant-menu-submenu-popup .ant-menu-item-selected > a,
+.ant-menu-submenu-popup .ant-menu-item-selected > a i,
+.ant-menu-submenu-popup .ant-menu-item-selected > a span {
+    color: #F5C542 !important;
+    background-color: rgba(245, 197, 66, 0.12) !important;
+    font-weight: 600 !important;
+}
+

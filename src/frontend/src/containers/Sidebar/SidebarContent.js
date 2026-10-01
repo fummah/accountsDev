@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {Menu,Button,Popover} from "antd";
 import {Link} from "react-router-dom";
 
 import CustomScrollbars from "util/CustomScrollbars";
 import SidebarLogo from "./SidebarLogo";
 import PopOverComponent from "./PopOverComponent";
+import { resolveActiveMenuKey, parentOf } from "../../utils/sidebarActive";
 import {
   NAV_STYLE_NO_HEADER_EXPANDED_SIDEBAR,
   NAV_STYLE_NO_HEADER_MINI_SIDEBAR
@@ -28,7 +29,27 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
     return "";
   };
 
-  const selectedKeys = pathname.substr(1);
+  // The active menu item comes from the CURRENT ROUTE (Redux `common.pathname`,
+  // updated on every navigation) — never from a click handler. Nested/detail
+  // routes resolve to their owning menu item via the alias map.
+  const activeKey = useMemo(() => resolveActiveMenuKey(pathname), [pathname]);
+  const activeParent = useMemo(() => parentOf(activeKey), [activeKey]);
+
+  // Keep the owning SubMenu expanded while one of its children is active.
+  const [openKeys, setOpenKeys] = useState(activeParent ? [activeParent] : []);
+  useEffect(() => {
+    if (activeParent) setOpenKeys((keys) => (keys.includes(activeParent) ? keys : [...keys, activeParent]));
+  }, [activeParent]);
+
+  // Accessibility: mark the selected link as the current page (secondary cue
+  // beyond colour). antd does not add this itself.
+  useEffect(() => {
+    const root = document.querySelector('.gx-sidebar-content');
+    if (!root) return;
+    root.querySelectorAll('a[aria-current="page"]').forEach((a) => a.removeAttribute('aria-current'));
+    const el = root.querySelector('.ant-menu-item-selected a');
+    if (el) el.setAttribute('aria-current', 'page');
+  }, [activeKey, sidebarCollapsed]);
 
   // When expanded: SubMenus show inline-expanded children.
   // When collapsed: SubMenus show a hover popup (antd's default collapsed behavior).
@@ -51,7 +72,10 @@ const SidebarContent = ({sidebarCollapsed, setSidebarCollapsed}) => {
         )}
         <CustomScrollbars className="gx-layout-sider-scrollbar">
           <Menu
-            selectedKeys={[selectedKeys]}
+            className="gx-sidebar-nav-menu"
+            selectedKeys={activeKey ? [activeKey] : []}
+            openKeys={sidebarCollapsed ? undefined : openKeys}
+            onOpenChange={setOpenKeys}
             theme="dark"
             mode={menuMode}
             inlineCollapsed={sidebarCollapsed}>
