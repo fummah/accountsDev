@@ -155,6 +155,8 @@ const journalCount = () => db.prepare('SELECT COUNT(*) AS c FROM journal_entries
   check('page opens the General Ledger for the bank account', /general-ledger\?accountId=/.test(page));
   check('page has a wide detail drawer', /width=\{Math\.min\(Math\.max\(1000/.test(page));
   check('page has loading + error + empty states', /Skeleton active/.test(page) && /Unable to load bank statements\./.test(page) && /No bank statements imported yet\./.test(page));
+  const recon = fs.readFileSync(path.join(FE, 'components', 'banking', 'BankReconciliation.js'), 'utf8');
+  check('reconcile page prefills from the statement deep link (closing + end)', /params\.get\('closing'\)/.test(recon) && /params\.get\('end'\)/.test(recon));
 
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

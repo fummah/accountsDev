@@ -93,10 +93,17 @@ const BankReconciliation = () => {
 
   // Deep-link support: ?accountId=<id> preselects the exact bank account to
   // reconcile (never by name). Also accepts the legacy ?account=<id>.
+  // A Bank Statement can deep-link here with ?accountId=&closing=&end= so the
+  // statement closing balance + end date pre-fill the reconcile form (the
+  // reconciliation ENGINE stays the single owner of the difference).
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const id = params.get('accountId') || params.get('account');
     if (id) setSelectedAccount(Number(id));
+    const closing = params.get('closing');
+    if (closing != null && closing !== '') setStatementBalance(String(closing));
+    const end = params.get('end');
+    if (end) { const m = moment(end, 'YYYY-MM-DD'); if (m.isValid()) setStatementDate(m); }
   }, [location.search]);
 
   useEffect(() => {
