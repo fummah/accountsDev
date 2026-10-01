@@ -158,13 +158,63 @@ function registerInventoryHandlers() {
   });
 
   // Adjustments and transfers
-  ipcMain.handle('adjust-inventory', async (event, itemId, warehouseId, quantity, reason) => {
+  ipcMain.handle('adjust-inventory', async (event, itemIdOrOpts, warehouseId, quantity, reason) => {
     try {
-      return Inventory.adjustStock(itemId, warehouseId, quantity, reason);
+      // Accept either the legacy positional signature or one options object.
+      if (itemIdOrOpts && typeof itemIdOrOpts === 'object') {
+        return Inventory.adjustStock(itemIdOrOpts.itemId, itemIdOrOpts.warehouseId, itemIdOrOpts.quantity, itemIdOrOpts);
+      }
+      return Inventory.adjustStock(itemIdOrOpts, warehouseId, quantity, reason);
     } catch (e) {
       console.error('Error adjusting inventory:', e);
       return { error: e.message };
     }
+  });
+
+  // Adjustment history / detail / reversal.
+  ipcMain.handle('get-adjustments', async (_e, filters) => {
+    try { return Inventory.listAdjustments(filters || {}); }
+    catch (e) { console.error('Error listing adjustments:', e); return { error: e.message }; }
+  });
+  ipcMain.handle('get-adjustment', async (_e, id) => {
+    try { return Inventory.getAdjustment(id); }
+    catch (e) { console.error('Error getting adjustment:', e); return { error: e.message }; }
+  });
+  ipcMain.handle('reverse-adjustment', async (_e, id, opts) => {
+    try { return Inventory.reverseAdjustment(id, opts || {}); }
+    catch (e) { console.error('Error reversing adjustment:', e); return { success: false, error: e.message }; }
+  });
+
+  // Read-only context for the adjustment form (authoritative values).
+  ipcMain.handle('get-adjustment-context', async (_e, productId) => {
+    try {
+      const Products = require('../models/products');
+      const Availability = require('../services/inventoryAvailabilityService');
+      const Valuation = require('../services/inventoryValuation');
+      const db = require('../models/dbmgr');
+      const p = Products.getById(Number(productId));
+      if (!p) return { error: 'Item not found' };
+      const avail = Availability.getItemAvailability(Number(productId)) || {};
+      const method = p.valuation_method || 'FIFO';
+      const value = p.item_id != null ? Valuation.currentValue(Number(p.item_id), method) : 0;
+      const onHand = Number(avail.onHand) || 0;
+      const unitCost = onHand > 0 ? value / onHand : (Number(p.purchase_cost) || 0);
+      const warehouseStock = p.item_id != null
+        ? db.prepare('SELECT warehouseId, quantity FROM item_stock WHERE itemId = ?').all(Number(p.item_id))
+        : [];
+      return {
+        productId: Number(productId),
+        productName: p.name || '',
+        sku: p.sku || '',
+        itemId: p.item_id != null ? Number(p.item_id) : null,
+        onHand,
+        unitCost: Math.round(unitCost * 100) / 100,
+        inventoryValue: Math.round(value * 100) / 100,
+        reorderPoint: p.reorder_point == null ? null : Number(p.reorder_point),
+        valuationMethod: method,
+        warehouseStock,
+      };
+    } catch (e) { console.error('Error reading adjustment context:', e); return { error: e.message }; }
   });
 
   ipcMain.handle('transfer-stock', async (event, itemId, fromWarehouseId, toWarehouseId, quantity, refType, refId) => {

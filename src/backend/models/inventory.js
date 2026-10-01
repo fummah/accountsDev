@@ -114,6 +114,36 @@ const Inventory = {
       console.error('stock_movements migration failed:', e);
     }
 
+    // ── inventory_adjustments review / accounting metadata (migration) ─────
+    // Makes an adjustment a proper, auditable transaction: reference, date,
+    // reason + details, before/after quantity AND value, status, and the linked
+    // movement + journal entry (so it can be viewed and reversed).
+    try {
+      const acols = new Set(db.prepare("PRAGMA table_info('inventory_adjustments')").all().map(r => r.name));
+      const aadd = (col, ddl) => { if (!acols.has(col)) db.prepare(`ALTER TABLE inventory_adjustments ADD COLUMN ${col} ${ddl}`).run(); };
+      aadd('reference', 'TEXT');
+      aadd('adjustmentDate', 'TEXT');
+      aadd('productId', 'INTEGER');
+      aadd('reasonDetails', 'TEXT');
+      aadd('notes', 'TEXT');
+      aadd('qtyBefore', 'REAL');
+      aadd('qtyAfter', 'REAL');
+      aadd('unitCost', 'REAL');
+      aadd('valueBefore', 'REAL');
+      aadd('valueChange', 'REAL');
+      aadd('valueAfter', 'REAL');
+      aadd('status', "TEXT DEFAULT 'Posted'");
+      aadd('movementId', 'INTEGER');
+      aadd('journalId', 'INTEGER');
+      aadd('createdBy', 'TEXT');
+      aadd('requestId', 'TEXT');
+      aadd('reversedById', 'INTEGER');
+      aadd('reversalOfId', 'INTEGER');
+      aadd('reversedAt', 'DATETIME');
+    } catch (e) {
+      console.error('inventory_adjustments migration failed:', e);
+    }
+
     // ── products.item_id (the id-space bridge) ────────────────────────────
     // resolveInventoryItem() READS and WRITES this column, so it must exist
     // before that function can ever be called. models/products.js also adds it,
@@ -163,82 +193,199 @@ const Inventory = {
     return up.run(itemId, warehouseId, itemId, warehouseId, reorderPoint);
   },
 
-  adjustStock: (itemId, warehouseId, quantity, reason) => {
-    const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-    // ONE transaction: stock upsert + movement + adjustment row + GL posting,
-    // so quantity, value and accounting commit or roll back together.
-    const tx = db.transaction(() => {
-      // A manual adjustment must carry a COST BASIS so quantity and value stay
-      // consistent: removing stock values it from the central valuation layers,
-      // and a positive adjustment values the gain at the item's current carrying
-      // cost (never a silent $0).
-      let unitCost = 0;
-      let invAccountId = null;
-      try {
-        const Valuation = require('../services/inventoryValuation');
-        const p = db.prepare('SELECT inventory_asset_account_id, valuation_method, purchase_cost FROM products WHERE item_id = ? LIMIT 1').get(Number(itemId));
-        const method = (p && p.valuation_method) || 'FIFO';
-        const standardCost = p ? Number(p.purchase_cost) || 0 : 0;
-        invAccountId = p && p.inventory_asset_account_id != null ? Number(p.inventory_asset_account_id) : null;
-        if (Number(quantity) < 0) {
-          unitCost = Valuation.costOfRemoval(itemId, -Number(quantity), method, { standardCost }).unitCost || 0;
-        } else if (Number(quantity) > 0) {
-          const state = Valuation.replay(itemId, method);
-          unitCost = state.qtyOn > 0 ? state.value / state.qtyOn : standardCost;
-        }
-      } catch { unitCost = 0; }
+  /** Backend-generated adjustment reference (ADJ-000001). */
+  generateAdjustmentReference: () => {
+    const last = db.prepare("SELECT reference FROM inventory_adjustments WHERE reference IS NOT NULL ORDER BY id DESC LIMIT 1").get();
+    const n = last && last.reference ? (parseInt(String(last.reference).replace(/\D/g, ''), 10) || 0) : 0;
+    return `ADJ-${String(n + 1).padStart(6, '0')}`;
+  },
 
-      const upsert = db.prepare(`
+  /**
+   * Record a stock adjustment as a proper transaction.
+   *
+   * Never overwrites Quantity On Hand: it writes an item_stock delta + an
+   * inventory MOVEMENT + an inventory_adjustments row + a journal entry, all in
+   * ONE transaction, and returns the before/after quantity AND value.
+   *
+   * Backward compatible: the 4th arg may be a plain reason string (legacy) or an
+   * options object { reason, reasonDetails, notes, adjustmentDate, productId,
+   * unitCost, createdBy, requestId, reversalOfId }.
+   */
+  adjustStock: (itemId, warehouseId, quantity, reasonOrOpts) => {
+    const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const opts = (reasonOrOpts && typeof reasonOrOpts === 'object') ? reasonOrOpts : { reason: reasonOrOpts };
+    const itemIdN = Number(itemId);
+    const whN = Number(warehouseId);
+    const qty = Number(quantity) || 0;
+    if (!itemIdN || !whN) return { success: false, error: 'Item and warehouse are required.' };
+    if (!qty) return { success: false, error: 'Adjustment quantity cannot be zero.' };
+
+    // Idempotency: a repeated requestId returns the existing adjustment (no double post).
+    if (opts.requestId) {
+      const dup = db.prepare('SELECT id, reference FROM inventory_adjustments WHERE requestId = ? LIMIT 1').get(String(opts.requestId));
+      if (dup) return { success: true, adjustmentId: Number(dup.id), reference: dup.reference, duplicate: true };
+    }
+
+    const tx = db.transaction(() => {
+      const Valuation = require('../services/inventoryValuation');
+      const COA = require('./chartOfAccounts');
+      const JournalEntries = require('./journalEntries');
+
+      const prod = db.prepare('SELECT id, inventory_asset_account_id, valuation_method, purchase_cost FROM products WHERE item_id = ? LIMIT 1').get(itemIdN);
+      const method = (prod && prod.valuation_method) || 'FIFO';
+      const standardCost = prod ? Number(prod.purchase_cost) || 0 : 0;
+      const invAccountId = prod && prod.inventory_asset_account_id != null ? Number(prod.inventory_asset_account_id) : null;
+
+      // Quantity before/after (authoritative item_stock balance for this warehouse).
+      const beforeRow = db.prepare('SELECT quantity FROM item_stock WHERE itemId = ? AND warehouseId = ?').get(itemIdN, whN);
+      const qtyBefore = Number(beforeRow ? beforeRow.quantity : 0);
+      const qtyAfter = qtyBefore + qty;
+
+      // Cost basis: an explicit unit cost wins (a positive adjustment with no
+      // existing basis must not silently create zero-cost stock); otherwise the
+      // CENTRAL valuation engine supplies it.
+      let unitCost;
+      if (opts.unitCost != null && opts.unitCost !== '' && Number(opts.unitCost) >= 0) {
+        unitCost = Number(opts.unitCost);
+      } else if (qty < 0) {
+        unitCost = Valuation.costOfRemoval(itemIdN, -qty, method, { standardCost }).unitCost || 0;
+      } else {
+        const state = Valuation.replay(itemIdN, method);
+        unitCost = state.qtyOn > 0 ? state.value / state.qtyOn : standardCost;
+      }
+      unitCost = round2(unitCost);
+
+      const valueBefore = round2(Valuation.currentValue(itemIdN, method));
+      const valueChange = round2(qty * unitCost);
+      const valueAfter = round2(valueBefore + valueChange);
+
+      db.prepare(`
         INSERT INTO item_stock (itemId, warehouseId, quantity, reorderPoint)
         VALUES (?, ?, ?, 0)
         ON CONFLICT(itemId, warehouseId) DO UPDATE SET quantity = item_stock.quantity + excluded.quantity
-      `);
-      upsert.run(itemId, warehouseId, quantity);
+      `).run(itemIdN, whN, qty);
 
-      db.prepare(`
+      const mv = db.prepare(`
         INSERT INTO stock_movements (itemId, warehouseId, quantityChange, reason, refType, refId, unitCost, movedAt)
         VALUES (?, ?, ?, ?, 'ADJUSTMENT', NULL, ?, datetime('now'))
-      `).run(itemId, warehouseId, quantity, reason || null, unitCost);
+      `).run(itemIdN, whN, qty, opts.reason || null, unitCost);
+      const movementId = Number(mv.lastInsertRowid);
 
+      const reference = Inventory.generateAdjustmentReference();
+      const adjDate = opts.adjustmentDate || new Date().toISOString().slice(0, 10);
       const adj = db.prepare(`
-        INSERT INTO inventory_adjustments (itemId, warehouseId, quantity, reason, createdAt)
-        VALUES (?, ?, ?, ?, datetime('now'))
-      `).run(itemId, warehouseId, quantity, reason || null);
+        INSERT INTO inventory_adjustments
+          (itemId, warehouseId, quantity, reason, createdAt, reference, adjustmentDate, productId, reasonDetails, notes,
+           qtyBefore, qtyAfter, unitCost, valueBefore, valueChange, valueAfter, status, movementId, createdBy, requestId, reversalOfId)
+        VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Posted', ?, ?, ?, ?)
+      `).run(
+        itemIdN, whN, qty, opts.reason || null, reference, adjDate,
+        prod ? Number(prod.id) : (opts.productId != null ? Number(opts.productId) : null),
+        opts.reasonDetails || null, opts.notes || null,
+        qtyBefore, qtyAfter, unitCost, valueBefore, valueChange, valueAfter,
+        movementId, opts.createdBy || 'system', opts.requestId || null,
+        opts.reversalOfId != null ? Number(opts.reversalOfId) : null
+      );
       const adjId = Number(adj.lastInsertRowid);
 
-      // Accounting: post against the item's Inventory Asset account and a
-      // CONFIGURED offset (system "Inventory Adjustment"). Shrink: Dr offset /
-      // Cr Inventory Asset. Gain: Dr Inventory Asset / Cr offset. Accounts are
-      // resolved by configured id/system lookup, never hardcoded by name.
-      const amount = round2(Math.abs(Number(quantity)) * unitCost);
+      // Accounting: configured Inventory Asset + configured offset (system
+      // "Inventory Adjustment"). Shrink: Dr offset / Cr Inventory Asset.
+      // Gain: Dr Inventory Asset / Cr offset. Never hardcoded by name.
+      let journalId = null;
+      const amount = round2(Math.abs(qty) * unitCost);
       if (amount > 0) {
-        const COA = require('./chartOfAccounts');
-        const JournalEntries = require('./journalEntries');
         const invAcct = invAccountId || ((COA.getSystemAccount('Inventory Asset') || {}).id);
         const offset = (COA.getSystemAccount('Inventory Adjustment') || {}).id;
         if (!invAcct || !offset) {
           throw new Error('Inventory adjustment cannot post: an Inventory Asset / Inventory Adjustment account is missing.');
         }
-        const lines = Number(quantity) < 0
+        const lines = qty < 0
           ? [{ account_id: offset, debit: amount, credit: 0, description: 'Inventory shrinkage' },
              { account_id: invAcct, debit: 0, credit: amount, description: 'Inventory adjusted down' }]
           : [{ account_id: invAcct, debit: amount, credit: 0, description: 'Inventory adjusted up' },
              { account_id: offset, debit: 0, credit: amount, description: 'Inventory gain' }];
         const res = JournalEntries.post({
-          date: new Date().toISOString().slice(0, 10),
-          reference: `ADJ-${adjId}`,
-          description: `Inventory adjustment: ${reason || 'manual'}`,
+          date: adjDate,
+          reference,
+          description: `Inventory adjustment ${reference}: ${opts.reason || 'manual'}`,
           source_type: 'adjustment', source_id: adjId, lines,
         });
         if (res && res.error) throw new Error(res.error);
+        journalId = res && res.id != null ? Number(res.id) : null;
+        db.prepare('UPDATE inventory_adjustments SET journalId = ? WHERE id = ?').run(journalId, adjId);
       }
-      return { success: true, adjustmentId: adjId };
+
+      return {
+        success: true, adjustmentId: adjId, reference, movementId, journalId,
+        quantity: qty,
+        qtyBefore, qtyAfter, unitCost, valueBefore, valueChange, valueAfter,
+        reason: opts.reason || null, itemId: itemIdN, warehouseId: whN,
+      };
     });
     try {
       return tx();
     } catch (e) {
       return { success: false, error: e.message };
     }
+  },
+
+  /** Adjustment history with product / warehouse names (newest first). */
+  listAdjustments: (filters = {}) => {
+    const where = [];
+    const params = [];
+    if (filters.search) { where.push('(p.name LIKE ? OR p.sku LIKE ? OR a.reference LIKE ?)'); const q = `%${filters.search}%`; params.push(q, q, q); }
+    if (filters.reason) { where.push('a.reason = ?'); params.push(String(filters.reason)); }
+    if (filters.warehouseId) { where.push('a.warehouseId = ?'); params.push(Number(filters.warehouseId)); }
+    if (filters.direction === 'increase') where.push('a.quantity > 0');
+    else if (filters.direction === 'decrease') where.push('a.quantity < 0');
+    if (filters.dateFrom) { where.push('a.adjustmentDate >= ?'); params.push(filters.dateFrom); }
+    if (filters.dateTo) { where.push('a.adjustmentDate <= ?'); params.push(filters.dateTo); }
+    const wc = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return db.prepare(`
+      SELECT a.*, p.name AS productName, p.sku AS sku, w.name AS warehouseName
+      FROM inventory_adjustments a
+      LEFT JOIN products p ON p.id = a.productId
+      LEFT JOIN warehouses w ON w.id = a.warehouseId
+      ${wc}
+      ORDER BY a.id DESC LIMIT 500
+    `).all(...params);
+  },
+
+  getAdjustment: (id) => {
+    const a = db.prepare(`
+      SELECT a.*, p.name AS productName, p.sku AS sku, w.name AS warehouseName
+      FROM inventory_adjustments a
+      LEFT JOIN products p ON p.id = a.productId
+      LEFT JOIN warehouses w ON w.id = a.warehouseId
+      WHERE a.id = ?
+    `).get(Number(id));
+    if (!a) return null;
+    const reversal = db.prepare('SELECT id, reference FROM inventory_adjustments WHERE reversalOfId = ? LIMIT 1').get(Number(id));
+    const original = a.reversalOfId ? db.prepare('SELECT id, reference FROM inventory_adjustments WHERE id = ?').get(Number(a.reversalOfId)) : null;
+    return { ...a, reversal: reversal || null, original: original || null };
+  },
+
+  /** Reverse a posted adjustment: creates the opposite adjustment + GL, and
+   *  marks the original Reversed (audit trail preserved — never a hard delete). */
+  reverseAdjustment: (id, opts = {}) => {
+    const a = db.prepare('SELECT * FROM inventory_adjustments WHERE id = ?').get(Number(id));
+    if (!a) return { success: false, error: 'Adjustment not found.' };
+    if (String(a.status) === 'Reversed') return { success: false, error: 'This adjustment is already reversed.' };
+    const res = Inventory.adjustStock(a.itemId, a.warehouseId, -Number(a.quantity), {
+      reason: 'Correction',
+      reasonDetails: `Reversal of ${a.reference || `#${a.id}`}`,
+      notes: opts.notes || null,
+      adjustmentDate: opts.date || new Date().toISOString().slice(0, 10),
+      createdBy: opts.createdBy || 'system',
+      productId: a.productId,
+      reversalOfId: a.id,
+      requestId: `reversal-of-${a.id}`,
+    });
+    if (res && res.success) {
+      db.prepare("UPDATE inventory_adjustments SET status = 'Reversed', reversedById = ?, reversedAt = datetime('now') WHERE id = ?")
+        .run(res.adjustmentId, Number(id));
+    }
+    return res;
   },
 
   recordMovement: (itemId, fromWarehouseId, toWarehouseId, quantity, refType, refId) => {
