@@ -170,6 +170,52 @@ function registerBankStatementHandlers() {
       return { error: e.message };
     }
   });
+
+  // ── Banking module integration (summary, link, match, reconcile, delete) ──
+  ipcMain.handle('bank-statements-summary', async () => {
+    try { return ParsedStatements.getSummary(); }
+    catch (e) { console.error('Error building bank statements summary:', e); return { error: e.message }; }
+  });
+
+  ipcMain.handle('bank-statement-duplicate-check', async (_e, payload) => {
+    try { return ParsedStatements.findDuplicate(payload || {}); }
+    catch (e) { return { duplicate: false, error: e.message }; }
+  });
+
+  ipcMain.handle('bank-statement-link-account', async (_e, statementId, bankAccountId) => {
+    try { return ParsedStatements.setBankAccount(statementId, bankAccountId); }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+
+  ipcMain.handle('bank-statement-set-status', async (_e, statementId, status) => {
+    try { return ParsedStatements.setStatus(statementId, status); }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+
+  ipcMain.handle('bank-statement-match-line', async (_e, lineId, payload) => {
+    try { return ParsedStatements.matchLine(lineId, payload || {}); }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+
+  ipcMain.handle('bank-statement-unmatch-line', async (_e, lineId) => {
+    try { return ParsedStatements.unmatchLine(lineId); }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+
+  ipcMain.handle('bank-statement-categorize-line', async (_e, lineId, accountId) => {
+    try { return ParsedStatements.categorizeLine(lineId, accountId); }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+
+  ipcMain.handle('bank-statement-set-reconciliation', async (_e, statementId, payload) => {
+    try { return ParsedStatements.setReconciliation(statementId, payload || {}); }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+
+  ipcMain.handle('bank-statement-delete', async (_e, statementId) => {
+    try { return ParsedStatements.deleteStatement(statementId); }
+    catch (e) { return { success: false, error: e.message }; }
+  });
 }
 
 module.exports = registerBankStatementHandlers;

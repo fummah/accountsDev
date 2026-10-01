@@ -412,6 +412,15 @@ invoiceRefundCreate:     (payload)    => ipcRenderer.invoke('invoice-refund-crea
   listParsedStatements: () => ipcRenderer.invoke('list-parsed-statements'),
   getParsedStatement: (id) => ipcRenderer.invoke('get-parsed-statement', id),
   parsePlaintextStatement: (text, meta) => ipcRenderer.invoke('parse-plaintext-statement', text, meta),
+  getBankStatementsSummary: () => ipcRenderer.invoke('bank-statements-summary'),
+  checkBankStatementDuplicate: (payload) => ipcRenderer.invoke('bank-statement-duplicate-check', payload),
+  linkBankStatementAccount: (statementId, bankAccountId) => ipcRenderer.invoke('bank-statement-link-account', statementId, bankAccountId),
+  setBankStatementStatus: (statementId, status) => ipcRenderer.invoke('bank-statement-set-status', statementId, status),
+  matchBankStatementLine: (lineId, payload) => ipcRenderer.invoke('bank-statement-match-line', lineId, payload),
+  unmatchBankStatementLine: (lineId) => ipcRenderer.invoke('bank-statement-unmatch-line', lineId),
+  categorizeBankStatementLine: (lineId, accountId) => ipcRenderer.invoke('bank-statement-categorize-line', lineId, accountId),
+  setBankStatementReconciliation: (statementId, payload) => ipcRenderer.invoke('bank-statement-set-reconciliation', statementId, payload),
+  deleteBankStatement: (statementId) => ipcRenderer.invoke('bank-statement-delete', statementId),
 
   // Bank Feeds (live/offline)
   bankProviders: () => ipcRenderer.invoke('bank-providers'),
