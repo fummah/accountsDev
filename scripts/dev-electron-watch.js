@@ -67,18 +67,18 @@ const restart = async () => {
  * process), which is exactly why the renderer can be current while the bridge
  * is stale. Scoped to electron.exe whose command line points at this repo.
  */
-const killLeftovers = () => {
-  if (process.platform !== 'win32') return;
+const killLeftovers = () => new Promise((resolve) => {
+  if (process.platform !== 'win32') { resolve(); return; }
   try {
     const pattern = `*${ROOT}*`;
     const script = `Get-CimInstance Win32_Process -Filter "Name='electron.exe'" | Where-Object { $_.CommandLine -like '${pattern}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
     const ps = spawn('powershell', ['-NoProfile', '-Command', script], { stdio: 'ignore' });
-    ps.on('exit', () => {});
-  } catch { /* best effort */ }
-};
+    ps.on('exit', resolve);
+    ps.on('error', resolve);
+  } catch { resolve(); }
+});
 
-killLeftovers();
-setTimeout(start, 400);
+killLeftovers().finally(start);
 };
 
 start();
