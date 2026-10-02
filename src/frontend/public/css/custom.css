@@ -594,14 +594,7 @@
     font-weight: 600 !important;
 }
 
-/* ── Wide Vendor detail drawer (Suppliers/Vendors + PO → View Vendor) ──────
-   One clean VERTICAL scroll; no horizontal body scrollbar. Long values (e.g.
-   "A&M Transportation") must not break into vertical letters. */
-.gx-profile-drawer .ant-drawer-body {
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-    height: 100%;
-}
+/* ── Vendor detail content (page + any drawer): readable, no vertical word breaks ── */
 .gx-vendor-info .ant-descriptions-item-label {
     white-space: nowrap;
     width: 150px;
@@ -613,11 +606,5 @@
 }
 .gx-vendor-summary-grid > .al-stat-card {
     min-width: 0;
-}
-.gx-profile-drawer .ant-tabs {
-    width: 100%;
-}
-.gx-profile-drawer .ant-drawer-header-title {
-    white-space: nowrap;
 }
 

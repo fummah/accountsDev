@@ -32,15 +32,16 @@ const list = read('components/vendors/SupplierVendorList.js');
 console.log('\n=== one shared component ===');
 check('VendorDetailsContent.js exists and is the shared content', /const VendorDetailsContent = \(\{ vendorId, mode/.test(content));
 check('page shell (PO → View Vendor) renders the shared content', /<VendorDetailsContent[\s\S]{0,120}mode="page"/.test(page));
-check('Suppliers/Vendors drawer renders the SAME shared content', /<VendorDetailsContent[\s\S]{0,200}mode="drawer"/.test(list));
-check('the shared content is imported by both shells', /import VendorDetailsContent from '\.\/VendorDetailsContent'/.test(page) && /import VendorDetailsContent from '\.\/VendorDetailsContent'/.test(list));
+check('Suppliers/Vendors list OPENS the Vendor Details page (route), like customers', /history\.push\(`\/main\/vendors\/details\/\$\{record\.id\}`\)/.test(list));
+check('the list no longer renders its own vendor detail drawer', !/<VendorDetailsContent/.test(list));
+check('the shared content is imported by the page shell', /import VendorDetailsContent from '\.\/VendorDetailsContent'/.test(page));
 
 console.log('\n=== old simplified drawer removed ===');
 for (const marker of ['Amount Pending', 'Open Bills', 'getOpenBills', 'pendingBills', 'vendorColor', 'describeTaxRate']) {
   check(`SupplierVendorList no longer contains "${marker}"`, !list.includes(marker));
 }
-check('the drawer no longer fetches vendor/bills itself (only the page stat cards use getAllExpenses)', !/getSingleSupplier|getOpenBills/.test(list));
-check('the drawer no longer has its own Info/Bills tab implementation', !/TabPane tab=/.test(list));
+check('the list no longer fetches vendor/bills itself (only the page stat cards use getAllExpenses)', !/getSingleSupplier|getOpenBills/.test(list));
+check('the list no longer has its own Info/Bills tab implementation', !/TabPane tab=/.test(list));
 
 console.log('\n=== shared content wiring ===');
 check('content loads vendor via getSingleSupplier', /getSingleSupplier/.test(content));
@@ -53,17 +54,11 @@ check('Bill references are clickable and use billId', /bills\/edit\/\$\{r\.id\}/
 check('content has loading skeleton (no zero flash)', /Spin tip="Loading vendor/.test(content));
 check('content has controlled error + Retry', /Unable to load vendor details\./.test(content) && /onClick=\{\(\) => loadVendor\(id\)\}/.test(content));
 
-console.log('\n=== drawer width / layout ===');
-check('drawer uses the shared responsive wide-drawer width util', /getWideDrawerWidth/.test(list) && /from '\.\.\/\.\.\/utils\/drawerWidth'/.test(list));
-const widthUtil = fs.readFileSync(path.join(FE, 'utils', 'drawerWidth.js'), 'utf8');
-check('wide-drawer util: 80vw large, cap 1400, floor 950', /w \* 0\.8/.test(widthUtil) && /1400/.test(widthUtil) && /950/.test(widthUtil));
+console.log('\n=== layout (page content) ===');
 check('summary uses a responsive auto-fit grid (min 190px)', /repeat\(auto-fit, minmax\(190px, 1fr\)\)/.test(content));
 check('vendor info uses a responsive Descriptions column', /column=\{\{ xs: 1, sm: 1, md: 2 \}\}/.test(content));
 const css = fs.readFileSync(path.join(ROOT, 'src', 'frontend', 'public', 'css', 'custom.css'), 'utf8');
-check('drawer body CSS hides horizontal overflow (vertical scroll only)', /\.gx-profile-drawer \.ant-drawer-body[\s\S]{0,140}overflow-x: hidden/.test(css));
 check('vendor info values do not break mid-word (word-break normal)', /\.gx-vendor-info \.ant-descriptions-item-content[\s\S]{0,80}word-break: normal/.test(css));
-check('drawer destroys on close so reopening refetches (no stale vendor)', /destroyOnClose/.test(list));
-check('drawer header shows "Vendor: <name>"', /Vendor: \$\{viewingSupplier/.test(list));
 
 console.log('\n=== data sources are shared + correct (functional) ===');
 const sup = db.prepare("INSERT INTO suppliers (title, first_name, mobile_number, display_name, entered_by) VALUES ('','V','','ZZ Unified Vendor','test')").run();
@@ -82,9 +77,9 @@ const activity = PurchaseOrders.getVendorActivity(vendorId);
 check('Vendor Activity has the shared 5 collections', activity && ['purchaseOrders', 'receipts', 'bills', 'payments', 'credits'].every((k) => Array.isArray(activity[k])));
 check('Vendor Activity includes the new PO', activity.purchaseOrders.some((p) => Number(p.id) === poId));
 
-// Both shells pass the SAME vendorId to the SAME component which calls the SAME
-// services → identical values by construction. Assert the shells pass the id.
-check('both shells pass vendorId (not a name) to the shared content', /vendorId=\{id\}/.test(page) && /vendorId=\{viewingSupplier\.id\}/.test(list));
+// The page passes the stable id to the shared component, which calls the SAME
+// services → identical values by construction.
+check('the page passes vendorId (not a name) to the shared content', /vendorId=\{id\}/.test(page));
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

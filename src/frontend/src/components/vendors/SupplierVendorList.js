@@ -8,8 +8,6 @@ import { formatPhone, phoneInputHandler } from '../../utils/phone';
 import COUNTRIES from '../../utils/countries';
 import FormSection, { FORM_ITEM_STYLE } from '../shared/FormSection';
 import ContactIdentityNote from '../shared/ContactIdentityNote';
-import VendorDetailsContent from './VendorDetailsContent';
-import { getWideDrawerWidth } from '../../utils/drawerWidth';
 import TaxSettingsSection from '../shared/TaxSettingsSection';
 import ListToolbar from '../shared/ListToolbar';
 import { toCsv, downloadCsv, csvDate } from '../../utils/csv';
@@ -34,9 +32,7 @@ const SupplierVendorList = () => {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState(null);
-  const [viewingSupplier, setViewingSupplier] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [form] = Form.useForm();
@@ -123,10 +119,10 @@ const SupplierVendorList = () => {
   };
 
   const openDetail = (record) => {
-    // The SHARED VendorDetailsContent loads everything by vendorId, so the
-    // drawer only needs the stable id. No duplicated vendor/bill fetching.
-    setViewingSupplier(record);
-    setDetailDrawerOpen(true);
+    // Open the SAME Vendor Details page Customers use (a route), which renders
+    // the shared VendorDetailsContent — one component, one experience. This
+    // matches /main/customers/details/:id for customers.
+    history.push(`/main/vendors/details/${record.id}`);
   };
 
   const handleSave = async () => {
@@ -513,25 +509,6 @@ const SupplierVendorList = () => {
           </FormSection>
         </Form>
       </Drawer>}
-
-      {/* Detail Drawer — SHARED VendorDetailsContent (identical to PO -> View Vendor) */}
-      <Drawer
-        title={viewingSupplier ? `Vendor: ${viewingSupplier.display_name || `${viewingSupplier.first_name || ''} ${viewingSupplier.last_name || ''}`.trim() || 'Supplier'}` : 'Vendor'}
-        closable
-        width={getWideDrawerWidth()}
-        visible={detailDrawerOpen}
-        onClose={() => setDetailDrawerOpen(false)}
-        destroyOnClose
-        className="gx-profile-drawer"
-      >
-        {viewingSupplier && (
-          <VendorDetailsContent
-            vendorId={viewingSupplier.id}
-            mode="drawer"
-            onNavigate={(path) => { setDetailDrawerOpen(false); history.push(path); }}
-          />
-        )}
-      </Drawer>
     </div>
   );
 };
