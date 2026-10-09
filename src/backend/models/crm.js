@@ -5,6 +5,7 @@ const { QUOTE_STATUS } = require('../services/documentStatus');
 // every other customer-writing path. Without this the conversion had its own
 // private rule and could fabricate a name.
 const ContactIdentity = require('../services/contactIdentity');
+const { customerNameSql } = require('../services/contactIdentity');
 
 const STAGES = ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
 
@@ -15,12 +16,8 @@ const STAGES = ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won
 // its customer without looking like it was converted.
 const LEAD_SELECT = `
   SELECT l.*,
-         c.first_name||' '||COALESCE(c.last_name,'') AS customer_name,
-         COALESCE(
-           NULLIF(TRIM(COALESCE(lc.display_name, '')), ''),
-           NULLIF(TRIM(lc.first_name||' '||COALESCE(lc.last_name, '')), ''),
-           lc.company_name
-         ) AS linked_customer_name,
+         ${customerNameSql('c')}  AS customer_name,
+         ${customerNameSql('lc')} AS linked_customer_name,
          lc.email        AS linked_customer_email,
          lc.company_name AS linked_customer_company
   FROM crm_leads l
@@ -393,7 +390,7 @@ const CRM = {
     return db.prepare(`
       SELECT q.id, q.number, q.status, q.start_date, q.last_date, q.customer_email,
              COALESCE(SUM(ql.amount), 0) AS amount, q.vat,
-             c.first_name||' '||c.last_name AS customer_name
+             ${customerNameSql('c')} AS customer_name, q.lead_id
       FROM quotes q
       LEFT JOIN quote_lines ql ON ql.quote_id = q.id
       LEFT JOIN customers c ON q.customer = c.id
@@ -414,50 +411,48 @@ const CRM = {
     return { success: true };
   },
 
-  createQuoteForLead: (leadId, quoteData, quoteLines) => {
+  // Create a quote for a lead, reusing the lead's EXISTING customer link.
+  //
+  // ROOT-CAUSE FIX: this used to read ONLY `converted_customer_id` and, when
+  // that was empty, AUTO-CREATE a brand-new customer. A lead that was linked to
+  // an existing customer (`customer_id`) therefore produced a SECOND, duplicate
+  // customer for the quote (Customer A → Lead, Customer B → Quote). It now
+  // resolves the customer from converted_customer_id → customer_id (→ an
+  // explicit override) and NEVER fabricates a customer. A lead with no customer
+  // link is rejected with `requiresCustomer` so the UI can ask for one.
+  createQuoteForLead: (leadId, quoteData = {}, quoteLines) => {
     const lead = db.prepare(`SELECT * FROM crm_leads WHERE id = ?`).get(leadId);
     if (!lead) return { success: false, error: 'Lead not found' };
 
-    const run = db.transaction(() => {
-      let customerId = lead.converted_customer_id;
+    // A caller may pass an explicit customer_id (the legacy-lead "select a
+    // customer" prompt). That wins, then the converted link, then the link.
+    const requestedId = quoteData.customer_id != null && quoteData.customer_id !== ''
+      ? Number(quoteData.customer_id) : null;
+    const linkId = requestedId || lead.converted_customer_id || lead.customer_id || null;
 
-      // Auto-convert to customer if not yet done. This is a SECOND path that
-      // writes into `customers`, so it obeys the same rule as convertToCustomer
-      // — see the note there. It used to split the lead's single `name` into
-      // first/last and fall back to 'Unknown', which turned a company-only lead
-      // into a person called "Amazon".
+    const run = db.transaction(() => {
+      let customerId = null;
+      if (linkId) {
+        const cust = db.prepare('SELECT id FROM customers WHERE id = ?').get(Number(linkId));
+        if (cust) customerId = cust.id;
+      }
       if (!customerId) {
-        const companyName = lead.company || '';
-        let firstName = lead.first_name || '';
-        let lastName  = lead.last_name != null ? lead.last_name : '';
-        if (!firstName && !companyName) {
-          const nameParts = String(lead.name || '').trim().split(/\s+/).filter(Boolean);
-          firstName = nameParts[0] || '';
-          lastName  = lastName || nameParts.slice(1).join(' ');
-        }
-        ContactIdentity.assertIdentified({ first_name: firstName, company_name: companyName });
-        const displayName = ContactIdentity.deriveDisplayName({
-          display_name: lead.display_name,
-          first_name: firstName,
-          last_name: lastName,
-          company_name: companyName,
-        });
-        const r = db.prepare(`
-          INSERT INTO customers (title,first_name,last_name,display_name,email,phone_number,mobile_number,company_name,address1)
-          VALUES (?,?,?,?,?,?,?,?,?)
-        `).run('', firstName, lastName, displayName, lead.email||'', lead.phone||'', lead.phone||'', companyName, lead.address||'');
-        customerId = r.lastInsertRowid;
-        db.prepare(`UPDATE crm_leads SET converted_customer_id=?, converted_at=datetime('now'), pipeline_stage='proposal', updatedAt=datetime('now') WHERE id=?`).run(customerId, leadId);
+        throw Object.assign(new Error('NO_CUSTOMER'), { code: 'NO_CUSTOMER' });
       }
 
-      // Create the quote.
-      // Status is intentionally NOT taken from the caller: a quote created from
-      // a lead starts in the active workflow state (Pending), exactly like one
-      // created from the standard Create Quote screen. It only moves on through
-      // acceptQuote / declineQuote / convertQuoteToInvoice.
+      // A newly-supplied customer (legacy lead) is saved back onto the lead so
+      // the relationship is stable for every later action.
+      if (requestedId && Number(requestedId) === customerId && !lead.customer_id) {
+        db.prepare(`UPDATE crm_leads SET customer_id=?, updatedAt=datetime('now') WHERE id=?`).run(customerId, leadId);
+      }
+
+      // Create the quote. Status is intentionally NOT taken from the caller:
+      // a quote created from a lead starts in the active workflow state
+      // (Pending), exactly like the standard Create Quote screen. It only moves
+      // on through acceptQuote / declineQuote / convertQuoteToInvoice.
       const qResult = db.prepare(`
-        INSERT INTO quotes (status,customer,customer_email,islater,billing_address,start_date,last_date,message,statement_message,number,entered_by,vat)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO quotes (status,customer,customer_email,islater,billing_address,start_date,last_date,message,statement_message,number,entered_by,vat,lead_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         QUOTE_STATUS.PENDING,
         customerId,
@@ -470,7 +465,8 @@ const CRM = {
         quoteData.statement_message || '',
         '',
         quoteData.entered_by || 'CRM',
-        Number(quoteData.vat || 0)
+        Number(quoteData.vat || 0),
+        Number(leadId)
       );
       const quoteId = qResult.lastInsertRowid;
 
@@ -486,7 +482,7 @@ const CRM = {
       const formattedNumber = `QUO-${String(quoteId).padStart(5,'0')}`;
       db.prepare(`UPDATE quotes SET number=? WHERE id=?`).run(formattedNumber, quoteId);
 
-      // Link quote to lead
+      // Link quote to lead (JSON list, kept for backwards compatibility).
       let ids = [];
       try { ids = JSON.parse(lead.quote_ids || '[]'); } catch { ids = []; }
       ids.push(quoteId);
@@ -496,11 +492,62 @@ const CRM = {
       db.prepare(`INSERT INTO crm_activities (leadId,type,subject,details,status,createdAt) VALUES (?,?,?,?,?,datetime('now'))`)
         .run(leadId, 'note', `Quote ${formattedNumber} created`, `Quote created for customer #${customerId} — Amount: R${lines.reduce((s,l)=>s+(l.amount||0),0).toFixed(2)}`, 'done');
 
-      return { success: true, quoteId: Number(quoteId), quoteNumber: formattedNumber, customerId, status: QUOTE_STATUS.PENDING };
+      return { success: true, quoteId: Number(quoteId), quoteNumber: formattedNumber, customerId, leadId: Number(leadId), status: QUOTE_STATUS.PENDING };
     });
 
     try { return run(); }
-    catch (e) { return { success: false, error: e.message }; }
+    catch (e) {
+      if (e && e.code === 'NO_CUSTOMER') {
+        return {
+          success: false,
+          requiresCustomer: true,
+          error: 'This Lead is not linked to a Customer. Select or create a Customer before creating the Quote.',
+        };
+      }
+      return { success: false, error: e.message };
+    }
+  },
+
+  /**
+   * AUDIT ONLY (no mutation): find likely-duplicate customers created by the
+   * old quote-from-lead bug — same normalised name/company/email split across
+   * records where one holds leads and another holds quotes. Never merges.
+   */
+  auditDuplicateCustomers: () => {
+    const keyOf = (r) => {
+      const name = String(r.name || '').trim().toLowerCase();
+      const company = String(r.company || '').trim().toLowerCase();
+      const email = String(r.email || '').trim().toLowerCase();
+      return `${name}|${company}|${email}`;
+    };
+    const rows = db.prepare(`
+      SELECT c.id,
+             ${customerNameSql('c')} AS name,
+             c.company_name AS company,
+             c.email,
+             (SELECT COUNT(*) FROM crm_leads l WHERE l.customer_id = c.id OR l.converted_customer_id = c.id) AS lead_count,
+             (SELECT COUNT(*) FROM quotes q WHERE q.customer = c.id) AS quote_count
+      FROM customers c
+    `).all();
+
+    const groups = new Map();
+    for (const r of rows) {
+      const k = keyOf(r);
+      if (!k.replace(/\|/g, '')) continue; // nothing to key on
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+    const candidates = [];
+    for (const [, list] of groups) {
+      if (list.length < 2) continue;
+      // Only interesting when the duplicate set straddles leads and quotes.
+      const totalLeads = list.reduce((s, r) => s + r.lead_count, 0);
+      const totalQuotes = list.reduce((s, r) => s + r.quote_count, 0);
+      if (totalLeads > 0 && totalQuotes > 0) {
+        candidates.push({ name: list[0].name || list[0].company || `Customer #${list[0].id}`, customers: list.map(r => ({ id: r.id, name: r.name, company: r.company, email: r.email, leads: r.lead_count, quotes: r.quote_count })) });
+      }
+    }
+    return candidates;
   },
 
   getLeadWithRelated: (leadId) => {

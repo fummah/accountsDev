@@ -4,12 +4,13 @@ import {
   Card, Table, Button, Space, Modal, Form, Input, Select, message,
   Drawer, Tabs, Tag, Badge, Progress, Row, Col, Statistic, Popconfirm,
   Timeline, Divider, Empty, Alert, InputNumber, DatePicker, Tooltip,
-  Radio, Spin,
+  Spin,
 } from 'antd';
 import { useCurrency } from '../../utils/currency';
+import { getCustomerName } from '../../utils/contactIdentity';
 import { ensureTrailingEmptyLine } from '../../utils/lineItems';
 import { Z } from '../../utils/layers';
-import CustomerContactFields, { CONTACT_FIELD_NAMES } from './shared/CustomerContactFields';
+import CustomerContactFields from './shared/CustomerContactFields';
 import SendEmailModal from './shared/SendEmailModal';
 import FormSection, { FORM_ITEM_STYLE, MODAL_BODY_SCROLL_STYLE, MODAL_WIDTH } from '../shared/FormSection';
 import { QuoteStatusBadge, normalizeStatus } from '../StatusBadge';
@@ -53,10 +54,6 @@ const PIE_COLORS = ['#1890ff','#52c41a','#fa8c16','#f5222d','#722ed1','#eb2f96',
 const stageMap = Object.fromEntries(STAGES.map(s => [s.key, s]));
 const prioMap  = Object.fromEntries(PRIORITIES.map(p => [p.key, p]));
 
-// How a lead's contact identity is established.
-const MODE_EXISTING = 'existing';   // pick an existing Customer (linked by id)
-const MODE_SCRATCH  = 'scratch';    // capture contact details from scratch
-
 /** Compose the legacy free-text `address` column from the structured parts. */
 const composeAddress = (c = {}) => {
   if (!c) return '';
@@ -98,6 +95,11 @@ const Leads = () => {
   const [filters, setFilters]                 = useState({});
   const [pipelineStats, setPipelineStats]     = useState(null);
   const [reports, setReports]                 = useState(null);
+  // Duplicate-customer AUDIT (read-only) — surfaces likely duplicates the old
+  // quote-from-lead bug created. Never merges automatically.
+  const [auditOpen, setAuditOpen]             = useState(false);
+  const [auditRows, setAuditRows]             = useState(null);
+  const [auditLoading, setAuditLoading]       = useState(false);
   const [overdueActs, setOverdueActs]         = useState([]);
   const [upcomingActs, setUpcomingActs]       = useState([]);
 
@@ -140,16 +142,14 @@ const Leads = () => {
 
   const history = useHistory();
 
-  // ── New/Edit Lead: creation mode + existing-customer picker ──────────────────
-  // mode determines whether the lead is linked to an existing Customer by id,
-  // or whether its contact details are captured from scratch.
-  const [createMode, setCreateMode]           = useState(MODE_EXISTING);
+  // ── New/Edit Lead: the ONE Customer link (by id) + searchable picker ─────────
   const [customerOptions, setCustomerOptions] = useState([]);
   const [customerSearching, setCustomerSearching] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
   const [selectedCustomer, setSelectedCustomer]   = useState(null);
-  const [duplicateWarning, setDuplicateWarning]   = useState(null);
   const customerSearchTimer = useRef(null);
+  const savingLeadRef = useRef(false);   // prevents double-click duplicate saves
+  const creatingQuoteRef = useRef(false); // prevents double-click duplicate quotes
   // The customer picker is a CONTROLLED dropdown so New Lead can auto-open it
   // once. `autoOpenedCustomerRef` guarantees the auto-open is one-time per
   // modal session — closing it never reopens it.
@@ -183,7 +183,7 @@ const Leads = () => {
     });
   }, []);
 
-  // ONE-TIME auto-open: New Lead + Existing Customer + no customer chosen.
+  // ONE-TIME auto-open: New Lead with no customer chosen yet.
   // Runs after the modal content mounts (leadModalOpen flips → effect runs), and
   // never again for the same session — closing the dropdown keeps it closed.
   useEffect(() => {
@@ -194,11 +194,10 @@ const Leads = () => {
       return;
     }
     if (autoOpenedCustomerRef.current) return;
-    if (createMode !== MODE_EXISTING) return;
     if (selectedCustomerId) return;
     autoOpenedCustomerRef.current = true;
     focusAndOpenCustomer();
-  }, [leadModalOpen, createMode, selectedCustomerId, focusAndOpenCustomer]);
+  }, [leadModalOpen, selectedCustomerId, focusAndOpenCustomer]);
 
   // ── Data ─────────────────────────────────────────────────────────────────────
   const fetchLeads = useCallback(async () => {
@@ -283,27 +282,34 @@ const Leads = () => {
 
   const refresh = () => { fetchLeads(); fetchMeta(); };
 
+  // Read-only duplicate-customer audit (Customer A → Lead, Customer B → Quote).
+  const openDuplicateAudit = async () => {
+    setAuditOpen(true); setAuditLoading(true); setAuditRows(null);
+    try {
+      const rows = await window.electronAPI.crmAuditDuplicateCustomers?.();
+      setAuditRows(Array.isArray(rows) ? rows : []);
+    } catch (_) { setAuditRows([]); }
+    finally { setAuditLoading(false); }
+  };
+
   // ── Lead CRUD ────────────────────────────────────────────────────────────────
-  const resetLeadModeState = (mode = MODE_EXISTING) => {
-    setCreateMode(mode);
+  const resetLeadState = () => {
     setSelectedCustomerId(null);
     setSelectedCustomer(null);
-    setDuplicateWarning(null);
     setCustomerOptions([]);
   };
 
   const openNewLead = () => {
     setEditingLead(null);
     leadForm.resetFields();
-    resetLeadModeState(MODE_EXISTING);
+    resetLeadState();
     searchCustomers('');           // seed the picker with the first page
     setLeadModalOpen(true);
   };
 
   const openEditLead = (lead) => {
     setEditingLead(lead);
-    const linkedId = lead.customer_id || null;
-    setCreateMode(linkedId ? MODE_EXISTING : MODE_SCRATCH);
+    const linkedId = lead.customer_id || lead.converted_customer_id || null;
     setSelectedCustomerId(linkedId);
     setSelectedCustomer(linkedId ? {
       id: linkedId,
@@ -311,63 +317,14 @@ const Leads = () => {
       email: lead.linked_customer_email || '',
       company_name: lead.linked_customer_company || '',
     } : null);
-    setDuplicateWarning(null);
     leadForm.setFieldsValue({
       ...lead,
-      customer_id: linkedId,
+      customer_id: linkedId || undefined,
       tags: lead.tags ? (typeof lead.tags === 'string' ? (() => { try { return JSON.parse(lead.tags); } catch { return []; } })() : lead.tags) : [],
       expected_close_date: lead.expected_close_date ? moment(lead.expected_close_date) : null,
     });
-    if (linkedId) searchCustomers('');
+    searchCustomers('');
     setLeadModalOpen(true);
-  };
-
-  /**
-   * Switch between "Existing Customer" and "New / From Scratch".
-   * Mode-specific values are cleared so a stale link or a stale contact block
-   * can never leak into the saved record. If the form already holds meaningful
-   * data we ask before clearing it.
-   */
-  const handleModeChange = (nextMode) => {
-    if (nextMode === createMode) return;
-    const apply = () => {
-      if (nextMode === MODE_EXISTING) {
-        // Leaving scratch: drop the scratch contact block, keep lead-only fields.
-        const cleared = { customer_id: undefined };
-        CONTACT_FIELD_NAMES.forEach(f => { cleared[f] = undefined; });
-        leadForm.setFieldsValue(cleared);
-        setDuplicateWarning(null);
-        searchCustomers('');
-        // The next required action is choosing a customer — allow ONE auto-open.
-        autoOpenedCustomerRef.current = false;
-      } else {
-        // Leaving "existing": drop the link so we never half-link a scratch lead.
-        setSelectedCustomerId(null);
-        setSelectedCustomer(null);
-        leadForm.setFieldsValue({ customer_id: undefined });
-      }
-      setCreateMode(nextMode);
-    };
-
-    const hasData = CONTACT_FIELD_NAMES.some(f => {
-      const v = leadForm.getFieldValue(f);
-      return v !== undefined && v !== null && String(v).trim() !== '';
-    });
-    const hasLink = createMode === MODE_EXISTING && !!selectedCustomerId;
-
-    if (hasData || hasLink) {
-      Modal.confirm({
-        title: 'Switch creation mode?',
-        content: 'The details captured for the current mode will be cleared.',
-        okText: 'Switch',
-        cancelText: 'Keep editing',
-        // The New Lead dialog is Z.MODAL (1050); the confirm must clear it.
-        zIndex: Z.CONFIRM,
-        onOk: apply,
-      });
-    } else {
-      apply();
-    }
   };
 
   /** Pick an existing customer → link by id and prefill the lead's contact copy. */
@@ -402,34 +359,9 @@ const Leads = () => {
     : `Customer #${selectedCustomerId}`;
 
   /**
-   * Duplicate guard for "from scratch": if a customer already exists with the
-   * same email, surface it rather than silently creating a parallel record.
-   */
-  const checkDuplicateCustomer = useCallback(async (email) => {
-    const term = String(email || '').trim();
-    if (!term) { setDuplicateWarning(null); return; }
-    try {
-      const res = await window.electronAPI.getCustomersPaginated?.(1, 5, term, '');
-      const rows = Array.isArray(res?.data) ? res.data : [];
-      const exact = rows.find(r => String(r.email || '').toLowerCase() === term.toLowerCase());
-      setDuplicateWarning(exact ? { id: exact.id, name: exact.display_name || `${exact.first_name || ''} ${exact.last_name || ''}`.trim() || exact.company_name } : null);
-    } catch (_) { setDuplicateWarning(null); }
-  }, []);
-
-  /** Duplicate found → adopt the existing customer as the lead's link. */
-  const linkDuplicateCustomer = async (id) => {
-    setCreateMode(MODE_EXISTING);
-    setDuplicateWarning(null);
-    searchCustomers('');
-    leadForm.setFieldsValue({ customer_id: id });
-    await handleSelectCustomer(id);
-  };
-
-  /**
-   * "+ Add New Customer" from the customer dropdown — same shared contact block
-   * and payload as the Invoice/Quote "Add New Customer" modal. On success the
-   * new customer is linked to the lead (found via the SAME server-side search,
-   * so we never load the whole customer table).
+   * "+ Add New Customer" from the customer dropdown — the SAME shared contact
+   * block + `insertCustomer` payload the Customers → New Customer flow uses. On
+   * success the new customer is created ONCE and linked to the lead.
    */
   const handleAddCustomer = async () => {
     try {
@@ -448,35 +380,48 @@ const Leads = () => {
       message.success('Customer added');
       setCustModalOpen(false);
       custForm.resetFields();
-      const term = vals.email || vals.display_name || vals.company_name
-        || `${vals.first_name || ''} ${vals.last_name || ''}`.trim();
-      const found = await window.electronAPI.getCustomersPaginated?.(1, 25, term || '', '');
-      const rows = Array.isArray(found?.data) ? found.data : [];
-      const email = String(vals.email || '').toLowerCase();
-      const exact = rows.find(r => email && String(r.email || '').toLowerCase() === email) || rows[0];
-      if (exact) {
-        setCreateMode(MODE_EXISTING);
-        leadForm.setFieldsValue({ customer_id: exact.id });
-        await handleSelectCustomer(exact.id);
+      // Refresh the dropdown and auto-select the customer we JUST created
+      // (matched by the freshly returned id when present, else by email).
+      const createdId = res?.id || res?.customerId || res?.lastInsertRowid || null;
+      await searchCustomers('');
+      if (createdId) {
+        leadForm.setFieldsValue({ customer_id: createdId });
+        await handleSelectCustomer(createdId);
+      } else {
+        const term = vals.email || vals.display_name || vals.company_name
+          || `${vals.first_name || ''} ${vals.last_name || ''}`.trim();
+        const found = await window.electronAPI.getCustomersPaginated?.(1, 25, term || '', '');
+        const rows = Array.isArray(found?.data) ? found.data : [];
+        const email = String(vals.email || '').toLowerCase();
+        const exact = rows.find(r => email && String(r.email || '').toLowerCase() === email) || rows[0];
+        if (exact) {
+          leadForm.setFieldsValue({ customer_id: exact.id });
+          await handleSelectCustomer(exact.id);
+        }
       }
     } catch (e) { if (!e?.errorFields) message.error(e?.message || 'Failed to add customer'); }
   };
 
   const handleSaveLead = async () => {
+    if (savingLeadRef.current) return;           // double-click / double-submit guard
     try {
       const v = await leadForm.validateFields();
+      const customerId = selectedCustomerId || v.customer_id || null;
+      if (!customerId) { message.error('Select a Customer.'); return; }
+      savingLeadRef.current = true;
       const payload = {
         ...v,
         tags: v.tags || [],
         expected_close_date: v.expected_close_date ? v.expected_close_date.format('YYYY-MM-DD') : null,
-        // Explicitly send customer_id (including null) so a mode switch
-        // reliably links or unlinks the lead.
-        customer_id: createMode === MODE_EXISTING ? (selectedCustomerId || null) : null,
+        // Stable link by ID — never by name. The lead and any later quote share
+        // this same customerId (Customer → Lead → Quote).
+        customer_id: customerId,
       };
       if (editingLead) { await window.electronAPI.crmUpdateLead({ ...editingLead, ...payload }); message.success('Lead updated'); }
       else             { await window.electronAPI.crmCreateLead(payload); message.success('Lead created'); }
       setLeadModalOpen(false); refresh();
     } catch (e) { if (!e?.errorFields) message.error(e?.message || 'Save failed'); }
+    finally { savingLeadRef.current = false; }
   };
   const handleDeleteLead = async (id) => {
     const res = await window.electronAPI.crmDeleteLead(id);
@@ -532,14 +477,26 @@ const Leads = () => {
 
   // ── Quote flow ─────────────────────────────────────────────────────────────
   const openQuoteModal = async (lead) => {
+    // Customer → Lead → Quote: the quote ALWAYS reuses the lead's linked
+    // customerId. A legacy lead with no link must NOT auto-create a customer by
+    // name — ask the user to pick one (in the Edit form's Customer selector).
+    const linkedId = lead.customer_id || lead.converted_customer_id || null;
+    if (!linkedId) {
+      message.warning('This Lead is not linked to a Customer. Select or create a Customer before creating the Quote.');
+      openEditLead(lead);
+      return;
+    }
+    // Prefill from the SAME linked customer (contact snapshot), never a new one.
+    let cust = null;
+    try { cust = await window.electronAPI.getSingleCustomer?.(linkedId); } catch (_) { /* ignore */ }
     setQuoteLeadId(lead.id);
     setQuoteLines([{ description:'', quantity:1, rate:0, amount:0 }]);
     quoteForm.resetFields();
     quoteForm.setFieldsValue({
       // No status field: a lead quote is always created Pending, exactly like
       // the standard Create Quote screen. Status only moves via workflow actions.
-      q_email: lead.email || '',
-      q_billing: lead.address || '',
+      q_email: cust?.email || lead.email || '',
+      q_billing: composeAddress(cust) || lead.address || '',
       q_start: moment(),
       q_end: moment().add(30,'days'),
       q_vat: 0,
@@ -618,20 +575,30 @@ const Leads = () => {
   };
 
   const handleCreateQuote = async () => {
+    if (creatingQuoteRef.current) return;        // double-click guard
     try {
+      creatingQuoteRef.current = true;
       const res = await submitLeadQuote();
       if (!res) return;
       if (res.success) {
         message.success(`Quote ${res.quoteNumber} created successfully!`);
         await afterLeadQuoteCreated(res);
+      } else if (res.requiresCustomer) {
+        // Legacy lead with no customer link — ask for one, never auto-create.
+        message.warning(res.error);
+        setQuoteModalOpen(false);
+        if (drawerLead) openEditLead(drawerLead);
       } else { message.error(res?.error || 'Quote creation failed'); }
     } catch (e) { if (!e?.errorFields) message.error('Failed to create quote'); }
+    finally { creatingQuoteRef.current = false; }
   };
 
   // Create the quote, then hand straight over to the shared email modal so the
   // PDF can be sent without leaving the lead — same flow as Create Quote.
   const handleCreateQuoteAndEmail = async () => {
+    if (creatingQuoteRef.current) return;        // double-click guard
     try {
+      creatingQuoteRef.current = true;
       const res = await submitLeadQuote();
       if (!res) return;
       if (!res.success) { message.error(res?.error || 'Quote creation failed'); return; }
@@ -647,6 +614,7 @@ const Leads = () => {
       });
       setEmailModalOpen(true);
     } catch (e) { if (!e?.errorFields) message.error('Failed to create quote'); }
+    finally { creatingQuoteRef.current = false; }
   };
 
   // ── Conversion ───────────────────────────────────────────────────────────────
@@ -758,6 +726,9 @@ const Leads = () => {
         tabBarStyle={{ overflowX: 'auto', flexWrap: 'nowrap' }}
         tabBarExtraContent={
           <Space>
+            <Tooltip title="Audit likely-duplicate customers (leads vs quotes)">
+              <Button icon={<WarningOutlined />} size="small" onClick={openDuplicateAudit}>Duplicate Customers</Button>
+            </Tooltip>
             <Button icon={<ReloadOutlined />} size="small" onClick={refresh} />
             <Button type="primary" icon={<PlusOutlined />} onClick={openNewLead}>New Lead</Button>
           </Space>
@@ -1141,94 +1112,65 @@ const Leads = () => {
         width={920} okText="Save" style={{ top: 24 }}
         bodyStyle={{ maxHeight: 'calc(100vh - 190px)', overflowY: 'auto', paddingRight: 12 }}>
         <Form form={leadForm} layout="vertical">
-          {/* ── Section 1: Source ─────────────────────────────────────────── */}
-          <FormSection title="Source" icon={<LinkOutlined />}>
-            {/* Both creation modes on one line (wraps only on very small screens). */}
-            <Radio.Group
-              value={createMode}
-              onChange={(e) => handleModeChange(e.target.value)}
-              style={{ display: 'flex', flexWrap: 'wrap', columnGap: 24, rowGap: 8 }}
-            >
-              <Radio value={MODE_EXISTING}><span><LinkOutlined /> Existing Customer</span></Radio>
-              <Radio value={MODE_SCRATCH}><span><UserAddOutlined /> New / From Scratch</span></Radio>
-            </Radio.Group>
-
-            {createMode === MODE_EXISTING ? (
-              <div style={{ marginTop: 12 }}>
-                <Form.Item name="customer_id" label="Customer" style={FORM_ITEM_STYLE}
-                  rules={[{ required: true, message: 'Select a customer' }]}
-                  extra={<span style={{ fontSize: 11 }}>Linked by Customer ID. Contact details copied to the Lead do not alter the Customer record.</span>}>
-                  <Select
-                    ref={customerSelectRef}
-                    open={customerDropdownOpen}
-                    onDropdownVisibleChange={(open) => setCustomerDropdownOpen(open)}
-                    showSearch allowClear
-                    placeholder="Search by name, display name, company, email, phone or customer #"
-                    filterOption={false}
-                    onSearch={searchCustomers}
-                    onChange={handleSelectCustomer}
-                    suffixIcon={<SearchOutlined />}
-                    notFoundContent={customerSearching ? <Spin size="small" /> : 'No customers found'}
-                    dropdownRender={(menu) => (
-                      <>
-                        {menu}
-                        <Divider style={{ margin: '4px 0' }} />
-                        <Button type="link" icon={<PlusOutlined />}
-                          onMouseDown={e => e.preventDefault()}
-                          onClick={() => setCustModalOpen(true)}
-                          style={{ width: '100%', textAlign: 'left' }}>
-                          Add New Customer
-                        </Button>
-                      </>
-                    )}>
-                    {customerOptions.map(c => (
-                      <Option key={c.id} value={c.id}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                          <span>
-                            {c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company_name || `Customer #${c.id}`}
-                          </span>
-                          <span style={{ color: '#8c8c8c', fontSize: 11 }}>
-                            {c.company_name ? `${c.company_name} · ` : ''}{c.email || ''} · #{c.id}
-                          </span>
-                        </div>
-                      </Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-                {selectedCustomerId && (
-                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <Tag color="blue" style={{ margin: 0 }}>
-                      <LinkOutlined /> Linked to {selectedCustomerName}
-                    </Tag>
-                    <Button size="small" icon={<UserOutlined />} onClick={() => goToCustomer(selectedCustomerId)}>
-                      View Customer
+          {/* ── Section 1: Customer (the ONE relationship, linked by ID) ───── */}
+          <FormSection title="Customer" icon={<LinkOutlined />}>
+            <Form.Item name="customer_id" label="Customer" style={FORM_ITEM_STYLE}
+              rules={[{ required: true, message: 'Select a Customer.' }]}
+              extra={<span style={{ fontSize: 11 }}>Linked by Customer ID — this Lead and any Quote you create share the SAME customer. Contact details copied here do not alter the Customer record.</span>}>
+              <Select
+                ref={customerSelectRef}
+                open={customerDropdownOpen}
+                onDropdownVisibleChange={(open) => setCustomerDropdownOpen(open)}
+                showSearch allowClear
+                placeholder="Search by name, display name, company, email, phone or customer #"
+                filterOption={false}
+                onSearch={searchCustomers}
+                onChange={handleSelectCustomer}
+                suffixIcon={<SearchOutlined />}
+                notFoundContent={customerSearching ? <Spin size="small" /> : 'No customers found'}
+                dropdownRender={(menu) => (
+                  <>
+                    {menu}
+                    <Divider style={{ margin: '4px 0' }} />
+                    <Button type="link" icon={<PlusOutlined />}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => setCustModalOpen(true)}
+                      style={{ width: '100%', textAlign: 'left' }}>
+                      Add New Customer
                     </Button>
-                  </div>
-                )}
+                  </>
+                )}>
+                {customerOptions.map(c => (
+                  <Option key={c.id} value={c.id}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span>{getCustomerName(c) || `Customer #${c.id}`}</span>
+                      <span style={{ color: '#8c8c8c', fontSize: 11 }}>
+                        {c.email ? `${c.email} · ` : ''}#{c.id}
+                      </span>
+                    </div>
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+            {selectedCustomerId && (
+              <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Tag color="blue" style={{ margin: 0 }}>
+                  <LinkOutlined /> Linked to {selectedCustomerName}
+                </Tag>
+                <Button size="small" icon={<UserOutlined />} onClick={() => goToCustomer(selectedCustomerId)}>
+                  View Customer
+                </Button>
               </div>
-            ) : null}
+            )}
           </FormSection>
 
-          {/* ── Sections 2 & 3: Customer / Contact Information + Address ──── */}
-          {/* The shared contact block renders the two boxes (same fields, same
-              validation) used by Invoice / Quote / Customer / Vendor. */}
-          {createMode === MODE_SCRATCH && duplicateWarning && (
-            <Alert type="warning" showIcon style={{ marginBottom: 12 }}
-              message="A customer with this email already exists"
-              description={
-                <span>
-                  <strong>{duplicateWarning.name}</strong> (Customer #{duplicateWarning.id}) —{' '}
-                  <Button type="link" size="small" style={{ padding: 0, height: 'auto' }}
-                    onClick={() => linkDuplicateCustomer(duplicateWarning.id)}>link to that customer instead</Button>
-                </span>
-              } />
-          )}
+          {/* ── Sections 2 & 3: Contact Information + Address (a snapshot kept on
+              the Lead; the master record stays with the linked Customer). ───── */}
           <CustomerContactFields
             form={leadForm}
             layout="lead"
             showNotes={false}
             extraFields={<Form.Item name="website" label="Website" style={FORM_ITEM_STYLE}><Input /></Form.Item>}
-            onEmailChange={createMode === MODE_SCRATCH ? checkDuplicateCustomer : undefined}
           />
 
           {/* ── Section 4: Lead Details ───────────────────────────────────── */}
@@ -1289,6 +1231,38 @@ const Leads = () => {
             </Row>
           </FormSection>
         </Form>
+      </Modal>
+
+      {/* ── Duplicate Customer Audit (read-only) ──────────────────────────── */}
+      <Modal title="Duplicate Customer Audit" visible={auditOpen} zIndex={Z.MODAL}
+        onCancel={() => setAuditOpen(false)} footer={[<Button key="close" onClick={() => setAuditOpen(false)}>Close</Button>]}
+        width={860} style={{ top: 24 }}>
+        <Alert type="info" showIcon style={{ marginBottom: 12 }}
+          message="Review only — nothing is merged automatically."
+          description="These customers share the same name/company/email and split leads vs quotes, which is the pattern the old quote-from-lead bug created (Customer A → Lead, Customer B → Quote). Merge them only through the existing Customer workflow after review." />
+        <Spin spinning={auditLoading}>
+          {auditRows == null ? null : auditRows.length === 0 ? (
+            <Empty description="No likely-duplicate customers found." image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <Table
+              dataSource={auditRows.map((g, i) => ({ key: i, ...g }))}
+              columns={[
+                { title: 'Name', dataIndex: 'name', key: 'name' },
+                { title: 'Customers', key: 'customers', render: (_, r) => (
+                  <div>
+                    {r.customers.map(c => (
+                      <div key={c.id} style={{ display: 'flex', gap: 12, alignItems: 'baseline' }}>
+                        <a onClick={() => goToCustomer(c.id)}>#{c.id} {c.name || c.company || ''}</a>
+                        <span style={{ color: '#8c8c8c', fontSize: 12 }}>Leads: {c.leads} · Quotes: {c.quotes}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) },
+              ]}
+              size="small" pagination={false}
+            />
+          )}
+        </Spin>
       </Modal>
 
       {/* ── Add New Customer (from the customer dropdown) ─────────────────── */}

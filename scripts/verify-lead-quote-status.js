@@ -69,16 +69,33 @@ const RND = String(Date.now()).slice(-6);
 const created = { leads: [], quotes: [], customers: [] };
 
 function makeLead(over = {}) {
+  // A Lead now links to an existing Customer BY ID (Customer → Lead → Quote).
+  // createQuoteForLead reuses that id and never fabricates a customer, so the
+  // fixture must supply one.
+  const cr = db.prepare(`
+    INSERT INTO customers (title, first_name, last_name, display_name, email, phone_number, mobile_number, company_name)
+    VALUES ('', ?, ?, ?, ?, '', '', ?)
+  `).run(
+    over.name ?? `${TAG} Lead`,
+    '',
+    over.name ?? `${TAG} Lead`,
+    over.email ?? `zz-leadquote-${RND}@example.invalid`,
+    over.company ?? `${TAG} Co`
+  );
+  const customerId = Number(cr.lastInsertRowid);
+  created.customers.push(customerId);
+
   const r = db.prepare(`
     INSERT INTO crm_leads
-      (name, company, email, phone, address, status, pipeline_stage, source, priority, createdAt)
-    VALUES (?, ?, ?, ?, ?, 'new', 'new', 'Other', 'medium', datetime('now'))
+      (name, company, email, phone, address, status, pipeline_stage, source, priority, customer_id, createdAt)
+    VALUES (?, ?, ?, ?, ?, 'new', 'new', 'Other', 'medium', ?, datetime('now'))
   `).run(
     over.name ?? `${TAG} Lead`,
     over.company ?? `${TAG} Co`,
     over.email ?? `zz-leadquote-${RND}@example.invalid`,
     over.phone ?? '(717) 555-0000',
-    over.address ?? '1 Test Street, Testville'
+    over.address ?? '1 Test Street, Testville',
+    customerId
   );
   const id = Number(r.lastInsertRowid);
   created.leads.push(id);
@@ -176,6 +193,19 @@ function run() {
     } else {
       ok(`createQuoteForLead with status "${legacy}" succeeded`, false, JSON.stringify(r2));
     }
+  }
+
+  // ── (4b) legacy lead WITHOUT a customer → requiresCustomer (no auto-create) ─
+  {
+    const rNo = db.prepare(`
+      INSERT INTO crm_leads (name, company, pipeline_stage, source, createdAt)
+      VALUES (?, ?, 'new', 'Other', datetime('now'))
+    `).run(`${TAG} NoCustomer`, `${TAG} NoCustomer`).lastInsertRowid;
+    created.leads.push(Number(rNo));
+    const cBefore = db.prepare('SELECT COUNT(*) AS c FROM customers').get().c;
+    const r = CRM.createQuoteForLead(Number(rNo), {}, [{ description: 'x', quantity: 1, rate: 1, amount: 1 }]);
+    ok('lead without customer → requiresCustomer', r && r.success === false && r.requiresCustomer === true, JSON.stringify(r));
+    check('no customer auto-created for an unlinked lead', db.prepare('SELECT COUNT(*) AS c FROM customers').get().c, cBefore);
   }
 
   // ── (5) the model no longer reads quoteData.status at all ─────────────────

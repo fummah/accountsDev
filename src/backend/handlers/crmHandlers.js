@@ -101,6 +101,13 @@ function registerCrmHandlers() {
     catch (e) { return { error: e.message }; }
   });
 
+  // Audit-only: likely-duplicate customers from the old quote-from-lead bug
+  // (one customer holds the Lead, a same-named one holds the Quote). Never merges.
+  ipcMain.handle('crm-audit-duplicate-customers', async () => {
+    try { return CRM.auditDuplicateCustomers(); }
+    catch (e) { return { error: e.message }; }
+  });
+
   // ── Reports & Stats ────────────────────────────────────────────────────────
   ipcMain.handle('crm-pipeline-stats', async () => {
     try { return CRM.getPipelineStats(); }

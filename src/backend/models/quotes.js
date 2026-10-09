@@ -65,6 +65,9 @@ const Quotes = {
       if (!colNames.includes('sent_status')) db.prepare("ALTER TABLE quotes ADD COLUMN sent_status TEXT DEFAULT 'Not Sent'").run();
       // Lifecycle audit timestamps (best effort — old DBs get them added here).
       if (!colNames.includes('linked_invoice')) db.prepare("ALTER TABLE quotes ADD COLUMN linked_invoice INTEGER").run();
+      // Source-lead traceability: a quote created from a Lead stores lead_id so
+      // Customer → Lead → Quote is a stable ID relationship (not a note).
+      if (!colNames.includes('lead_id')) db.prepare("ALTER TABLE quotes ADD COLUMN lead_id INTEGER").run();
       if (!colNames.includes('accepted_at'))  db.prepare("ALTER TABLE quotes ADD COLUMN accepted_at TEXT").run();
       if (!colNames.includes('declined_at'))  db.prepare("ALTER TABLE quotes ADD COLUMN declined_at TEXT").run();
       if (!colNames.includes('converted_at')) db.prepare("ALTER TABLE quotes ADD COLUMN converted_at TEXT").run();

@@ -646,6 +646,7 @@ billCreditApplications: (expenseId) => ipcRenderer.invoke('bill-credit-applicati
   crmLinkQuote: (leadId, quoteId) => ipcRenderer.invoke('crm-link-quote', leadId, quoteId),
   crmCreateQuoteForLead: (leadId, quoteData, quoteLines) => ipcRenderer.invoke('crm-create-quote-for-lead', leadId, quoteData, quoteLines),
   crmGetLeadWithRelated: (leadId) => ipcRenderer.invoke('crm-get-lead-with-related', leadId),
+  crmAuditDuplicateCustomers: () => ipcRenderer.invoke('crm-audit-duplicate-customers'),
   crmPipelineStats: () => ipcRenderer.invoke('crm-pipeline-stats'),
   crmReports: () => ipcRenderer.invoke('crm-reports'),
 
