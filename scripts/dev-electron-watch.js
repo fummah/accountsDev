@@ -61,6 +61,9 @@ const restart = async () => {
   console.log('\n[dev-electron-watch] backend changed — restarting Electron to reload main + preload...');
   await killChild();
   restarting = false;
+  start();
+};
+
 /**
  * Kill any OTHER Electron instance belonging to THIS project before starting.
  * A leftover process holds the OLD preload (Electron loads preload once per
@@ -79,9 +82,6 @@ const killLeftovers = () => new Promise((resolve) => {
 });
 
 killLeftovers().finally(start);
-};
-
-start();
 
 let timer = null;
 try {
