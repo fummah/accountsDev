@@ -1024,12 +1024,13 @@ safeHandle('deletingrecord', async (event,id,table) => {
       const q = String(query || '').trim();
       if (!q) return { success: true, results: [] };
       const db = require('../models/dbmgr');
+      const { customerNameSql } = require('../services/contactIdentity');
       const like = `%${q}%`;
       const results = [];
 
       // Customers
       const custs = db.prepare(
-        `SELECT id, display_name AS title, company_name AS subtitle, 'customer' AS kind
+        `SELECT id, ${customerNameSql('customers')} AS title, company_name AS subtitle, 'customer' AS kind
          FROM customers
          WHERE display_name LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR company_name LIKE ? OR email LIKE ?
          ORDER BY display_name LIMIT 8`
@@ -1046,20 +1047,20 @@ safeHandle('deletingrecord', async (event,id,table) => {
 
       // Invoices
       const invs = db.prepare(
-        `SELECT i.id, i.number AS title, COALESCE(c.display_name, c.company_name, '') AS subtitle, 'invoice' AS kind
+        `SELECT i.id, i.number AS title, ${customerNameSql('c')} AS subtitle, 'invoice' AS kind
          FROM invoices i LEFT JOIN customers c ON i.customer = c.id
-         WHERE i.number LIKE ? OR i.billing_address LIKE ? OR COALESCE(c.display_name,'') LIKE ? OR COALESCE(c.company_name,'') LIKE ?
+         WHERE i.number LIKE ? OR i.billing_address LIKE ? OR ${customerNameSql('c')} LIKE ?
          ORDER BY i.id DESC LIMIT 8`
-      ).all(like, like, like, like);
+      ).all(like, like, like);
       for (const n of invs) results.push({ kind: n.kind, title: n.title || `Invoice #${n.id}`, subtitle: n.subtitle, route: `/main/customers/invoices/edit/${n.id}` });
 
       // Quotes
       const quotes = db.prepare(
-        `SELECT q.id, q.number AS title, COALESCE(c.display_name, c.company_name, '') AS subtitle, 'quote' AS kind
+        `SELECT q.id, q.number AS title, ${customerNameSql('c')} AS subtitle, 'quote' AS kind
          FROM quotes q LEFT JOIN customers c ON q.customer = c.id
-         WHERE q.number LIKE ? OR COALESCE(c.display_name,'') LIKE ? OR COALESCE(c.company_name,'') LIKE ?
+         WHERE q.number LIKE ? OR ${customerNameSql('c')} LIKE ?
          ORDER BY q.id DESC LIMIT 5`
-      ).all(like, like, like);
+      ).all(like, like);
       for (const n of quotes) results.push({ kind: n.kind, title: n.title || `Quote #${n.id}`, subtitle: n.subtitle, route: `/main/customers/quotes/edit/${n.id}` });
 
       // Transactions (bank register)

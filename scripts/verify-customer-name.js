@@ -41,6 +41,23 @@ check('no trailing space (last only)', getCustomerName({ last_name: 'Smith' }) =
 check('camelCase keys supported', getCustomerName({ firstName: 'John', lastName: 'Smith' }) === 'John Smith' && getCustomerName({ company: 'A&M Transportation' }) === 'A&M Transportation');
 check('trims surrounding whitespace', getCustomerName({ first_name: '  John ', last_name: ' Smith ' }) === 'John Smith');
 
+console.log('\n=== backend parity (same rule, both processes) ===');
+const backend = require(path.join(ROOT, 'src', 'backend', 'services', 'contactIdentity'));
+const parity = [
+  { first_name: 'John', last_name: 'Smith', company_name: 'Smith Hardware' },
+  { first_name: 'John', last_name: '', company_name: 'Smith Hardware' },
+  { first_name: '', last_name: 'Smith', company_name: 'Smith Hardware' },
+  { first_name: '', last_name: '', company_name: 'Westfield Egg Farm' },
+  { first_name: null, last_name: null, company_name: 'A&M Transportation' },
+  { first_name: '   ', last_name: '', company_name: 'ABC Supplies' },
+  { first_name: '', last_name: '', company_name: '', display_name: 'Cash Customer' },
+  { first_name: '-', last_name: '-', company_name: 'Westfield Egg Farm' },
+  { first_name: '', last_name: '', company_name: '', display_name: '' },
+];
+check('backend exports getCustomerName + customerNameSql', typeof backend.getCustomerName === 'function' && typeof backend.customerNameSql === 'function');
+check('frontend and backend getCustomerName agree on all cases', parity.every(c => getCustomerName(c) === backend.getCustomerName(c)),
+  parity.map(c => ({ sql: getCustomerName(c), be: backend.getCustomerName(c) })));
+
 console.log('\n=== wiring ===');
 const ci = fs.readFileSync(path.join(FE, 'components', 'customers', 'invoices', 'CreateInvoice.js'), 'utf8');
 const cq = fs.readFileSync(path.join(FE, 'components', 'customers', 'quotes', 'CreateQuote.js'), 'utf8');

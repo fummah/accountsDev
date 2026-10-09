@@ -13,7 +13,7 @@ fs.copyFileSync(liveDb, tmpDb);
 const Database = require('better-sqlite3');
 const real = new Database(tmpDb);
 
-const custExpr = `COALESCE(NULLIF(customers.display_name, ''), NULLIF(customers.company_name, ''), NULLIF(TRIM(customers.first_name || ' ' || customers.last_name), ''), '')`;
+const custExpr = require(path.join(__dirname, '..', 'src', 'backend', 'services', 'contactIdentity')).customerNameSql('customers');
 const sql = `SELECT invoices.id, invoices.number, invoices.customer, ${custExpr} AS customer_name
              FROM invoices
              LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id

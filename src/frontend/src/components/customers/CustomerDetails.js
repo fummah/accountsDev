@@ -4,6 +4,7 @@ import { ArrowLeftOutlined, EditOutlined, FileTextOutlined, DollarOutlined, Plus
 import { useParams, useHistory, Link } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import { getCustomerName } from '../../utils/contactIdentity';
 import { formatPhone } from '../../utils/phone';
 import CustomerPaymentHistory from './payments/CustomerPaymentHistory';
 import RefundInvoiceModal from './payments/RefundInvoiceModal';
@@ -208,6 +209,8 @@ const CustomerDetails = () => {
   const quoteColumns = [
     { title: '#', dataIndex: 'number', key: 'number', width: 110,
       render: (t, r) => <Link to={`/main/customers/quotes/edit/${r.id}`}>{t || `#${r.id}`}</Link> },
+    { title: 'Customer', dataIndex: 'customer_name', key: 'customer', ellipsis: true,
+      render: (t, r) => getCustomerName(r) || t || '-' },
     { title: 'Date', dataIndex: 'start_date', key: 'date', width: 100,
       render: d => d ? moment(d).format('MM/DD/YYYY') : '-' },
     { title: 'Expiry', dataIndex: 'last_date', key: 'expiry', width: 100,

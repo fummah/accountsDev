@@ -4,6 +4,7 @@ import { DollarOutlined, FileDoneOutlined, ClockCircleOutlined, PlusOutlined, Se
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import { getCustomerName } from '../../utils/contactIdentity';
 import { formatPhone } from '../../utils/phone';
 import CustomerContactFields from './shared/CustomerContactFields';
 import { resolveTaxRateFields, describeTaxRate } from '../../utils/taxRate';
@@ -310,7 +311,7 @@ const CustomerCenter = () => {
       title: 'Invoice #', dataIndex: 'number', key: 'number',
       render: (text, record) => <Link to={`/main/customers/invoices/edit/${record.id}`} style={{ fontWeight: 600, color: '#1890ff' }}>{text || `INV-${record.id}`}</Link>,
     },
-    { title: 'Customer', dataIndex: 'customer_name', key: 'customer', render: t => t || '-' },
+    { title: 'Customer', dataIndex: 'customer_name', key: 'customer', render: (t, r) => getCustomerName(r) || t || '-' },
     { title: 'Date', dataIndex: 'start_date', key: 'date', render: (d) => d ? moment(d).format('MM/DD/YYYY') : '-' },
     { title: 'Due Date', dataIndex: 'last_date', key: 'dueDate', render: (d) => d ? moment(d).format('MM/DD/YYYY') : '-' },
     {
@@ -325,7 +326,7 @@ const CustomerCenter = () => {
       title: 'Quote #', dataIndex: 'number', key: 'number',
       render: (text, record) => <Link to={`/main/customers/quotes/edit/${record.id}`} style={{ fontWeight: 600, color: '#1890ff' }}>{text || `QT-${record.id}`}</Link>,
     },
-    { title: 'Customer', dataIndex: 'customer_name', key: 'customer', render: t => t || '-' },
+    { title: 'Customer', dataIndex: 'customer_name', key: 'customer', render: (t, r) => getCustomerName(r) || t || '-' },
     { title: 'Date', dataIndex: 'start_date', key: 'date', render: (d) => d ? moment(d).format('MM/DD/YYYY') : '-' },
     { title: 'Expiry', dataIndex: 'last_date', key: 'expiry', render: (d) => d ? moment(d).format('MM/DD/YYYY') : '-' },
     {

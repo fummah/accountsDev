@@ -4,6 +4,7 @@ import { PlusOutlined, ReloadOutlined, DeleteOutlined, EyeOutlined, SwapOutlined
 import { Link, useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
+import { getCustomerName } from '../../../utils/contactIdentity';
 
 const { Title, Text } = Typography;
 
@@ -164,7 +165,7 @@ const QuoteList = () => {
     if (!quotes.length) { message.warning('No data to print'); return; }
     const rowsHtml = quotes.map(q => `<tr>
       <td>${q.number || `QT-${q.id}`}</td>
-      <td>${(q.customer_name || q.customer || '-').replace(/</g, '&lt;')}</td>
+      <td>${(getCustomerName(q) || q.customer_name || '-').replace(/</g, '&lt;')}</td>
       <td>${q.start_date ? moment(q.start_date).format('MM/DD/YYYY') : '-'}</td>
       <td>${q.last_date ? moment(q.last_date).format('MM/DD/YYYY') : '-'}</td>
       <td style="text-align:right">${cSym} ${Number(q.amount || 0).toFixed(2)}</td>
@@ -195,7 +196,7 @@ const QuoteList = () => {
     const header = ['Quote #', 'Customer', 'Date', 'Expiry', 'Amount', 'Status'];
     const rows = quotes.map(q => [
       q.number || `QT-${q.id}`,
-      (q.customer_name || q.customer || '-').replace(/"/g, '""'),
+      (getCustomerName(q) || q.customer_name || '-').replace(/"/g, '""'),
       q.start_date || '',
       q.last_date || '',
       Number(q.amount || 0).toFixed(2),
@@ -229,15 +230,18 @@ const QuoteList = () => {
     },
     {
       title: 'Customer', dataIndex: 'customer_name', key: 'customer',
-      sorter: (a, b) => (a.customer_name || '').localeCompare(b.customer_name || ''),
-      render: (t, r) => (
+      sorter: (a, b) => (getCustomerName(a) || a.customer_name || '').localeCompare(getCustomerName(b) || b.customer_name || ''),
+      render: (t, r) => {
+        const name = getCustomerName(r) || t || '-';
+        return (
         <Space size={8}>
           <Avatar size={26} style={{ background: '#e6f7ff', color: '#1890ff', fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
-            {(t || r.customer || '?').charAt(0).toUpperCase()}
+            {name.charAt(0).toUpperCase()}
           </Avatar>
-          <span style={{ fontWeight: 500 }}>{t || r.customer || '-'}</span>
+          <span style={{ fontWeight: 500 }}>{name}</span>
         </Space>
-      ),
+        );
+      },
     },
     {
       title: 'Date', dataIndex: 'start_date', key: 'date', width: 105,

@@ -7,6 +7,10 @@ const {
   INVOICE_STATUS,
   normalizeQuoteStatus,
 } = require('../services/documentStatus');
+const {
+  getCustomerName,
+  customerNameSql,
+} = require('../services/contactIdentity');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Quote status is SYSTEM CONTROLLED.
@@ -183,7 +187,8 @@ const Quotes = {
           quotes.id, 
           quotes.number,
           quotes.customer, 
-          customers.first_name || ' ' || customers.last_name AS customer_name, 
+          ${customerNameSql('customers')} AS customer_name, 
+          customers.first_name, customers.last_name, customers.company_name, customers.display_name,
           quotes.status, 
           quotes.start_date, 
           quotes.last_date, 
@@ -217,13 +222,13 @@ const Quotes = {
   getPaginated: (page = 1, pageSize = 25, search = '', status = '', dateFrom = '', dateTo = '', expFrom = '', expTo = '') => {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
-    const baseSql = `SELECT quotes.id, quotes.number, quotes.customer, customers.first_name || ' ' || customers.last_name AS customer_name, quotes.status, quotes.start_date, quotes.last_date, COALESCE(SUM(quote_lines.amount), 0) AS amount, quotes.vat, quotes.customer_email, quotes.message, quotes.statement_message, quotes.billing_address, quotes.linked_invoice, (SELECT number FROM invoices WHERE invoices.id = quotes.linked_invoice) AS linked_invoice_number FROM quotes LEFT JOIN quote_lines ON quote_lines.quote_id = quotes.id LEFT JOIN customers ON quotes.customer = customers.id`;
+    const baseSql = `SELECT quotes.id, quotes.number, quotes.customer, ${customerNameSql('customers')} AS customer_name, customers.first_name, customers.last_name, customers.company_name, customers.display_name, quotes.status, quotes.start_date, quotes.last_date, COALESCE(SUM(quote_lines.amount), 0) AS amount, quotes.vat, quotes.customer_email, quotes.message, quotes.statement_message, quotes.billing_address, quotes.linked_invoice, (SELECT number FROM invoices WHERE invoices.id = quotes.linked_invoice) AS linked_invoice_number FROM quotes LEFT JOIN quote_lines ON quote_lines.quote_id = quotes.id LEFT JOIN customers ON quotes.customer = customers.id`;
     const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
     const whereParts = [];
     const params = [];
     if (searchParam) {
-      whereParts.push(`(customers.first_name || ' ' || customers.last_name LIKE ? OR quotes.number LIKE ?)`);
-      params.push(searchParam, searchParam);
+      whereParts.push(`(${customerNameSql('customers')} LIKE ? OR quotes.number LIKE ? OR quotes.billing_address LIKE ?)`);
+      params.push(searchParam, searchParam, searchParam);
     }
     // Status filter: normalise legacy labels so "Open" still finds Pending quotes.
     if (status && String(status).trim()) {
@@ -264,7 +269,9 @@ const Quotes = {
 
   getSingleQuote: (quote_id) => {
     const stmt = db.prepare(`SELECT quotes.id as quote_id, quotes.customer as customer_id,
-        customers.first_name, customers.last_name, customers.phone_number, customers.mobile_number,
+        customers.first_name, customers.last_name, customers.company_name, customers.display_name,
+        ${customerNameSql('customers')} AS customer_name,
+        customers.phone_number, customers.mobile_number,
         quotes.status, quotes.customer_email, quotes.islater, quotes.billing_address,
         quotes.start_date, quotes.last_date, quotes.message, quotes.statement_message,
         quotes.number, quotes.vat, quotes.entered_by, quotes.date_entered,
@@ -290,6 +297,9 @@ const Quotes = {
       quote_id: first.quote_id,
       customer_id: first.customer_id,
       customer: first.customer_id,
+      customer_name: first.customer_name || '',
+      company_name: first.company_name,
+      display_name: first.display_name,
       first_name: first.first_name,
       last_name: first.last_name,
       phone_number: first.phone_number,

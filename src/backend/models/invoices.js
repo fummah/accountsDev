@@ -4,6 +4,11 @@ const { getInvoiceFinancials, recalcInvoiceFinancials } = require('../services/i
 const { filterDocumentLines } = require('../services/documentLines');
 const { INVOICE_STATUS, isInvoiceDocumentState, isFinanciallyEffective } = require('../services/documentStatus');
 const { getExpectedNormalBalance, normalizeNormalBalance } = require('../services/normalBalance');
+const { customerNameSql } = require('../services/contactIdentity');
+
+// Shared rule (person → company → display_name) for the customer column in
+// invoice lists. Identical to the Quotes list + the frontend getCustomerName.
+const CUSTOMER_NAME_SQL = customerNameSql('customers');
 
 /**
  * The inventory lines of an invoice, in the shape
@@ -336,7 +341,7 @@ const Invoices = {
 
   // Retrieve all Invoices
   getAllInvoices: function () {
-    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, COALESCE(NULLIF(customers.display_name, ''), NULLIF(customers.company_name, ''), NULLIF(TRIM(customers.first_name || ' ' || customers.last_name), ''), '') AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, COALESCE(pt.totalPaid, 0) AS totalPaid, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0), 2) AS balance, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id LEFT JOIN (SELECT i.id AS invoiceId, COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a.invoiceId = i.id), 0) + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId = i.id AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)), 0) AS totalPaid FROM invoices i) pt ON pt.invoiceId = invoices.id GROUP BY invoices.id ORDER BY invoices.id DESC");
+    const stmt = db.prepare("SELECT invoices.id, invoices.number, invoices.customer, " + CUSTOMER_NAME_SQL + " AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, COALESCE(pt.totalPaid, 0) AS totalPaid, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0), 2) AS balance, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id LEFT JOIN (SELECT i.id AS invoiceId, COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a.invoiceId = i.id), 0) + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId = i.id AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)), 0) AS totalPaid FROM invoices i) pt ON pt.invoiceId = invoices.id GROUP BY invoices.id ORDER BY invoices.id DESC");
     const report = this.getInvoiceReport();
     return {all:stmt.all(), report:report};
   },
@@ -344,13 +349,13 @@ const Invoices = {
   getPaginated: function (page = 1, pageSize = 25, search = '', status = '', dueFrom = '', dueTo = '', startFrom = '', startTo = '', customerId = '', onlyOutstanding = false) {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
-    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, COALESCE(NULLIF(customers.display_name, ''), NULLIF(customers.company_name, ''), NULLIF(TRIM(customers.first_name || ' ' || customers.last_name), ''), '') AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, COALESCE(pt.totalPaid, 0) AS totalPaid, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0), 2) AS balance, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address, invoices.sent_date, invoices.sent_method, invoices.sent_status FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id LEFT JOIN (SELECT i.id AS invoiceId, COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a.invoiceId = i.id), 0) + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId = i.id AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)), 0) AS totalPaid FROM invoices i) pt ON pt.invoiceId = invoices.id`;
+    const baseSql = `SELECT invoices.id, invoices.number, invoices.customer, ${CUSTOMER_NAME_SQL} AS customer_name, invoices.customer_email, invoices.status, invoices.start_date, invoices.last_date, COALESCE(SUM(invoice_lines.amount), 0) AS subtotal, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0), 2) AS amount, COALESCE(pt.totalPaid, 0) AS totalPaid, ROUND(COALESCE(SUM(invoice_lines.amount), 0) * (1 + COALESCE(invoices.vat, 0) / 100.0) - COALESCE(pt.totalPaid, 0), 2) AS balance, invoices.vat, invoices.terms, invoices.message, invoices.statement_message, invoices.billing_address, invoices.sent_date, invoices.sent_method, invoices.sent_status FROM invoices LEFT JOIN invoice_lines ON invoice_lines.invoice_id = invoices.id LEFT JOIN customers ON invoices.customer = customers.id LEFT JOIN (SELECT i.id AS invoiceId, COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a.invoiceId = i.id), 0) + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId = i.id AND NOT EXISTS (SELECT 1 FROM payment_allocations x WHERE x.paymentId = p.id)), 0) AS totalPaid FROM invoices i) pt ON pt.invoiceId = invoices.id`;
     const searchParam = search && search.trim() ? `%${search.trim()}%` : null;
     const statusParam = status && status.trim() ? status.trim() : null;
     const whereParts = [];
     const params = [];
     if (searchParam) {
-      whereParts.push(`(customers.first_name || ' ' || customers.last_name LIKE ? OR invoices.number LIKE ?)`);
+      whereParts.push(`(${CUSTOMER_NAME_SQL} LIKE ? OR invoices.number LIKE ?)`);
       params.push(searchParam, searchParam);
     }
     if (statusParam) {

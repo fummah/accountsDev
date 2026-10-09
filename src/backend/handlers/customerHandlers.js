@@ -4,6 +4,7 @@ const { Customers } = require('../models');
 const Payments = require('../models/payments');
 const JournalEntries = require('../models/journalEntries');
 const { recalcInvoiceFinancials } = require('../services/invoiceFinancials');
+const { customerNameSql, getCustomerName } = require('../services/contactIdentity');
 
 function registerCustomerHandlers() {
     // Statements
@@ -83,7 +84,7 @@ function registerCustomerHandlers() {
         try {
             const baseSql = `
                 SELECT i.*,
-                       COALESCE(NULLIF(c.display_name, ''), c.first_name || ' ' || c.last_name) AS customerName,
+                       ${customerNameSql('c')} AS customerName,
                        COALESCE(lt.lineTotal, 0) AS amount,
                        COALESCE(lt.lineTotal, 0) * (1 + COALESCE(i.vat, 0) / 100.0) AS total,
                        COALESCE(pt.totalPaid, 0) AS totalPaid,
@@ -143,13 +144,13 @@ function registerCustomerHandlers() {
                 if (lastPayment) {
                     // Fetch customer name for description
                     const inv = db.prepare('SELECT customer, number FROM invoices WHERE id = ?').get(invoiceId);
-                    const cust = inv?.customer ? db.prepare('SELECT display_name FROM customers WHERE id = ? LIMIT 1').get(inv.customer) : null;
+                    const cust = inv?.customer ? db.prepare('SELECT first_name, last_name, company_name, display_name FROM customers WHERE id = ? LIMIT 1').get(inv.customer) : null;
                     JournalEntries.postPayment({
                         id: lastPayment.id,
                         amount: payAmount,
                         date: paymentData.date || paymentData.paymentDate || new Date().toISOString().slice(0, 10),
                         reference: paymentData.reference || (inv?.number ? `Pmt-${inv.number}` : null),
-                        customerName: cust?.display_name || '',
+                    customerName: cust ? getCustomerName(cust) : '',
                         bankAccountName: paymentData.depositTo || null,
                     });
                 }
@@ -168,7 +169,7 @@ function registerCustomerHandlers() {
             const lim = Number(limit) > 0 ? Number(limit) : 100;
             const sql = `SELECT p.*, 
                                 i.number AS invoiceNumber,
-                                COALESCE(NULLIF(c.display_name, ''), c.first_name || ' ' || c.last_name) AS customerName
+                                ${customerNameSql('c')} AS customerName
                          FROM payments p
                          JOIN invoices i ON p.invoiceId = i.id
                          JOIN customers c ON i.customer = c.id
@@ -190,9 +191,9 @@ function registerCustomerHandlers() {
             let params = [];
             const conds = [];
             if (search) {
-                conds.push(`(i.number LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.display_name LIKE ?)`);
+                conds.push(`(${customerNameSql('c')} LIKE ? OR i.number LIKE ?)`);
                 const s = `%${search}%`;
-                params.push(s, s, s, s);
+                params.push(s, s);
             }
             if (dateFrom || dateTo) {
                 // Inclusive date-range filter on the payment date (falls back to
@@ -205,7 +206,7 @@ function registerCustomerHandlers() {
             if (conds.length) where = `WHERE ${conds.join(' AND ')}`;
             const countSql = `SELECT COUNT(*) AS total FROM payments p JOIN invoices i ON p.invoiceId = i.id JOIN customers c ON i.customer = c.id ${where}`;
             const dataSql = `SELECT p.*, i.number AS invoiceNumber,
-                                    COALESCE(NULLIF(c.display_name, ''), c.first_name || ' ' || c.last_name) AS customerName
+                                    ${customerNameSql('c')} AS customerName
                              FROM payments p
                              JOIN invoices i ON p.invoiceId = i.id
                              JOIN customers c ON i.customer = c.id
@@ -231,7 +232,7 @@ function registerCustomerHandlers() {
                     t.date,
                     t.description,
                     t.status,
-                    COALESCE(NULLIF(c.display_name, ''), c.first_name || ' ' || c.last_name) as customerName
+                    ${customerNameSql('c')} as customerName
                 FROM transactions t
                 LEFT JOIN customers c ON t.customerId = c.id
                 WHERE t.type = 'income'
@@ -618,14 +619,14 @@ function registerCustomerHandlers() {
             // would make the books inconsistent with the register.
             try {
                 const cust = customerId
-                    ? db.prepare('SELECT display_name FROM customers WHERE id = ?').get(customerId)
+                    ? db.prepare('SELECT first_name, last_name, company_name, display_name FROM customers WHERE id = ?').get(customerId)
                     : null;
                 const glRes = JournalEntries.postPayment({
                     id: res.id,
                     amount: Number(data.amount) || 0,
                     date,
                     reference: data.reference || null,
-                    customerName: cust?.display_name || '',
+                    customerName: cust ? getCustomerName(cust) : '',
                     bankAccountName: data.depositTo || null,
                 });
                 if (glRes && glRes.error) {

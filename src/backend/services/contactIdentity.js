@@ -79,10 +79,52 @@ function deriveDisplayName({ display_name, first_name, last_name, company_name }
   return norm(company_name);
 }
 
+/**
+ * THE document/list NAME rule — identical to the frontend `getCustomerName`
+ * (src/frontend/src/utils/contactIdentity.js) and to the SQL produced by
+ * `customerNameSql` below. Priority:
+ *
+ *   1. the personal name, "First Last" (either part alone is fine)
+ *   2. otherwise the Company Name
+ *   3. otherwise an explicit Display Name
+ *
+ * This is what makes a BUSINESS customer (no First/Last, Company set) show as
+ * "Westfield Egg Farm" on a quote/invoice list instead of a blank cell.
+ * First/Last stay OPTIONAL. A lone "-" is a UI placeholder, treated as empty,
+ * so it never yields "- -" or "- Westfield Egg Farm".
+ *
+ * NOTE: this intentionally REVERSES the display_name-first order of the legacy
+ * `deriveDisplayName` above (which is kept for the customer form's own
+ * derivation). The three implementations are held in step by
+ * scripts/verify-customer-name.js.
+ */
+function getCustomerName({ first_name, last_name, company_name, display_name } = {}) {
+  const clean = (v) => { const s = norm(v); return s === '-' ? '' : s; };
+  const person = `${clean(first_name)} ${clean(last_name)}`.trim();
+  if (person) return person;
+  const company = clean(company_name);
+  if (company) return company;
+  return clean(display_name);
+}
+
+/**
+ * SQL expression producing EXACTLY the same string as getCustomerName, for
+ * SELECT lists (which cannot call JS). `alias` is the joined customers table
+ * alias (default `c`). Each raw column is trimmed and a lone "-" folded to
+ * NULL, then COALESCE picks person → company → display_name.
+ */
+function customerNameSql(alias = 'c') {
+  const clean = (col) => `NULLIF(NULLIF(TRIM(COALESCE(${alias}.${col}, '')), ''), '-')`;
+  const person = `NULLIF(TRIM(COALESCE(${clean('first_name')}, '') || ' ' || COALESCE(${clean('last_name')}, '')), '')`;
+  return `COALESCE(${person}, ${clean('company_name')}, ${clean('display_name')}, '')`;
+}
+
 module.exports = {
   IDENTITY_ERROR,
   isIdentified,
   assertIdentified,
   deriveDisplayName,
+  getCustomerName,
+  customerNameSql,
   norm,
 };
