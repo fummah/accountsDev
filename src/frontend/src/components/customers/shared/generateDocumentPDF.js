@@ -1,6 +1,7 @@
 import jsPDF, { GState } from 'jspdf';
 import 'jspdf-autotable';
 import { normalizeDocumentLines } from '../../../utils/lineItems';
+import { formatAddressLines } from '../../../utils/address';
 
 /**
  * Professional Invoice / Quotation PDF generator.
@@ -29,74 +30,18 @@ const SOFT      = [229, 231, 235];  // #E5E7EB
 const tint = (rgb, amount) => rgb.map(c => Math.round(c + (255 - c) * amount));
 
 /**
- * Reusable address formatter.
+ * Address formatter (thin wrapper over the ONE shared rule in
+ * ../../../utils/address). Kept as a named export for existing callers.
  *
- * Accepts either a structured object or a plain (possibly multi-line) string
- * and returns a clean array of lines:
- *   [address1, address2, suburb?, "City, Province PostalCode", country?]
+ * Accepts a structured object or a plain (possibly multi-line / comma) string
+ * and returns clean lines with the postal code merged onto the
+ * "City State, PostalCode" line (never stranded on its own line).
  *
- * Key guarantee: a postal/ZIP code is never left on its own line — it is
- * merged onto the preceding "City, State/Province" line.
- *
- * @param {object|string} addr – e.g. { address1, address2, city, state,
- *   postal_code|postalCode|zip, country } or "Street\nCity, ST 12345"
+ * @param {object|string} addr
  * @returns {string[]} cleaned, non-empty address lines
  */
 export function formatAddress(addr) {
-  const clean = (v) => String(v == null ? '' : v).trim();
-
-  // ── Structured object (preferred) ──────────────────────────────────────
-  if (addr && typeof addr === 'object') {
-    const a1 = clean(addr.address1 || addr.address || addr.street || addr.street1 || addr.line1);
-    const a2 = clean(addr.address2 || addr.suite || addr.line2);
-    const suburb = clean(addr.suburb || addr.area || addr.neighborhood);
-    const city = clean(addr.city || addr.town);
-    const state = clean(addr.state || addr.province || addr.province_code || addr.region);
-    const postal = clean(addr.postal_code || addr.postalCode || addr.zip || addr.postcode);
-    const country = clean(addr.country);
-
-    const csz = [city, state].filter(Boolean).join(', ');
-    const cszLine = postal ? (csz ? `${csz} ${postal}` : postal) : csz;
-
-    const lines = [];
-    if (a1) lines.push(a1);
-    if (a2) lines.push(a2);
-    if (suburb) lines.push(suburb);
-    if (cszLine) lines.push(cszLine);
-    if (country) lines.push(country);
-    return lines;
-  }
-
-  // ── Plain string ───────────────────────────────────────────────────────
-  const rawLines = String(addr || '')
-    .split(/\r?\n/)
-    .map(l => clean(l).replace(/,\s*$/, ''))
-    .filter(Boolean);
-
-  const out = [];
-  for (let i = 0; i < rawLines.length; i++) {
-    const line = rawLines[i];
-    const next = rawLines[i + 1];
-    // If this line is a bare postal code and the previous line exists,
-    // append it to the previous line (e.g. "Citty, CP" + "09674353").
-    if (looksLikePostal(line) && out.length > 0 && !looksLikePostal(out[out.length - 1])) {
-      out[out.length - 1] = `${out[out.length - 1]} ${line}`;
-    } else {
-      out.push(line);
-    }
-  }
-  return out.filter(Boolean);
-}
-
-// Heuristic: is this line a bare postal/ZIP code?
-function looksLikePostal(line) {
-  const t = String(line || '').trim();
-  if (!t) return false;
-  if (/^\d{3,10}$/.test(t)) return true;                                            // 7975 · 12345 · 09674353
-  if (/^[A-Z]\d[A-Z]\s?\d[A-Z]\d$/i.test(t)) return true;                           // UK / CA postcodes
-  if (t.length <= 10 && /[A-Za-z]/.test(t) && /\d/.test(t) && /^[\w\-\s]+$/.test(t)
-      && !/\b(suite|floor|apt|unit|#)\b/i.test(t)) return true;                     // short alphanumeric codes
-  return false;
+  return formatAddressLines(addr);
 }
 
 // Subtle, professional status badge colours (fg colour per status).
@@ -266,14 +211,14 @@ export function generateDocumentPDF({
     doc.text(footerMsg, pageW / 2, pageH - 10, { align: 'center' });
   };
 
-  // ── Helper: customer block lines (name bold, rest normal) ──────────────
+  // ── Helper: customer block lines (name bold, then address, then email) ──
   const customerLines = (name, email, address, opts) => {
     const out = [];
     if (name) out.push({ text: name, bold: true });
-    if (opts.email && email) out.push({ text: String(email), bold: false });
     if (opts.address) {
       formatAddress(address).forEach(l => out.push({ text: l, bold: false }));
     }
+    if (opts.email && email) out.push({ text: String(email), bold: false });
     return out;
   };
 

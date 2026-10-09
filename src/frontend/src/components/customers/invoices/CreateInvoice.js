@@ -6,6 +6,7 @@ import SendEmailModal from '../shared/SendEmailModal';
 import { confirmSavedDocumentEdit, confirmPaymentImpact, confirmFinancialImpact, useUnsavedChanges } from '../shared/documentEditGuard';
 import CustomerContactFields from '../shared/CustomerContactFields';
 import { deriveDisplayName, getCustomerName } from '../../../utils/contactIdentity';
+import { formatCityStatePostal } from '../../../utils/address';
 import { tracksInventory } from '../../../utils/itemTypes';
 import { resolveTaxRateFields } from '../../../utils/taxRate';
 import {
@@ -86,8 +87,7 @@ const CreateInvoice = () => {
     if (cust.email && cust.email !== 'null') updates.customer_email = cust.email;
     const addrParts = [
       cust.address1, cust.address2,
-      [cust.city, cust.state].filter(Boolean).join(', '),
-      cust.postal_code || cust.zip
+      formatCityStatePostal(cust.city, cust.state, cust.postal_code || cust.zip),
     ].filter(v => v && v !== 'null');
     if (addrParts.length > 0) updates.billing_address = addrParts.join('\n');
     if (cust.terms && cust.terms !== 'null') updates.terms = cust.terms;

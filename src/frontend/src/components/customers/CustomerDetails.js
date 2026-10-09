@@ -5,6 +5,7 @@ import { useParams, useHistory, Link } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { getCustomerName } from '../../utils/contactIdentity';
+import { formatAddressLines } from '../../utils/address';
 import { formatPhone } from '../../utils/phone';
 import CustomerPaymentHistory from './payments/CustomerPaymentHistory';
 import RefundInvoiceModal from './payments/RefundInvoiceModal';
@@ -337,7 +338,10 @@ const CustomerDetails = () => {
                 <Descriptions.Item label="Balance">{cSym} {Number(customer?.opening_balance || 0).toFixed(2)}</Descriptions.Item>
                 <Descriptions.Item label="Payment Terms">{(customer?.terms && customer.terms !== 'null') ? customer.terms : ((customer?.payment_method && customer.payment_method !== 'null') ? customer.payment_method : '-')}</Descriptions.Item>
                 <Descriptions.Item label="Billing Address" span={2}>
-                  {[customer?.address1, customer?.address2, customer?.city, customer?.state, customer?.postal_code, customer?.country].filter(Boolean).join(', ') || '-'}
+                  {(() => {
+                    const lines = formatAddressLines(customer || {});
+                    return lines.length ? lines.map((l, i) => <div key={i}>{l}</div>) : '-';
+                  })()}
                 </Descriptions.Item>
                 <Descriptions.Item label="Notes" span={2}>{(customer?.notes && customer.notes !== 'null') ? customer.notes : '-'}</Descriptions.Item>
               </Descriptions>
