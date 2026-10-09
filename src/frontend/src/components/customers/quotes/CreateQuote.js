@@ -9,7 +9,7 @@ import { useCurrency } from '../../../utils/currency';
 import { ensureTrailingEmptyLine, removeLineItem, normalizeDocumentLines, collapseToSingleTrailingEmpty } from '../../../utils/lineItems';
 import { confirmSavedDocumentEdit, confirmDocumentAction, useUnsavedChanges } from '../shared/documentEditGuard';
 import CustomerContactFields from '../shared/CustomerContactFields';
-import { deriveDisplayName } from '../../../utils/contactIdentity';
+import { deriveDisplayName, getCustomerName } from '../../../utils/contactIdentity';
 import { resolveTaxRateFields } from '../../../utils/taxRate';
 import {
   FormSection, FormGrid, FormCol, DocumentActionBar, TotalsBlock, FORM_ITEM_STYLE,
@@ -595,7 +595,7 @@ const CreateQuote = () => {
         status: isEdit ? canonicalQuoteStatus : 'Pending',
         date: vals.start_date ? vals.start_date.format('MM/DD/YYYY') : '',
         dueDate: vals.last_date ? vals.last_date.format('MM/DD/YYYY') : '',
-        customerName: cust ? (cust.display_name || cust.name || `${cust.first_name || ''} ${cust.last_name || ''}`.trim()) : '',
+        customerName: cust ? getCustomerName(cust) : '',
         email: vals.customer_email || '',
         billingAddress: vals.billing_address || '',
       },
@@ -700,7 +700,7 @@ const CreateQuote = () => {
                     defaultOpen={customerOpen}
                     filterOption={(input, opt) => (opt?.children || '').toString().toLowerCase().includes(input.toLowerCase())}
                     dropdownRender={(menu) => (<>{menu}<Divider style={{ margin: '4px 0' }} /><Button type="link" icon={<PlusOutlined />} onClick={() => setCustModalOpen(true)} style={{ width: '100%', textAlign: 'left' }}>Add New Customer</Button></>)}>
-                    {customers.map(c => <Select.Option key={c.id} value={c.id}>{c.display_name || c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</Select.Option>)}
+                    {customers.map(c => <Select.Option key={c.id} value={c.id}>{getCustomerName(c) || `Customer #${c.id}`}</Select.Option>)}
                   </Select>
                 </Form.Item>
               </FormCol>
@@ -879,7 +879,7 @@ const CreateQuote = () => {
         documentType="Quote"
         documentNumber={form.getFieldValue('number') || ''}
         amount={`${cSym} ${lines.reduce((s, l) => s + Number(l.amount || 0), 0).toFixed(2)}`}
-        customerName={(() => { const c = customers.find(cu => cu.id === form.getFieldValue('customer')); return c ? (c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()) : ''; })()}
+              customerName={(() => { const c = customers.find(cu => cu.id === form.getFieldValue('customer')); return c ? getCustomerName(c) : ''; })()}
         companyName={company.name || company.company_name || ''}
         documentId={savedQuoteId || (id ? Number(id) : null)}
       />

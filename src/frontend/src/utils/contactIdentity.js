@@ -75,6 +75,36 @@ export const deriveDisplayName = ({ display_name, first_name, last_name, company
 };
 
 /**
+ * THE customer/vendor NAME shown on documents (Invoice / Quote header, PDF,
+ * preview, "Bill To", selectors). One rule, used everywhere identity is shown:
+ *
+ *   1. personal name  → "First Last" (either part alone is fine)
+ *   2. otherwise       → Company Name
+ *   3. otherwise       → explicit Display Name
+ *
+ * This is what makes a BUSINESS customer (no First/Last, Company set) render on
+ * an invoice instead of a blank heading. First/Last stay OPTIONAL.
+ *
+ * A lone "-" is a UI placeholder, not a real name, so it is treated as empty
+ * (never produces "- -" or "- Westfield Egg Farm"). Values are trimmed, so no
+ * double spaces and no stray leading/trailing space.
+ */
+export const getCustomerName = (customer = {}) => {
+  const c = customer || {};
+  const clean = (v) => { const s = normIdentity(v); return s === '-' ? '' : s; };
+  const first = clean(c.first_name != null ? c.first_name : c.firstName);
+  const last = clean(c.last_name != null ? c.last_name : c.lastName);
+  const company = clean(c.company_name != null ? c.company_name : c.company);
+  const explicit = clean(c.display_name != null ? c.display_name : c.displayName);
+  const person = `${first} ${last}`.trim();
+  if (person) return person;
+  if (company) return company;
+  if (explicit) return explicit;
+  return '';
+};
+
+
+/**
  * antd validator factory. Attach it to the FIRST NAME field; it consults the
  * company field, so the pair is validated as a unit.
  *
