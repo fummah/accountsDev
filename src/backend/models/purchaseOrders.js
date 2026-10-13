@@ -83,9 +83,19 @@ const PurchaseOrders = {
         warehouse_id INTEGER,
         memo TEXT,
         created_by TEXT,
+        client_request_id TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `).run();
+
+    // Idempotency key for a receipt submit. A retry / double-click that reuses
+    // the same client_request_id must NOT create a second goods receipt (and so
+    // must not move stock twice).
+    try {
+      const rc = new Set(db.prepare("PRAGMA table_info('goods_receipts')").all().map(r => r.name));
+      if (rc.size && !rc.has('client_request_id')) db.prepare('ALTER TABLE goods_receipts ADD COLUMN client_request_id TEXT').run();
+      db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_request ON goods_receipts(purchase_order_id, client_request_id) WHERE client_request_id IS NOT NULL').run();
+    } catch { /* additive migration / index is best-effort */ }
 
     db.prepare(`
       CREATE TABLE IF NOT EXISTS goods_receipt_lines (
@@ -432,6 +442,17 @@ const PurchaseOrders = {
     if (po.status === PO_STATUS.CANCELLED) return { success: false, error: 'A cancelled Purchase Order cannot be received.' };
     if (po.status === PO_STATUS.CLOSED) return { success: false, error: 'A closed Purchase Order cannot be received.' };
 
+    // Idempotency FIRST: a retry / double-click that reuses the same
+    // client_request_id returns the FIRST receipt instead of failing on
+    // "nothing remaining" or creating a second receipt (which would move the
+    // same stock again).
+    const requestId = payload.requestId != null && String(payload.requestId).trim() !== ''
+      ? String(payload.requestId).trim() : null;
+    if (requestId) {
+      const existing = db.prepare('SELECT id, receipt_number FROM goods_receipts WHERE purchase_order_id = ? AND client_request_id = ? LIMIT 1').get(id, requestId);
+      if (existing) return { success: true, receiptId: existing.id, receiptNumber: existing.receipt_number, idempotent: true };
+    }
+
     const lines = db.prepare('SELECT * FROM purchase_order_lines WHERE purchase_order_id = ? ORDER BY line_no, id').all(id);
     const byId = new Map(lines.map(l => [Number(l.id), l]));
     const requested = Array.isArray(payload.lines) ? payload.lines : [];
@@ -451,10 +472,13 @@ const PurchaseOrders = {
     const Warehouses = require('./warehouses');
     const warehouseId = payload.warehouseId != null ? Number(payload.warehouseId) : Warehouses.getOrCreateDefault().id;
 
+    // Idempotency: a retry / double-click that reuses the same client_request_id
+    // returns the FIRST receipt instead of creating a second one (which would
+    // move the same stock again).
     const tx = db.transaction(() => {
       const receiptNumber = PurchaseOrders.generateReceiptNumber();
-      const rres = db.prepare(`INSERT INTO goods_receipts (receipt_number, purchase_order_id, vendor_id, receipt_date, reference, warehouse_id, memo, created_by) VALUES (?,?,?,?,?,?,?,?)`)
-        .run(receiptNumber, id, po.vendor_id, payload.receiptDate || new Date().toISOString().slice(0, 10), payload.reference || null, warehouseId, payload.memo || null, ctx.userId || 'system');
+      const rres = db.prepare(`INSERT INTO goods_receipts (receipt_number, purchase_order_id, vendor_id, receipt_date, reference, warehouse_id, memo, created_by, client_request_id) VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(receiptNumber, id, po.vendor_id, payload.receiptDate || new Date().toISOString().slice(0, 10), payload.reference || null, warehouseId, payload.memo || null, ctx.userId || 'system', requestId);
       const receiptId = rres.lastInsertRowid;
 
       const insRl = db.prepare('INSERT INTO goods_receipt_lines (receipt_id, purchase_order_line_id, item_id, qty_received, unit_cost) VALUES (?,?,?,?,?)');

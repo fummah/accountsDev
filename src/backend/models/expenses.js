@@ -146,11 +146,11 @@ const readItemLines = (expenseId) => {
   let rows = [];
   try {
     rows = db.prepare(
-      `SELECT id, line_type, product_id, quantity, rate, warehouse_id, purchase_order_line_id
+      `SELECT id, line_type, product_id, quantity, rate, warehouse_id, purchase_order_id, purchase_order_line_id
          FROM expense_lines WHERE expense_id = ? ORDER BY id`
     ).all(Number(expenseId));
   } catch {
-    // Older databases without the PO-link column still work (no PO linkage).
+    // Older databases without the PO-link columns still work (no PO linkage).
     try {
       rows = db.prepare(
         `SELECT id, line_type, product_id, quantity, rate, warehouse_id
@@ -160,10 +160,22 @@ const readItemLines = (expenseId) => {
   }
   return rows
     .filter(r => normalizeLineType(r.line_type) === LINE_TYPE_ITEM)
-    // A bill line LINKED TO A PO LINE was already received by the goods receipt
-    // (the receipt owns the stock movement). Re-receiving it here would
-    // double-count inventory, so PO-linked lines never move stock from a bill.
-    .filter(r => r.purchase_order_line_id == null)
+    // ── ONE physical receipt per purchase (root-cause rule) ──────────────────
+    // For a PO purchase the GOODS RECEIPT owns the physical stock event
+    // (PurchaseOrders.receive → sourceType 'receipt'). A vendor bill is the
+    // AP/financial document and must NEVER receive the same goods again.
+    //
+    // A bill line therefore moves NO stock when it references a purchase order
+    // either by line OR by header. The previous rule only checked the LINE link
+    // (purchase_order_line_id), so a "bill from PO" that carried only the PO id
+    // silently re-received stock already taken in by the receipt — the King
+    // Mattress double-count.
+    //
+    // A DIRECT bill (no PO reference at all) is the approved Model B: it acts as
+    // the single physical receipt for that purchase. Model A (PO) and Model B
+    // (direct) are deterministic and mutually exclusive; both post exactly one
+    // quantity movement.
+    .filter(r => r.purchase_order_id == null && r.purchase_order_line_id == null)
     .map(r => ({
       lineId: r.id,
       productId: r.product_id,

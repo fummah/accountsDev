@@ -249,7 +249,8 @@ const PurchaseOrders = () => {
       });
       setReceivePo(po);
       setReceiveLines(linesToReceive);
-      setReceiptMeta({ receiptDate: moment(), reference: '', warehouseId: warehouses.find(w => w.isDefault)?.id || warehouses[0]?.id, memo: '' });
+      setReceiptMeta({ receiptDate: moment(), reference: '', warehouseId: warehouses.find(w => w.isDefault)?.id || warehouses[0]?.id, memo: '',
+        requestId: `rcv-${po.id}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` });
       setReceiveOpen(true);
     } catch { message.error('Failed to load Purchase Order'); }
   };
@@ -260,6 +261,7 @@ const PurchaseOrders = () => {
       reference: receiptMeta.reference || '',
       warehouseId: receiptMeta.warehouseId,
       memo: receiptMeta.memo || '',
+      requestId: receiptMeta.requestId || null,
       lines: receiveLines.filter(l => Number(l.receiveNow) > 0).map(l => ({ purchaseOrderLineId: l.lineId, qtyReceived: Number(l.receiveNow) })),
     };
     if (!payload.lines.length) { message.error('Enter a quantity to receive.'); return; }

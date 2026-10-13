@@ -507,6 +507,7 @@ const Inventory = {
                e.ref_no AS billRef, e.payment_date AS billDate,
                COALESCE(s.display_name, s.first_name || ' ' || s.last_name, s.first_name) AS vendorName,
                i.number AS invoiceNumber, i.start_date AS invoiceDate,
+               gr.receipt_number AS receiptNumber, po.po_number AS poNumber,
                COALESCE(NULLIF(c.display_name, ''), NULLIF(c.company_name, ''),
                         NULLIF(TRIM(c.first_name || ' ' || c.last_name), ''), c.first_name) AS customerName
         FROM stock_movements m
@@ -515,6 +516,8 @@ const Inventory = {
         LEFT JOIN suppliers   s ON s.id = e.payee
         LEFT JOIN invoices    i ON m.sourceType = 'invoice' AND i.id = m.sourceId
         LEFT JOIN customers   c ON c.id = i.customer
+        LEFT JOIN goods_receipts gr ON m.sourceType = 'receipt' AND gr.id = m.sourceId
+        LEFT JOIN purchase_orders po ON po.id = gr.purchase_order_id
         WHERE m.itemId = ?
         ORDER BY m.movedAt DESC, m.id DESC
         LIMIT ?
@@ -542,6 +545,11 @@ const Inventory = {
       } else if (r.sourceType === 'invoice') {
         source = `Invoice ${r.invoiceNumber || `#${r.sourceId}`}`;
         if (r.customerName) source += ` — ${r.customerName}`;
+      } else if (r.sourceType === 'receipt') {
+        // The canonical physical purchase event: reference the receipt document
+        // (and its PO) instead of the ambiguous 'PO RECEIPT' reason label.
+        source = `Receipt ${r.receiptNumber || `#${r.sourceId}`}`;
+        if (r.poNumber) source += ` — ${r.poNumber}`;
       } else if (r.refType) {
         source = String(r.refType);
       }

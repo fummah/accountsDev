@@ -705,6 +705,14 @@ safeHandle('receive-purchase-order', async (event, poId, payload) => {
 safeHandle('get-goods-receipt', async (event, id) => {
   try { return PurchaseOrders.getReceipt(id); } catch (error) { return { error: error.message }; }
 });
+// READ-ONLY purchase/inventory integrity audit (duplicate receipt+bill postings,
+// and ledger-vs-cached QOH reconciliation). Never mutates.
+safeHandle('get-inventory-purchase-audit', async () => {
+  try {
+    const Svc = require('../services/inventoryPurchaseAudit');
+    return { duplicate: Svc.auditDuplicatePurchaseMovements(), qoh: Svc.reconcileQoh() };
+  } catch (error) { return { error: error.message }; }
+});
 safeHandle('get-vendor-activity', async (event, vendorId) => {
   try { return PurchaseOrders.getVendorActivity(vendorId); } catch (error) { return { error: error.message }; }
 });
