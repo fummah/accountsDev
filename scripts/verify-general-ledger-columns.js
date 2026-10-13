@@ -105,9 +105,12 @@ if (bank && exp.length >= 3) {
 // ── Frontend: columns + wiring ────────────────────────────────────────────
 console.log('\n=== Frontend: General Ledger columns ===');
 const gl = read('components/accountant/GeneralLedger.js');
-for (const h of ['Date', 'Journal', 'Payee / Description', 'Account(s)', 'Reference', 'Debit', 'Credit', 'Balance']) {
+for (const h of ['Date', 'Journal', 'Payee / Description', 'Account(s)', 'Reference', 'Debit', 'Credit']) {
   check(`column "${h}" present`, new RegExp(`title:\\s*'${h.replace(/[()/]/g, m => '\\' + m)}'`).test(gl));
 }
+check('the last column is "Running Balance" (renamed from "Balance")',
+  /<span>Running Balance<\/span>/.test(gl));
+check('no column is labelled simply "Balance"', !/title:\s*'Balance'/.test(gl));
 check('generic "Type" column removed', !/title:\s*'Type'/.test(gl));
 check('uses the shared account-path helper', /buildAccountLabelMap/.test(gl));
 check('counterpart accounts exclude the viewed account (from backend)', /counterAccounts/.test(gl));
@@ -124,7 +127,7 @@ console.log('\n=== Export / Print use the improved schema ===');
 check('print header has Payee / Description + Account(s)',
   /<th>Payee \/ Description<\/th>/.test(gl) && /<th>Account\(s\)<\/th>/.test(gl));
 check('export header has Journal + Payee / Description + Account(s)',
-  /\['Date', 'Journal', 'Payee \/ Description', 'Account\(s\)', 'Reference', 'Debit', 'Credit', 'Balance'\]/.test(gl));
+  /\['Date', 'Journal', 'Payee \/ Description', 'Account\(s\)', 'Reference', 'Debit', 'Credit', 'Running Balance'\]/.test(gl));
 
 // ── Width / layout: all 8 columns fit the desktop width ────────────────────
 console.log('\n=== Width / layout (no horizontal scrollbar on desktop) ===');
@@ -135,7 +138,10 @@ const widthOf = (title) => {
 const w = {
   date: widthOf('Date'), journal: widthOf('Journal'), payee: widthOf('Payee / Description'),
   accounts: widthOf('Account(s)'), reference: widthOf('Reference'),
-  debit: widthOf('Debit'), credit: widthOf('Credit'), balance: widthOf('Balance'),
+  debit: widthOf('Debit'), credit: widthOf('Credit'),
+  // The "Running Balance" column title is now a JSX Tooltip, so read its width
+  // from the account map column (key: 'balance').
+  balance: (() => { const m = gl.match(/key:\s*'balance'[\s\S]*?width:\s*(\d+)/); return m ? Number(m[1]) : null; })(),
 };
 check('Date is compact (80-110px)', w.date >= 80 && w.date <= 110, String(w.date));
 check('Journal is compact (70-95px)', w.journal >= 70 && w.journal <= 95, String(w.journal));

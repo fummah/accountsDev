@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Table, Select, DatePicker, Space, Card, Statistic, Button, Row, Col, Input, Tag, Typography, Tooltip, Divider, message, Modal, Alert, Spin } from 'antd';
 import { PrinterOutlined, DownloadOutlined, SyncOutlined, SearchOutlined, CalendarOutlined, BookOutlined, FileTextOutlined } from '@ant-design/icons';
 import moment from 'moment';
@@ -161,11 +161,18 @@ const GeneralLedger = () => {
     return labels.length === 1 ? labels[0] : `Split (${labels.length} accounts)`;
   };
 
-  const filteredLedger = useMemo(() => {
-    if (!searchText) return allLedger;
+  // FULL ordered period activity — the Account Balance Summary is ALWAYS derived
+  // from this, never from the Search-filtered view. Search only HIDES rows; it
+  // must never redefine the account's Opening/Closing balance.
+  const allSorted = useMemo(() =>
+    [...allLedger].sort((a, b) => new Date(a.date) - new Date(b.date) || Number(a.id) - Number(b.id)),
+    [allLedger]);
+
+  // Search predicate (display-only).
+  const matchesSearch = useCallback((e) => {
+    if (!searchText) return true;
     const q = searchText.toLowerCase();
-    return allLedger.filter(e =>
-      (e.description || '').toLowerCase().includes(q) ||
+    return (e.description || '').toLowerCase().includes(q) ||
       (e.lineDesc || '').toLowerCase().includes(q) ||
       (e.reference || '').toLowerCase().includes(q) ||
       (e.memo || '').toLowerCase().includes(q) ||
@@ -173,17 +180,12 @@ const GeneralLedger = () => {
       (e.source && e.source.number ? String(e.source.number).toLowerCase().includes(q) : false) ||
       String(e.journalId || '').includes(q) ||
       (e.counterAccounts || []).some(a =>
-        String(labelMap.get(Number(a.id)) || a.name || '').toLowerCase().includes(q))
-    );
-  }, [allLedger, searchText, labelMap]);
+        String(labelMap.get(Number(a.id)) || a.name || '').toLowerCase().includes(q));
+  }, [searchText, labelMap]);
 
-  const sortedLedger = useMemo(() =>
-    [...filteredLedger].sort((a, b) => new Date(a.date) - new Date(b.date) || Number(a.id) - Number(b.id)),
-    [filteredLedger]);
-
-  const totalDebit = sortedLedger.reduce((s, e) => s + (Number(e.debit) || 0), 0);
-  const totalCredit = sortedLedger.reduce((s, e) => s + (Number(e.credit) || 0), 0);
-  const netMovement = totalDebit - totalCredit;
+  // Period activity totals — the authoritative, unfiltered figures.
+  const periodDebits = allSorted.reduce((s, e) => s + (Number(e.debit) || 0), 0);
+  const periodCredits = allSorted.reduce((s, e) => s + (Number(e.credit) || 0), 0);
 
   // The account's normal balance controls the running-balance sign: Debit-normal
   // accounts (Asset/Bank/Expense) grow by (debit - credit); Credit-normal accounts
@@ -208,12 +210,19 @@ const GeneralLedger = () => {
   // It is the SAME figure already inside the account's computed balance — shown
   // as a row, never added twice.
   const startingBalance = Number(openingState?.balance || 0);
-  const isOpeningRow = !!openingState?.isOpening;
 
-  // Period-scoped closing balance: brought-forward balance plus this period's net
-  // movement. The chart-of-accounts "balance" is the current total and would leak
-  // activity from outside the selected date range into the report.
-  const closingBalance = startingBalance + sortedLedger.reduce((s, e) => s + balanceDelta(e), 0);
+  // Net Movement = this account's BALANCE effect during the period, expressed on
+  // its NORMAL side: debit-normal accounts grow by (debits − credits);
+  // credit-normal accounts (Liability/Equity/Income) grow by (credits − debits).
+  // This is what the user must NOT confuse with the closing balance.
+  const netMovement = normalBalance === 'Credit'
+    ? (periodCredits - periodDebits)
+    : (periodDebits - periodCredits);
+
+  // Closing Balance = brought-forward balance + this period's net movement,
+  // derived from the FULL (unfiltered) activity, so it is the authoritative
+  // closing balance for the selected period — never a page or search subtotal.
+  const closingBalance = startingBalance + netMovement;
 
   // Opening Balance / Balance Brought Forward as the first ledger row.
   // `date` is the period start (the moment the brought-forward figure is true
@@ -243,14 +252,28 @@ const GeneralLedger = () => {
     }];
   }, [selectedAccountData, openingState, dateRange, startingBalance]);
 
-  // Running balance starts from the opening / brought-forward balance
-  const withRunningBalance = useMemo(() => {
+  // Running Balance is computed over the FULL ordered period (not the filtered
+  // view), so each row's balance is correct even while the Search box filters
+  // which rows are shown.
+  const withRunningBalanceFull = useMemo(() => {
     let balance = startingBalance;
-    return openingRow.concat(sortedLedger.map((entry, idx) => {
+    return openingRow.concat(allSorted.map((entry, idx) => {
       balance += balanceDelta(entry);
       return { ...entry, _idx: idx, balance };
     }));
-  }, [openingRow, sortedLedger, startingBalance]);
+  }, [openingRow, allSorted, startingBalance]);
+
+  // Rows shown in the table: the opening row always, then activity matching the
+  // Search box. Each carries its true full-period running balance.
+  const withRunningBalance = useMemo(
+    () => withRunningBalanceFull.filter(r => r.isOpening || matchesSearch(r)),
+    [withRunningBalanceFull, matchesSearch]);
+
+  // Filtered subtotal — meaningful only when Search is active; labelled
+  // "Filtered" so it is never mistaken for the account's real balance.
+  const filteredDebits = withRunningBalance.reduce((s, e) => s + (Number(e.isOpening ? 0 : e.debit) || 0), 0);
+  const filteredCredits = withRunningBalance.reduce((s, e) => s + (Number(e.isOpening ? 0 : e.credit) || 0), 0);
+  const filteredNet = normalBalance === 'Credit' ? (filteredCredits - filteredDebits) : (filteredDebits - filteredCredits);
 
   // ── Drill-down: open a journal entry by id ──────────────────────────────
   const openJournal = (journalId) => {
@@ -334,7 +357,7 @@ const GeneralLedger = () => {
     { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120, ellipsis: true, render: v => v ? <span title={v}>{v}</span> : <Text type="secondary">-</Text> },
     { title: 'Debit', dataIndex: 'debit', key: 'debit', width: 105, align: 'right', render: v => Number(v) ? <Text style={{ color: '#3f8600', whiteSpace: 'nowrap' }}>{fmt(v)}</Text> : '' },
     { title: 'Credit', dataIndex: 'credit', key: 'credit', width: 105, align: 'right', render: v => Number(v) ? <Text style={{ color: '#cf1322', whiteSpace: 'nowrap' }}>{fmt(v)}</Text> : '' },
-    { title: 'Balance', dataIndex: 'balance', key: 'balance', width: 115, align: 'right', render: v => <Text strong style={{ color: v >= 0 ? '#1890ff' : '#ff4d4f', whiteSpace: 'nowrap' }}>{fmt(v)}</Text> },
+    { title: <Tooltip title="Account balance immediately after this transaction."><span>Running Balance</span></Tooltip>, dataIndex: 'balance', key: 'balance', width: 125, align: 'right', render: v => <Text strong style={{ color: v >= 0 ? '#1890ff' : '#ff4d4f', whiteSpace: 'nowrap' }}>{fmt(v)}</Text> },
   ];
 
   // The opening row can legitimately have NO date (no period selected and no
@@ -347,14 +370,36 @@ const GeneralLedger = () => {
     const acct = selectedAccountData;
     const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
     const rowsHtml = withRunningBalance.map(r => `<tr><td>${fmtDate(r.date, 'MM/DD/YYYY')}</td><td>${r.journalId ? '#' + r.journalId : ''}</td><td>${esc(partyOf(r))}</td><td>${esc(counterText(r))}</td><td>${esc(r.reference || '')}</td><td style="text-align:right">${Number(r.debit) ? fmt(r.debit) : ''}</td><td style="text-align:right">${Number(r.credit) ? fmt(r.credit) : ''}</td><td style="text-align:right">${fmt(r.balance)}</td></tr>`).join('');
-    const html = `<!doctype html><html><head><title>General Ledger</title><style>body{font-family:Arial,sans-serif;font-size:11px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:5px}th{background:#f5f5f5;text-align:left}tfoot td{font-weight:bold;border-top:2px solid #333}</style></head><body><h2>General Ledger</h2><p><strong>${acct ? (acct.accountNumber || acct.accountCode || '') + ' - ' + (acct.accountName || acct.name || '') : ''}</strong></p><p>${dateRange[0].format('MM/DD/YYYY')} to ${dateRange[1].format('MM/DD/YYYY')}</p><table><thead><tr><th>Date</th><th>Journal</th><th>Payee / Description</th><th>Account(s)</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${rowsHtml}</tbody><tfoot><tr><td colspan="5">Totals</td><td style="text-align:right">${fmt(totalDebit)}</td><td style="text-align:right">${fmt(totalCredit)}</td><td style="text-align:right">${fmt(netMovement)}</td></tr></tfoot></table></body></html>`;
+    const acctType = acct ? (acct.accountType || acct.type || '') : '';
+    const summaryHtml = `<table style="width:62%;margin-bottom:10px"><tbody>
+      <tr><td>Opening Balance</td><td style="text-align:right">${fmt(startingBalance)}</td></tr>
+      <tr><td>Period Debits</td><td style="text-align:right">${fmt(periodDebits)}</td></tr>
+      <tr><td>Period Credits</td><td style="text-align:right">${fmt(periodCredits)}</td></tr>
+      <tr><td><strong>Net Movement</strong></td><td style="text-align:right"><strong>${netMovement >= 0 ? '+' : ''}${fmt(netMovement)}</strong></td></tr>
+      <tr><td><strong>Closing Balance</strong></td><td style="text-align:right"><strong>${fmt(closingBalance)}</strong></td></tr>
+    </tbody></table>`;
+    const html = `<!doctype html><html><head><title>General Ledger</title><style>body{font-family:Arial,sans-serif;font-size:11px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:5px}th{background:#f5f5f5;text-align:left}tfoot td{font-weight:bold;border-top:2px solid #333}</style></head><body><h2>General Ledger</h2><p><strong>${acct ? (acct.accountNumber || acct.accountCode || '') + ' - ' + (acct.accountName || acct.name || '') : ''}</strong></p><p>Account Type: ${acctType} &middot; Normal Balance: ${normalBalance}</p><p>${dateRange[0].format('MM/DD/YYYY')} to ${dateRange[1].format('MM/DD/YYYY')}</p>${summaryHtml}<table><thead><tr><th>Date</th><th>Journal</th><th>Payee / Description</th><th>Account(s)</th><th>Reference</th><th>Debit</th><th>Credit</th><th>Running Balance</th></tr></thead><tbody>${rowsHtml}</tbody><tfoot><tr><td colspan="5">Period Activity — Debits / Credits</td><td style="text-align:right">${fmt(periodDebits)}</td><td style="text-align:right">${fmt(periodCredits)}</td><td></td></tr><tr><td colspan="7">Net Movement</td><td style="text-align:right">${netMovement >= 0 ? '+' : ''}${fmt(netMovement)}</td></tr><tr><td colspan="7">Closing Balance</td><td style="text-align:right">${fmt(closingBalance)}</td></tr></tfoot></table></body></html>`;
     const w = window.open('', '_blank'); w.document.open(); w.document.write(html); w.document.close(); setTimeout(() => w.print(), 300);
   };
 
   const handleExport = () => {
     if (!withRunningBalance.length) { message.warning('No data to export'); return; }
     const q = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
-    const lines = [['Date', 'Journal', 'Payee / Description', 'Account(s)', 'Reference', 'Debit', 'Credit', 'Balance'].join(',')];
+    const acctType = selectedAccountData ? (selectedAccountData.accountType || selectedAccountData.type || '') : '';
+    const acctLabel = selectedAccountData
+      ? `${selectedAccountData.accountNumber || selectedAccountData.accountCode || ''} - ${selectedAccountData.accountName || selectedAccountData.name || ''}`
+      : '';
+    const lines = [];
+    // Summary metadata (so the file explains itself and never labels Net Movement as "Balance").
+    lines.push(['General Ledger'].join(','));
+    lines.push([q(acctLabel)].join(','));
+    lines.push([q(`Account Type: ${acctType}`), q(`Normal Balance: ${normalBalance}`)].join(','));
+    lines.push([q(`Period: ${dateRange[0].format('YYYY-MM-DD')} to ${dateRange[1].format('YYYY-MM-DD')}`)].join(','));
+    lines.push(['Opening Balance', startingBalance.toFixed(2)].join(','));
+    lines.push(['Period Debits', periodDebits.toFixed(2), 'Period Credits', periodCredits.toFixed(2)].join(','));
+    lines.push(['Net Movement', netMovement.toFixed(2), 'Closing Balance', closingBalance.toFixed(2)].join(','));
+    lines.push('');
+    lines.push(['Date', 'Journal', 'Payee / Description', 'Account(s)', 'Reference', 'Debit', 'Credit', 'Running Balance'].join(','));
     withRunningBalance.forEach(r => {
       lines.push([
         fmtDate(r.date, 'YYYY-MM-DD'),
@@ -367,7 +412,9 @@ const GeneralLedger = () => {
         r.balance.toFixed(2),
       ].join(','));
     });
-    lines.push(['Totals', '', '', '', '', totalDebit.toFixed(2), totalCredit.toFixed(2), netMovement.toFixed(2)].join(','));
+    lines.push(['Period Totals', '', '', '', 'Debits', periodDebits.toFixed(2), 'Credits', periodCredits.toFixed(2)].join(','));
+    lines.push(['Net Movement', '', '', '', '', '', '', netMovement.toFixed(2)].join(','));
+    lines.push(['Closing Balance', '', '', '', '', '', '', closingBalance.toFixed(2)].join(','));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `general-ledger-${selectedAccountData?.accountCode || 'all'}-${dateRange[0].format('YYYYMMDD')}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   };
@@ -390,9 +437,22 @@ const GeneralLedger = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <Title level={3} style={{ margin: 0 }}>General Ledger</Title>
-          <Text type="secondary">
-            {selectedAccountData ? `${selectedAccountData.accountNumber || selectedAccountData.accountCode || ''} — ${selectedAccountData.accountName || selectedAccountData.name || ''}` : 'Select an account to view ledger entries'}
-          </Text>
+          {selectedAccountData ? (
+            <>
+              <Text strong style={{ fontSize: 15 }}>
+                {selectedAccountData.accountNumber || selectedAccountData.accountCode || ''}
+                {(selectedAccountData.accountNumber || selectedAccountData.accountCode) ? ' — ' : ''}
+                {selectedAccountData.accountName || selectedAccountData.name || ''}
+              </Text>
+              <div>
+                <Text type="secondary">
+                  {selectedAccountData.accountType || selectedAccountData.type || ''}
+                  {(selectedAccountData.accountType || selectedAccountData.type) ? ' · ' : ''}
+                  Normal Balance: <Text strong>{normalBalance}</Text>
+                </Text>
+              </div>
+            </>
+          ) : <Text type="secondary">Select an account to view ledger entries</Text>}
         </div>
         <Space wrap>
           <Tooltip title="Double-click a row to open its journal entry">
@@ -437,34 +497,74 @@ const GeneralLedger = () => {
         </Row>
       </Card>
 
-      {/* Account Summary Cards */}
+      {/* Account Balance Summary — the five figures that tell the whole story.
+          All derive from the FULL (unfiltered) period, independent of paging. */}
       {selectedAccountData && (
-        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-          <Col xs={12} sm={6}>
-            <Card size="small" style={{ borderTop: '3px solid #1890ff' }}>
-              <Statistic title="Account" value={selectedAccountData.accountNumber || selectedAccountData.accountCode || '-'} valueStyle={{ fontSize: 18 }} />
-              <Text type="secondary">{selectedAccountData.accountType || selectedAccountData.type || ''}</Text>
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card size="small" style={{ borderTop: '3px solid #722ed1' }}>
-              <Statistic title={isOpeningRow ? 'Opening Balance' : 'Balance Brought Forward'} value={startingBalance} precision={2} prefix={cSym} valueStyle={{ fontSize: 18, color: startingBalance >= 0 ? '#1890ff' : '#ff4d4f' }} />
-              <Text type="secondary">as of {dateRange[0].format('MM/DD/YYYY')}</Text>
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card size="small" style={{ borderTop: '3px solid #52c41a' }}>
-              <Statistic title="Net Movement" value={netMovement} precision={2} prefix={cSym} valueStyle={{ fontSize: 18, color: netMovement >= 0 ? '#3f8600' : '#cf1322' }} />
-              <Text type="secondary">{sortedLedger.length} transactions</Text>
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card size="small" style={{ borderTop: '3px solid #ff4d4f' }}>
-              <Statistic title="Closing Balance (Period)" value={closingBalance} precision={2} prefix={cSym} valueStyle={{ fontSize: 18, color: closingBalance >= 0 ? '#1890ff' : '#ff4d4f' }} />
-              <Text type="secondary">as of {dateRange[1].format('MM/DD/YYYY')}</Text>
-            </Card>
-          </Col>
-        </Row>
+        <>
+          <Row gutter={[16, 16]} style={{ marginBottom: 12 }}>
+            <Col xs={12} sm={8} lg={4}>
+              <Card size="small" style={{ borderTop: '3px solid #722ed1' }}>
+                <Statistic title={<Tooltip title="Account balance brought forward at the beginning of the selected period."><span>Opening Balance</span></Tooltip>} value={startingBalance} precision={2} prefix={cSym} valueStyle={{ fontSize: 18, color: startingBalance >= 0 ? '#1890ff' : '#ff4d4f' }} />
+                <Text type="secondary">as of {dateRange[0].format('MM/DD/YYYY')}</Text>
+              </Card>
+            </Col>
+            <Col xs={12} sm={8} lg={5}>
+              <Card size="small" style={{ borderTop: '3px solid #52c41a' }}>
+                <Statistic title="Period Debits" value={periodDebits} precision={2} prefix={cSym} valueStyle={{ fontSize: 18, color: '#3f8600' }} />
+                <Text type="secondary">in the selected period</Text>
+              </Card>
+            </Col>
+            <Col xs={12} sm={8} lg={5}>
+              <Card size="small" style={{ borderTop: '3px solid #cf1322' }}>
+                <Statistic title="Period Credits" value={periodCredits} precision={2} prefix={cSym} valueStyle={{ fontSize: 18, color: '#cf1322' }} />
+                <Text type="secondary">in the selected period</Text>
+              </Card>
+            </Col>
+            <Col xs={12} sm={12} lg={5}>
+              <Card size="small" style={{ borderTop: `3px solid ${netMovement >= 0 ? '#3f8600' : '#cf1322'}` }}>
+                <Tooltip title="Net change in this account's balance during the selected period — not the closing balance.">
+                  <div style={{ fontSize: 14, color: 'rgba(0,0,0,0.45)', marginBottom: 4, whiteSpace: 'nowrap' }}>Net Movement</div>
+                </Tooltip>
+                <Text strong style={{ fontSize: 20, color: netMovement >= 0 ? '#3f8600' : '#cf1322' }}>
+                  {netMovement >= 0 ? '+' : '−'}{fmtC(Math.abs(netMovement))}
+                </Text>
+                <div><Text type="secondary">{allSorted.length} transactions</Text></div>
+              </Card>
+            </Col>
+            <Col xs={24} sm={12} lg={5}>
+              <Card size="small" style={{ borderTop: '3px solid #1890ff', background: '#f0f7ff' }}>
+                <Statistic title={<Tooltip title="Authoritative account balance at the end of the selected period (full period, not the current page)."><span>Closing Balance</span></Tooltip>} value={closingBalance} precision={2} prefix={cSym} valueStyle={{ fontSize: 20, fontWeight: 700, color: closingBalance >= 0 ? '#1890ff' : '#ff4d4f' }} />
+                <Text type="secondary">as of {dateRange[1].format('MM/DD/YYYY')}</Text>
+              </Card>
+            </Col>
+          </Row>
+
+          {/* Balance reconciliation — makes the arithmetic explicit. */}
+          <Card size="small" style={{ marginBottom: 16, background: '#fafafa' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>Balance Reconciliation</Text>
+            <div style={{ marginTop: 2, fontSize: 13 }}>
+              <Text>{fmtC(startingBalance)}</Text>
+              {normalBalance === 'Credit' ? (
+                <> <Text type="secondary">+</Text> <Text style={{ color: '#cf1322' }}>{fmtC(periodCredits)}</Text> <Text type="secondary">−</Text> <Text style={{ color: '#3f8600' }}>{fmtC(periodDebits)}</Text></>
+              ) : (
+                <> <Text type="secondary">+</Text> <Text style={{ color: '#3f8600' }}>{fmtC(periodDebits)}</Text> <Text type="secondary">−</Text> <Text style={{ color: '#cf1322' }}>{fmtC(periodCredits)}</Text></>
+              )}
+              {' '}<Text type="secondary">=</Text> <Text strong>{fmtC(closingBalance)}</Text>
+              <Text type="secondary" style={{ marginLeft: 12 }}>
+                (Net Movement: {netMovement >= 0 ? '+' : '−'}{fmtC(Math.abs(netMovement))})
+              </Text>
+            </div>
+            {searchText && (
+              <div style={{ marginTop: 4 }}>
+                <Text type="warning" style={{ fontSize: 12 }}>
+                  Search active — showing {withRunningBalance.filter(r => !r.isOpening).length} of {allSorted.length} transactions.
+                  Filtered: Debits {fmtC(filteredDebits)}, Credits {fmtC(filteredCredits)}, Net {filteredNet >= 0 ? '+' : '−'}{fmtC(Math.abs(filteredNet))}.
+                  Balances above reflect the full period.
+                </Text>
+              </div>
+            )}
+          </Card>
+        </>
       )}
 
       {/* Ledger Table */}
@@ -496,19 +596,30 @@ const GeneralLedger = () => {
             if (!pageData.length) return null;
             let pgDebit = 0, pgCredit = 0;
             pageData.forEach(r => { pgDebit += Number(r.debit) || 0; pgCredit += Number(r.credit) || 0; });
+            // The last column is Running Balance, so its footer shows the ENDING
+            // running balance — never net movement mislabelled as "Balance".
+            const pageEndBalance = pageData[pageData.length - 1]
+              ? Number(pageData[pageData.length - 1].balance) || 0 : closingBalance;
+            const displayed = withRunningBalance.filter(r => !r.isOpening).length;
             return (
               <>
                 <Table.Summary.Row style={{ background: '#fafafa' }}>
-                  <Table.Summary.Cell colSpan={5}><Text strong>Page Totals</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell colSpan={5}>
+                    <Text strong>Page Totals</Text>
+                    <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>(this page — Net Movement {pgDebit - pgCredit >= 0 ? '+' : '−'}{fmt(Math.abs(pgDebit - pgCredit))})</Text>
+                  </Table.Summary.Cell>
                   <Table.Summary.Cell align="right"><Text strong style={{ color: '#3f8600' }}>{fmt(pgDebit)}</Text></Table.Summary.Cell>
                   <Table.Summary.Cell align="right"><Text strong style={{ color: '#cf1322' }}>{fmt(pgCredit)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text strong>{fmt(pgDebit - pgCredit)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text strong style={{ color: '#1890ff' }}>{fmt(pageEndBalance)}</Text></Table.Summary.Cell>
                 </Table.Summary.Row>
                 <Table.Summary.Row style={{ background: '#e6f7ff' }}>
-                  <Table.Summary.Cell colSpan={5}><Text strong>Grand Totals ({sortedLedger.length} entries)</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text strong style={{ color: '#3f8600' }}>{fmt(totalDebit)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text strong style={{ color: '#cf1322' }}>{fmt(totalCredit)}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text strong style={{ color: '#1890ff' }}>{fmt(netMovement)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell colSpan={5}>
+                    <Text strong>Grand Totals ({displayed}{searchText ? ` of ${allSorted.length}` : ''} entries)</Text>
+                    <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>(Net Movement {netMovement >= 0 ? '+' : '−'}{fmt(Math.abs(netMovement))})</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text strong style={{ color: '#3f8600' }}>{fmt(periodDebits)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text strong style={{ color: '#cf1322' }}>{fmt(periodCredits)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text strong style={{ color: '#1890ff' }}>{fmt(closingBalance)}</Text></Table.Summary.Cell>
                 </Table.Summary.Row>
               </>
             );
