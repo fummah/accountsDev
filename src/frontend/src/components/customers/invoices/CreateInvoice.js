@@ -3,7 +3,7 @@ import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Table, Spac
 import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, SaveOutlined, FilePdfOutlined, PrinterOutlined, EyeOutlined, SettingOutlined, MailOutlined, UserOutlined, FileTextOutlined, UnorderedListOutlined, MessageOutlined } from '@ant-design/icons';
 import { handleDocumentPDF } from '../shared/generateDocumentPDF';
 import SendEmailModal from '../shared/SendEmailModal';
-import { confirmSavedDocumentEdit, confirmPaymentImpact, confirmFinancialImpact, useUnsavedChanges } from '../shared/documentEditGuard';
+import { confirmSavedDocumentEdit, confirmPaymentImpact, confirmFinancialImpact, useUnsavedChanges, useDocumentEditGuard } from '../shared/documentEditGuard';
 import CustomerContactFields from '../shared/CustomerContactFields';
 import { deriveDisplayName, getCustomerName } from '../../../utils/contactIdentity';
 import { formatCityStatePostal } from '../../../utils/address';
@@ -63,11 +63,21 @@ const CreateInvoice = () => {
   const [isDirty, setIsDirty] = useState(false);
   const [originalFinancials, setOriginalFinancials] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
-  const armedRef = useRef(false);            // first-edit warning acknowledged this session
   const formSnapshotRef = useRef(null);      // last acknowledged form values (for revert)
   const navBypassRef = useRef(false);        // set before a save-triggered navigation
 
   useUnsavedChanges(isDirty, navBypassRef);
+
+  // ONE confirmation owner for editing a saved invoice (see documentEditGuard).
+  // Both the form-field path and the line path funnel through this single guard,
+  // so one user action can never raise two dialogs.
+  const confirmInvoiceEdit = useCallback(() => {
+    const paid = Number(originalFinancials?.paidToDate) || 0;
+    return (paid > 0)
+      ? confirmPaymentImpact({ paidToDate: paid, currentTotal: Number(originalFinancials?.total) || 0, currencySymbol: cSym })
+      : confirmSavedDocumentEdit('Invoice');
+  }, [originalFinancials, cSym]);
+  const { guard: editGuard, guardWithCancel: editGuardWithCancel, armedRef, reset: resetEditGuard } = useDocumentEditGuard({ isEdit, confirm: confirmInvoiceEdit });
 
   const calcDueDate = (invoiceDate, terms) => {
     if (!invoiceDate || !terms) return;
@@ -129,21 +139,15 @@ const CreateInvoice = () => {
     setTimeout(() => dateRef.current?.focus(), 50);
   };
 
-  const isFinancialField = (field) => ['vat', 'start_date', 'last_date', 'terms', 'number', 'customer', 'billing_address'].includes(field);
-
-  // First material change on an already-saved invoice → warn once per session.
-  // Cancel → do not perform the attempted change.
-  const runEditGuard = useCallback(async (apply, { financial = true } = {}) => {
-    if (!isEdit || armedRef.current) { apply(); setIsDirty(true); return; }
-    const paid = Number(originalFinancials?.paidToDate) || 0;
-    const ok = (financial && paid > 0)
-      ? await confirmPaymentImpact({ paidToDate: paid, currentTotal: Number(originalFinancials?.total) || 0, currencySymbol: cSym })
-      : await confirmSavedDocumentEdit('Invoice');
-    if (ok) { armedRef.current = true; apply(); setIsDirty(true); }
-  }, [isEdit, originalFinancials, cSym]);
+  const runEditGuard = useCallback((apply) => {
+    editGuard(() => { apply(); setIsDirty(true); });
+  }, [editGuard]);
 
   // Invoice-level (form) changes are applied by antd Form before this fires, so
-  // a cancel must revert the form to the last acknowledged snapshot.
+  // a cancel must revert the form to the last acknowledged snapshot. Routed
+  // through the SAME guard, so a form change and a line change that happen in
+  // ONE user action (e.g. selecting a product sets the tax field AND a line)
+  // share a single confirmation instead of opening two.
   const handleFormValuesChange = (changed) => {
     const isCustomer = Object.prototype.hasOwnProperty.call(changed, 'customer');
     if (!isEdit) {
@@ -158,24 +162,18 @@ const CreateInvoice = () => {
     }
     const prevVals = formSnapshotRef.current || {};
     const prevCustomerId = selectedCustomerId;
-    const paid = Number(originalFinancials?.paidToDate) || 0;
-    const financial = Object.keys(changed).some(isFinancialField);
-    const proceed = async () => {
-      const ok = (financial && paid > 0)
-        ? await confirmPaymentImpact({ paidToDate: paid, currentTotal: Number(originalFinancials?.total) || 0, currencySymbol: cSym })
-        : await confirmSavedDocumentEdit('Invoice');
-      if (ok) {
-        armedRef.current = true;
+    editGuardWithCancel(
+      () => {
         if (isCustomer) { setSelectedCustomerId(changed.customer != null ? Number(changed.customer) : null); applyCustomerChange(changed.customer); }
         formSnapshotRef.current = form.getFieldsValue();
         setIsDirty(true);
-      } else {
+      },
+      () => {
         form.setFieldsValue(prevVals);
         if (Object.prototype.hasOwnProperty.call(changed, 'vat')) setVatPercent(Number(prevVals.vat) || 0);
         setSelectedCustomerId(prevCustomerId);
       }
-    };
-    proceed();
+    );
   };
 
   useEffect(() => {
@@ -375,7 +373,7 @@ const CreateInvoice = () => {
         const loadedTotal = loadedSubtotal * (1 + (Number(inv.vat) || 0) / 100);
         setPaidToDate(Number(inv.totalPaid) || 0);
         setOriginalFinancials({ total: loadedTotal, paidToDate: Number(inv.totalPaid) || 0, status: inv.status });
-        armedRef.current = false;
+        resetEditGuard();
         setIsDirty(false);
         formSnapshotRef.current = form.getFieldsValue();
       }
@@ -422,18 +420,24 @@ const CreateInvoice = () => {
     const prodTax = prod.sales_tax_rate_id != null
       ? vatRates.find(v => Number(v.id) === Number(prod.sales_tax_rate_id))
       : null;
-    if (prodTax && !(Number(form.getFieldValue('vat')) > 0)) {
-      form.setFieldsValue({ vat: Number(prodTax.vat_percentage) || 0 });
-      setVatPercent(Number(prodTax.vat_percentage) || 0);
-    }
-    runEditGuard(() => setLines(prev => {
-      const updated = prev.map(l => {
-        if (l.key !== key) return l;
-        return { ...l, description: desc, rate, amount: (Number(l.quantity) || 1) * rate, product_id: productId };
+    // The tax default MUST be set INSIDE the guard callback: setting it earlier
+    // fired the form's onValuesChange guard, which opened a SECOND confirmation
+    // for the same product selection. Inside the callback the edit is already
+    // acknowledged, so the form change is silent.
+    runEditGuard(() => {
+      if (prodTax && !(Number(form.getFieldValue('vat')) > 0)) {
+        form.setFieldsValue({ vat: Number(prodTax.vat_percentage) || 0 });
+        setVatPercent(Number(prodTax.vat_percentage) || 0);
+      }
+      setLines(prev => {
+        const updated = prev.map(l => {
+          if (l.key !== key) return l;
+          return { ...l, description: desc, rate, amount: (Number(l.quantity) || 1) * rate, product_id: productId };
+        });
+        // Product selected → make sure a fresh empty line waits below.
+        return ensureTrailingEmptyLine(updated, makeEmptyLine);
       });
-      // Product selected → make sure a fresh empty line waits below.
-      return ensureTrailingEmptyLine(updated, makeEmptyLine);
-    }));
+    });
   };
 
   const [vatPercent, setVatPercent] = useState(0);
@@ -558,13 +562,13 @@ const CreateInvoice = () => {
       }
       if (navigate) {
         setIsDirty(false);
-        armedRef.current = false;
+        resetEditGuard();
         formSnapshotRef.current = form.getFieldsValue();
         navBypassRef.current = true;
         history.push('/main/customers/invoices/list');
       } else {
         setIsDirty(false);
-        armedRef.current = false;
+        resetEditGuard();
         formSnapshotRef.current = form.getFieldsValue();
       }
       return savedId;

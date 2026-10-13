@@ -529,6 +529,8 @@ invoiceRefundCreate:     (payload)    => ipcRenderer.invoke('invoice-refund-crea
   // Quote Template Customization
   getQuoteTemplate: () => ipcRenderer.invoke('get-quote-template'),
   saveQuoteTemplate: (templateSettings) => ipcRenderer.invoke('save-quote-template', templateSettings),
+  getCheckPrintSettings: () => ipcRenderer.invoke('get-check-print-settings'),
+  saveCheckPrintSettings: (cfg) => ipcRenderer.invoke('save-check-print-settings', cfg),
 
   // Imports (QuickBooks CSV)
   importCustomersCsv: (csvText, options) => ipcRenderer.invoke('import-customers-csv', csvText, options || {}),

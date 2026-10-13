@@ -7,7 +7,7 @@ import { useHistory, useParams, useLocation } from 'react-router-dom';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
 import { ensureTrailingEmptyLine, removeLineItem, normalizeDocumentLines, collapseToSingleTrailingEmpty } from '../../../utils/lineItems';
-import { confirmSavedDocumentEdit, confirmDocumentAction, useUnsavedChanges } from '../shared/documentEditGuard';
+import { confirmSavedDocumentEdit, confirmDocumentAction, useUnsavedChanges, useDocumentEditGuard } from '../shared/documentEditGuard';
 import CustomerContactFields from '../shared/CustomerContactFields';
 import { deriveDisplayName, getCustomerName } from '../../../utils/contactIdentity';
 import { formatCityStatePostal } from '../../../utils/address';
@@ -54,11 +54,15 @@ const CreateQuote = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
-  const armedRef = useRef(false);
   const formSnapshotRef = useRef(null);
   const navBypassRef = useRef(false);
 
   useUnsavedChanges(isDirty, navBypassRef);
+
+  // ONE confirmation owner for editing a saved quote (see documentEditGuard) —
+  // the form-field path and the line path share a single dialog.
+  const confirmQuoteEdit = useCallback(() => confirmSavedDocumentEdit('Quote'), []);
+  const { guard: editGuard, guardWithCancel: editGuardWithCancel, armedRef, reset: resetEditGuard } = useDocumentEditGuard({ isEdit, confirm: confirmQuoteEdit });
   const [productCategories, setProductCategories] = useState([]);
   const [catModalOpen, setCatModalOpen] = useState(false);
   const [catForm] = Form.useForm();
@@ -125,12 +129,10 @@ const CreateQuote = () => {
     setTimeout(() => dateRef.current?.focus(), 50);
   };
 
-  // First material change on an already-saved quote → warn once per session.
-  const runEditGuard = useCallback(async (apply) => {
-    if (!isEdit || armedRef.current) { apply(); setIsDirty(true); return; }
-    const ok = await confirmSavedDocumentEdit('Quote');
-    if (ok) { armedRef.current = true; apply(); setIsDirty(true); }
-  }, [isEdit]);
+  // Line-level edit → ONE guard call (the shared guard opens at most one dialog).
+  const runEditGuard = useCallback((apply) => {
+    editGuard(() => { apply(); setIsDirty(true); });
+  }, [editGuard]);
 
   const handleFormValuesChange = (changed) => {
     const isCustomer = Object.prototype.hasOwnProperty.call(changed, 'customer');
@@ -147,18 +149,18 @@ const CreateQuote = () => {
     }
     const prevVals = formSnapshotRef.current || {};
     const prevCustomerId = selectedCustomerId;
-    confirmSavedDocumentEdit('Quote').then((ok) => {
-      if (ok) {
-        armedRef.current = true;
+    editGuardWithCancel(
+      () => {
         if (isCustomer) { setCustomer(changed.customer); applyCustomerChange(changed.customer); }
         formSnapshotRef.current = form.getFieldsValue();
         setIsDirty(true);
-      } else {
+      },
+      () => {
         form.setFieldsValue(prevVals);
         if (Object.prototype.hasOwnProperty.call(changed, 'vat')) setVatPercent(Number(prevVals.vat) || 0);
         setSelectedCustomerId(prevCustomerId);
       }
-    });
+    );
   };
 
   useEffect(() => {
@@ -308,7 +310,7 @@ const CreateQuote = () => {
           // One blank trailing row for convenient entry; never persisted.
           setLines(ensureTrailingEmptyLine(loaded, makeEmptyLine));
         }
-        armedRef.current = false;
+        resetEditGuard();
         setIsDirty(false);
         formSnapshotRef.current = form.getFieldsValue();
       }
@@ -355,18 +357,22 @@ const CreateQuote = () => {
     const prodTax = prod.sales_tax_rate_id != null
       ? vatRates.find(v => Number(v.id) === Number(prod.sales_tax_rate_id))
       : null;
-    if (prodTax && !(Number(form.getFieldValue('vat')) > 0)) {
-      form.setFieldsValue({ vat: Number(prodTax.vat_percentage) || 0 });
-      setVatPercent(Number(prodTax.vat_percentage) || 0);
-    }
-    runEditGuard(() => setLines(prev => {
-      const updated = prev.map(l => {
-        if (l.key !== key) return l;
-        return { ...l, description: desc, rate, amount: (l.quantity || 1) * rate, product_id: productId };
+    // Tax default set INSIDE the guard callback (setting it before fired the
+    // form onValuesChange guard and opened a second confirmation).
+    runEditGuard(() => {
+      if (prodTax && !(Number(form.getFieldValue('vat')) > 0)) {
+        form.setFieldsValue({ vat: Number(prodTax.vat_percentage) || 0 });
+        setVatPercent(Number(prodTax.vat_percentage) || 0);
+      }
+      setLines(prev => {
+        const updated = prev.map(l => {
+          if (l.key !== key) return l;
+          return { ...l, description: desc, rate, amount: (l.quantity || 1) * rate, product_id: productId };
+        });
+        // Product selected → make sure a fresh empty line waits below.
+        return ensureTrailingEmptyLine(updated, makeEmptyLine);
       });
-      // Product selected → make sure a fresh empty line waits below.
-      return ensureTrailingEmptyLine(updated, makeEmptyLine);
-    }));
+    });
   };
 
   const [vatPercent, setVatPercent] = useState(0);
@@ -450,7 +456,7 @@ const CreateQuote = () => {
         message.success('Quote created');
       }
       setIsDirty(false);
-      armedRef.current = false;
+      resetEditGuard();
       formSnapshotRef.current = form.getFieldsValue();
       if (navigate) {
         navBypassRef.current = true;
@@ -579,7 +585,7 @@ const CreateQuote = () => {
       setConvertedInvoiceId(res?.invoiceId || null);
       setConvertedInvoiceNumber(res?.invoiceNumber || null);
       setIsDirty(false);
-      armedRef.current = false;
+      resetEditGuard();
       message.success(`Quote converted to invoice${res?.invoiceNumber ? ` ${res.invoiceNumber}` : ''}`);
     } catch { message.error('Conversion failed'); }
     finally { setActionBusy(false); }

@@ -116,6 +116,37 @@ function registerSettingsHandlers() {
       return { error: e.message };
     }
   });
+
+  // Preprinted-check alignment (physical, in inches). Different printers feed
+  // stock differently, so the CHECK body's vertical/horizontal offset is a
+  // single persisted calibration instead of hard-coded pixels.
+  ipcMain.handle('get-check-print-settings', async () => {
+    try {
+      const s = Settings.get('checkPrintSettings') || {};
+      return {
+        offsetYIn: s.offsetYIn != null && s.offsetYIn !== '' ? Number(s.offsetYIn) : 0.5,
+        offsetXIn: s.offsetXIn != null && s.offsetXIn !== '' ? Number(s.offsetXIn) : 0,
+      };
+    } catch (e) {
+      console.error('Error getting check print settings:', e);
+      return { offsetYIn: 0.5, offsetXIn: 0 };
+    }
+  });
+
+  ipcMain.handle('save-check-print-settings', async (_event, cfg) => {
+    try {
+      const cur = Settings.get('checkPrintSettings') || {};
+      const next = {
+        offsetYIn: cfg && cfg.offsetYIn != null ? Number(cfg.offsetYIn) : (cur.offsetYIn != null ? Number(cur.offsetYIn) : 0.5),
+        offsetXIn: cfg && cfg.offsetXIn != null ? Number(cfg.offsetXIn) : (cur.offsetXIn != null ? Number(cur.offsetXIn) : 0),
+      };
+      Settings.set('checkPrintSettings', next);
+      return { success: true, ...next };
+    } catch (e) {
+      console.error('Error saving check print settings:', e);
+      return { error: e.message };
+    }
+  });
 }
 
 module.exports = registerSettingsHandlers;

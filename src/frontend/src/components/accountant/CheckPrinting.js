@@ -89,6 +89,12 @@ const CheckPrinting = () => {
   const [totalChecks, setTotalChecks] = useState(0);
   const [thisMonthCount, setThisMonthCount] = useState(0);
   const [suggestedCheckNum, setSuggestedCheckNum] = useState('');
+  // Preprinted-check physical alignment (inches), persisted in settings. The
+  // whole check body shifts by these, so printer/stock feed differences are a
+  // single calibration — never scattered per-field pixel hacks.
+  const [alignYIn, setAlignYIn] = useState(0.5);
+  const [alignXIn, setAlignXIn] = useState(0);
+  const [alignSaving, setAlignSaving] = useState(false);
 
   const location = useLocation();
   const history = useHistory();
@@ -99,6 +105,19 @@ const CheckPrinting = () => {
   useEffect(() => { loadCheckHistory(); }, [page, pageSize, searchText]);
   // Load stats on mount (and after mutations)
   useEffect(() => { loadCheckStats(); }, []);
+
+  // Load the saved preprinted-check alignment calibration.
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await window.electronAPI.getCheckPrintSettings?.();
+        if (s && !s.error) {
+          if (s.offsetYIn != null) setAlignYIn(Number(s.offsetYIn));
+          if (s.offsetXIn != null) setAlignXIn(Number(s.offsetXIn));
+        }
+      } catch { /* keep defaults */ }
+    })();
+  }, []);
 
   // Auto-load check passed from Pay Bills/Bill Tracker via query param
   const autoLoadCheckId = useMemo(() => {
@@ -435,8 +454,8 @@ const CheckPrinting = () => {
          as one piece without disturbing the internal layout.
          â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
       :root {
-        --check-offset-x: 0in;    /* nudge the whole body left/right */
-        --check-offset-y: 0in;    /* nudge the whole body up/down    */
+        --check-offset-x: ${Number(alignXIn || 0)}in;    /* nudge the whole body left/right */
+        --check-offset-y: ${Number(alignYIn || 0)}in;    /* nudge the whole body up/down    */
         --check-pad-left: 28px;   /* left inset of the printed fields  */
         --check-pad-right: 28px;  /* right inset of the printed fields */
         --check-date-top: 8px;    /* date band            */
@@ -568,6 +587,40 @@ const CheckPrinting = () => {
         reloadAll();
       }
     }
+  };
+
+  // ── Preprinted-check alignment calibration ────────────────────────────────
+  // Persist the physical (inch) offset so different printers/stock feeds can be
+  // tuned without editing source. Document-only: never touches accounting.
+  const saveAlignment = async () => {
+    setAlignSaving(true);
+    try {
+      const res = await window.electronAPI.saveCheckPrintSettings?.({ offsetYIn: Number(alignYIn) || 0, offsetXIn: Number(alignXIn) || 0 });
+      if (res && res.success !== false && !res.error) {
+        if (res.offsetYIn != null) setAlignYIn(Number(res.offsetYIn));
+        if (res.offsetXIn != null) setAlignXIn(Number(res.offsetXIn));
+        message.success('Check alignment saved');
+      } else { message.error(res?.error || 'Failed to save alignment'); }
+    } finally { setAlignSaving(false); }
+  };
+
+  // Alignment test: prints the CURRENT template with sample values. It creates
+  // NO transaction, posts NO accounting and consumes NO check number.
+  const printTestCheck = () => {
+    const sample = {
+      date: moment(),
+      payeeName: 'ALIGNMENT TEST - NOT A REAL CHECK',
+      payeeAddress: 'Sample Payee\n123 Sample Street\nSample City, ST 00000',
+      amount: 1234.56,
+      memo: 'Alignment test',
+      splitLines: [],
+      accountName: selectedAccount?.accountName || selectedAccount?.name || '',
+      _company: company,
+    };
+    const html = generateCheckHtml(sample, true);
+    const w = window.open('', '_blank');
+    w.document.open(); w.document.write(html); w.document.close();
+    setTimeout(() => w.print(), 300);
   };
 
   const onFinish = async (values, saveOnly) => {
@@ -912,6 +965,30 @@ const CheckPrinting = () => {
           </Card>
         </Col>
       </Row>
+
+      {/* Preprinted-check alignment (physical, inches). Shifts the WHOLE check
+          body as one piece — field values, spacing and horizontal position are
+          untouched. Default Vertical +0.50in for the current stock. */}
+      <Card size="small" style={{ marginBottom: 20, borderTop: '3px solid #13c2c2' }}
+        title={<><PrinterOutlined style={{ marginRight: 6 }} />Preprinted Check Alignment</>}>
+        <Space wrap size={16} align="end">
+          <div>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Vertical Offset (in)</Text>
+            <InputNumber value={alignYIn} step={0.05} precision={2} style={{ width: 130 }}
+              onChange={(v) => setAlignYIn(v == null ? 0 : Number(v))} />
+          </div>
+          <div>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Horizontal Offset (in)</Text>
+            <InputNumber value={alignXIn} step={0.05} precision={2} style={{ width: 130 }}
+              onChange={(v) => setAlignXIn(v == null ? 0 : Number(v))} />
+          </div>
+          <Button type="primary" loading={alignSaving} onClick={saveAlignment}>Save Alignment</Button>
+          <Button icon={<PrinterOutlined />} onClick={printTestCheck}>Print Test Check</Button>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Positive Vertical moves the content DOWN. Test print posts no accounting.
+          </Text>
+        </Space>
+      </Card>
 
       <Row gutter={[16, 16]}>
         {/* Check Form */}

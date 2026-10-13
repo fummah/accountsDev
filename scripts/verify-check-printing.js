@@ -120,8 +120,8 @@ check('the check body has no inline margin/padding offsets left',
 // ── Execute the REAL generator against a fixture ────────────────────────────
 console.log('\nGENERATED OUTPUT — the real generateCheckHtml(), not a copy');
 const genSrc = slice('const generateCheckHtml = (vals, forPrint) => {', 'const handlePreview = () => {');
-const makeGen = new Function('toWords', 'company', 'cSym', `${genSrc}\nreturn generateCheckHtml;`);
-const generateCheckHtml = makeGen(toWords, {}, '$');
+const makeGen = new Function('toWords', 'company', 'cSym', 'alignYIn', 'alignXIn', `${genSrc}\nreturn generateCheckHtml;`);
+const generateCheckHtml = makeGen(toWords, {}, '$', 0.5, 0);
 
 const FIXTURE = {
   date: { format: () => '09/30/2026' },
@@ -134,6 +134,10 @@ const FIXTURE = {
   _company: { name: 'Ledger Demo Co' },
 };
 const html = generateCheckHtml(FIXTURE, true);
+check('check body vertical offset default renders 0.5in (preprinted stock)', /--check-offset-y:\s*0\.5in/.test(html));
+check('check body horizontal offset default renders 0in (unchanged X)', /--check-offset-x:\s*0in/.test(html));
+const genShifted = makeGen(toWords, {}, '$', 0.45, 0)(FIXTURE, true);
+check('a different vertical offset changes the rendered value', /--check-offset-y:\s*0\.45in/.test(genShifted) && !/--check-offset-y:\s*0\.45in/.test(html));
 const checkBody = html.slice(html.indexOf('CHECK BODY'), html.indexOf('STUB 1'));
 
 check('date printed', html.includes('09/30/2026'));
