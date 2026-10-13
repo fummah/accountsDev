@@ -4,6 +4,7 @@ import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, m
 import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, PlusOutlined, PaperClipOutlined, EditOutlined, BookOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
+import { getCustomerName } from '../../utils/contactIdentity';
 import { dedupeAccounts, getBankAccounts, isBillLineAccount, isBankAccount } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
 import JournalEntryDetailModal from './JournalEntryDetailModal';
@@ -186,9 +187,13 @@ const CheckPrinting = () => {
       const customers = Array.isArray(customersRes?.all) ? customersRes.all : (Array.isArray(customersRes) ? customersRes : []);
       const employees = Array.isArray(employeesRes?.data) ? employeesRes.data : (Array.isArray(employeesRes) ? employeesRes : []);
       const merged = [
-        ...vendors.map(v => ({ id: `v-${v.id}`, name: v.display_name || v.name || `${v.first_name||''} ${v.last_name||''}`.trim(), type: 'Vendor', _raw: v })),
-        ...customers.map(c => ({ id: `c-${c.id}`, name: c.display_name || `${c.first_name||''} ${c.last_name||''}`.trim(), type: 'Customer', _raw: c })),
-        ...employees.map(e => ({ id: `e-${e.id}`, name: e.name || `${e.first_name||''} ${e.last_name||''}`.trim(), type: 'Employee', _raw: e })),
+        // ONE shared identity rule for customers/vendors (person → company →
+        // display name), so a company-only payee still shows a name. Employees
+        // keep their own name field. Each always has a safe fallback, so a
+        // company-only payee is never dropped from the list.
+        ...vendors.map(v => ({ id: `v-${v.id}`, name: getCustomerName(v) || v.name || `Vendor #${v.id}`, type: 'Vendor', _raw: v })),
+        ...customers.map(c => ({ id: `c-${c.id}`, name: getCustomerName(c) || `Customer #${c.id}`, type: 'Customer', _raw: c })),
+        ...employees.map(e => ({ id: `e-${e.id}`, name: e.name || `${e.first_name || ''} ${e.last_name || ''}`.trim() || `Employee #${e.id}`, type: 'Employee', _raw: e })),
       ].filter(p => p.name);
       setPayees(merged);
 
@@ -1025,11 +1030,14 @@ const CheckPrinting = () => {
                   <FormCol>
                     <Form.Item name="payee" label="Pay To" style={FORM_ITEM_STYLE}>
                       <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear onChange={(val, opt) => {
-                        const name = opt?.children || '';
+                        // Resolve the payee name from the SAME shared identity rule
+                        // used to build the option labels (never a blank company payee).
+                        const found = val ? payees.find(p => p.id === val) : null;
+                        const name = found?.name || opt?.children || '';
                         form.setFieldsValue({ payeeName: name });
                         setWatchPayeeName(name);
                         if (val) {
-                          const payee = payees.find(p => p.id === val);
+                          const payee = found;
                           if (payee) {
                             const addr = formatPayeeAddress(payee);
                             form.setFieldsValue({ payeeAddress: addr });

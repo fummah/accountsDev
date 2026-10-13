@@ -32,6 +32,7 @@
 // apart. It is transactional and idempotent.
 
 const db = require('./dbmgr');
+const ContactIdentity = require('../services/contactIdentity');
 
 const TOLERANCE = 0.005;
 
@@ -191,7 +192,7 @@ const BillPayments = {
     const rows = db.prepare(`
       SELECT bp.id, bp.expense_id AS billId, bp.amount, bp.status,
              e.ref_no AS billNumber, e.due_date AS dueDate,
-             COALESCE(s.display_name, s.first_name || ' ' || s.last_name, s.first_name) AS vendorName
+             COALESCE(NULLIF(TRIM(s.display_name), ''), NULLIF(TRIM(s.company_name), ''), NULLIF(TRIM(s.first_name || ' ' || s.last_name), ''), s.first_name) AS vendorName
       FROM bill_payments bp
       LEFT JOIN expenses e ON e.id = bp.expense_id
       LEFT JOIN suppliers s ON s.id = bp.supplier_id
@@ -364,8 +365,10 @@ const BillPayments = {
     let name = vendorName;
     if (!name) {
       try {
-        const vendor = db.prepare('SELECT display_name, first_name, last_name FROM suppliers WHERE id = ?').get(Number(expense.payee));
-        if (vendor) name = vendor.display_name || `${vendor.first_name || ''} ${vendor.last_name || ''}`.trim();
+        // ONE shared identity rule (person → company → display name) so a
+        // company-only vendor never leaves the check payee blank.
+        const vendor = db.prepare('SELECT display_name, first_name, last_name, company_name FROM suppliers WHERE id = ?').get(Number(expense.payee));
+        if (vendor) name = ContactIdentity.getCustomerName(vendor) || `${vendor.first_name || ''} ${vendor.last_name || ''}`.trim();
       } catch { name = ''; }
     }
     name = name || '';
@@ -505,8 +508,9 @@ const BillPayments = {
 
     let vendorName = '';
     try {
-      const v = db.prepare('SELECT display_name, first_name, last_name FROM suppliers WHERE id = ?').get(vendorId);
-      if (v) vendorName = v.display_name || `${v.first_name || ''} ${v.last_name || ''}`.trim();
+      // ONE shared identity rule (person → company → display name).
+      const v = db.prepare('SELECT display_name, first_name, last_name, company_name FROM suppliers WHERE id = ?').get(vendorId);
+      if (v) vendorName = ContactIdentity.getCustomerName(v) || `${v.first_name || ''} ${v.last_name || ''}`.trim();
     } catch { /* optional */ }
 
     let nextCheck = checkNumber != null && String(checkNumber).trim() !== '' ? parseInt(String(checkNumber), 10) : null;
