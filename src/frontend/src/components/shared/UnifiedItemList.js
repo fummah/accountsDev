@@ -55,6 +55,11 @@ const UnifiedItemList = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Read-only Item account-mapping audit (Inventory Parts with missing /
+  // ambiguous Inventory COGS or a stale generic Purchase Expense/COGS mapping).
+  const [accountAuditOpen, setAccountAuditOpen] = useState(false);
+  const [accountAudit, setAccountAudit] = useState(null);
+  const [accountAuditLoading, setAccountAuditLoading] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -109,6 +114,9 @@ const UnifiedItemList = () => {
   // per-type checks in the form body.
   const sections = useMemo(() => getSections(itemType), [itemType]);
   const showSection = (name) => sections.includes(name);
+  // An Inventory Part uses the dedicated Inventory accounts (Asset + COGS); the
+  // generic Purchase Expense/COGS mapping is not applicable to it.
+  const inventoryPart = useMemo(() => !!(capabilities(itemType) || {}).needsInventoryAsset, [itemType]);
 
   // Live read-only profitability preview while editing (backend is authoritative).
   const watchCost = Form.useWatch('purchaseCost', form);
@@ -265,6 +273,10 @@ const UnifiedItemList = () => {
       setEditingItem(full);
       const code = normalizeTypeCode(full.type) || 'NON_INVENTORY_PART';
       setItemType(code);
+      // An Inventory Part never carries the generic Purchase Expense/COGS
+      // mapping (it may exist from a legacy Non-Inventory configuration) — do
+      // not surface it as an active mapping on the form.
+      const loadedIsInventory = !!(capabilities(code) || {}).needsInventoryAsset;
       form.setFieldsValue({
         type: code,
         name: full.name || '',
@@ -277,7 +289,7 @@ const UnifiedItemList = () => {
         purchaseCost: full.purchase_cost != null ? Number(full.purchase_cost) : 0,
         purchaseDescription: full.purchase_description || '',
         preferredVendorId: full.preferred_vendor_id != null ? Number(full.preferred_vendor_id) : undefined,
-        purchaseExpenseAccountId: full.purchase_expense_account_id != null ? Number(full.purchase_expense_account_id) : undefined,
+        purchaseExpenseAccountId: (!loadedIsInventory && full.purchase_expense_account_id != null) ? Number(full.purchase_expense_account_id) : undefined,
         purchaseTaxRateId: full.purchase_tax_rate_id != null ? Number(full.purchase_tax_rate_id) : undefined,
         defaultPurchaseUnit: full.default_purchase_unit || undefined,
         vendorItemNumber: full.vendor_item_number || '',
@@ -427,6 +439,15 @@ const UnifiedItemList = () => {
       message.success('Item deleted');
       fetchItems();
     } catch { message.error('Delete failed'); }
+  };
+
+  const openAccountAudit = async () => {
+    setAccountAuditOpen(true); setAccountAuditLoading(true); setAccountAudit(null);
+    try {
+      const res = await window.electronAPI.getItemAccountAudit?.();
+      setAccountAudit(res && !res.error ? res : { count: 0, items: [] });
+    } catch { setAccountAudit({ count: 0, items: [] }); }
+    finally { setAccountAuditLoading(false); }
   };
 
   const handleTableChange = (pag, _filters, sorter) => {
@@ -750,6 +771,7 @@ const UnifiedItemList = () => {
           <Tooltip title="Refresh"><Button icon={<ReloadOutlined />} style={{ borderRadius: 8 }} onClick={handleRefresh} /></Tooltip>
           <Tooltip title="Print"><Button icon={<PrinterOutlined />} style={{ borderRadius: 8 }} onClick={handlePrint} /></Tooltip>
           <Tooltip title="Download CSV"><Button icon={<DownloadOutlined />} style={{ borderRadius: 8 }} onClick={exportCSV} /></Tooltip>
+          <Tooltip title="Audit Inventory Part account mappings"><Button icon={<FileTextOutlined />} style={{ borderRadius: 8 }} onClick={openAccountAudit}>Account Audit</Button></Tooltip>
           <span style={{ marginLeft: 'auto', color: '#8c8c8c', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
             <DollarOutlined /> {cSym} {Number(totalValue || 0).toFixed(2)} in stock · {lowStockCount} low
           </span>
@@ -788,7 +810,17 @@ const UnifiedItemList = () => {
         <Form
           form={form}
           layout="vertical"
-          onValuesChange={(changed) => { if (changed.type) setItemType(changed.type); if (changed.category) loadSubcategories(changed.category); }}
+                onValuesChange={(changed) => {
+                  if (changed.type) {
+                    setItemType(changed.type);
+                    // Switching TO an Inventory Part must not leave a stale
+                    // generic Purchase Expense/COGS mapping active.
+                    if ((capabilities(changed.type) || {}).needsInventoryAsset) {
+                      form.setFieldsValue({ purchaseExpenseAccountId: undefined });
+                    }
+                  }
+                  if (changed.category) loadSubcategories(changed.category);
+                }}
         >
           {/* ── BASIC INFORMATION ── */}
           <FormSection title="Basic Information" icon={<AppstoreOutlined />}>
@@ -863,8 +895,14 @@ const UnifiedItemList = () => {
               </Col>
               <Col xs={24} md={8}>
                 <Form.Item name="purchaseExpenseAccountId" label="Expense / COGS Account" style={FORM_ITEM_STYLE}
-                  tooltip="The account debited when this item is purchased (non-inventory / service). Inventory Parts post to the Inventory Asset account instead.">
-                  <AccountSelect accounts={accounts} allowedTypes={EXPENSE_ACCOUNT_TYPES} placeholder="Select expense / COGS account" />
+                  tooltip={inventoryPart
+                    ? 'Not used for Inventory Parts. Configure COGS under Inventory Information.'
+                    : 'The account debited when this item is purchased (non-inventory / service).'}
+                  extra={inventoryPart
+                    ? <Text type="secondary" style={{ fontSize: 11 }}>Not applicable for Inventory Parts — uses the Inventory COGS Account below.</Text>
+                    : null}>
+                  <AccountSelect accounts={accounts} allowedTypes={EXPENSE_ACCOUNT_TYPES} disabled={inventoryPart}
+                    placeholder={inventoryPart ? 'Not applicable for Inventory Parts' : 'Select expense / COGS account'} />
                 </Form.Item>
               </Col>
             </Row>
@@ -969,7 +1007,9 @@ const UnifiedItemList = () => {
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={8}>
-                  <Form.Item name="cogsAccountId" label="COGS Account" style={FORM_ITEM_STYLE} rules={[{ required: true, message: 'Select COGS Account' }]}>
+                  <Form.Item name="cogsAccountId" label="COGS Account" style={FORM_ITEM_STYLE}
+                    rules={[{ required: true, message: 'Select COGS Account' }]}
+                    extra={<Text type="secondary" style={{ fontSize: 11 }}>Used when inventory is sold and cost is recognized.</Text>}>
                     <AccountSelect accounts={accounts} allowedTypes={COGS_ACCOUNT_TYPES} placeholder="Select COGS account" />
                   </Form.Item>
                 </Col>
@@ -1252,6 +1292,31 @@ const UnifiedItemList = () => {
       </Modal>
 
       {/* Add Category Modal */}
+      <Modal title="Inventory Part Account Audit" visible={accountAuditOpen} zIndex={1200}
+        onCancel={() => setAccountAuditOpen(false)} footer={[<Button key="close" onClick={() => setAccountAuditOpen(false)}>Close</Button>]}
+        width={880} style={{ top: 24 }}>
+        <Alert type="info" showIcon style={{ marginBottom: 12 }}
+          message="Review only — nothing is rewritten automatically."
+          description="An Inventory Part should map only Inventory Asset + Inventory COGS. A generic Purchase Expense/COGS mapping is never used for posting and can be cleared by re-saving the item. Historical journal entries are not changed." />
+        <Spin spinning={accountAuditLoading}>
+          {accountAudit == null ? null : accountAudit.count === 0 ? (
+            <Empty description="All Inventory Parts have clean account mappings." image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <Table
+              rowKey="id" size="small" pagination={{ pageSize: 10 }}
+              dataSource={accountAudit.items || []}
+              columns={[
+                { title: 'Item', dataIndex: 'name', key: 'name', render: (v, r) => <span>{v}<br /><Text type="secondary" style={{ fontSize: 11 }}>{r.sku || ''}</Text></span> },
+                { title: 'Purchase Expense/COGS', dataIndex: 'purchaseExpenseAccount', key: 'pe', render: v => v || <Text type="secondary">—</Text> },
+                { title: 'Inventory COGS', dataIndex: 'inventoryCogsAccount', key: 'ic', render: v => v || <Text type="danger">missing</Text> },
+                { title: 'Inventory Asset', dataIndex: 'inventoryAssetAccount', key: 'ia', render: v => v || <Text type="danger">missing</Text> },
+                { title: 'Status', dataIndex: 'status', key: 'status', render: s => <Tag color={s === 'DUPLICATE/AMBIGUOUS' ? 'orange' : 'red'}>{s}</Tag> },
+              ]}
+            />
+          )}
+        </Spin>
+      </Modal>
+
       <Modal title="Add New Category" visible={catModalOpen} onOk={handleAddCategory} onCancel={() => setCatModalOpen(false)} okText="Add" destroyOnClose>
         <Form form={catForm} layout="vertical" preserve={false}>
           <Form.Item name="cat_name" label="Category Name" rules={[{ required: true, message: 'Enter category name' }]}><Input placeholder="e.g. Electronics" /></Form.Item>

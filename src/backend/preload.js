@@ -119,6 +119,7 @@ getOpenPurchaseOrders: (vendorId) => ipcRenderer.invoke('get-open-purchase-order
 receivePurchaseOrder: (poId, payload) => ipcRenderer.invoke('receive-purchase-order', poId, payload),
   getGoodsReceipt: (id) => ipcRenderer.invoke('get-goods-receipt', id),
   getInventoryPurchaseAudit: () => ipcRenderer.invoke('get-inventory-purchase-audit'),
+  getItemAccountAudit: () => ipcRenderer.invoke('get-item-account-audit'),
   getVendorActivity: (vendorId) => ipcRenderer.invoke('get-vendor-activity', vendorId),
   getVendorPurchasingSummary: (vendorId) => ipcRenderer.invoke('get-vendor-purchasing-summary', vendorId),
 //Vat

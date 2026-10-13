@@ -603,7 +603,7 @@ const Products = {
       if (err) return { success: false, error: err };
     }
 
-    const purchaseExpenseAccountId = numOrNull(data.purchaseExpenseAccountId);
+    let purchaseExpenseAccountId = numOrNull(data.purchaseExpenseAccountId);
     if (purchaseExpenseAccountId) {
       const err = validateAccountType(purchaseExpenseAccountId, ACCOUNT_TYPES.expenseOrCogs, 'Expense / COGS Account');
       if (err) return { success: false, error: err };
@@ -618,6 +618,10 @@ const Products = {
       if (!cogsAccountId) return { success: false, error: 'COGS Account is required for an Inventory Part.' };
       const err2 = validateAccountType(cogsAccountId, ACCOUNT_TYPES.cogs, 'COGS Account');
       if (err2) return { success: false, error: err2 };
+      // An Inventory Part must NOT carry the generic Purchase Expense/COGS
+      // mapping — normalize it to null so no posting path can ever pick it up.
+      // Authoritative accounts are Inventory Asset + Inventory COGS only.
+      purchaseExpenseAccountId = null;
     } else {
       // Normalise: never keep stale inventory-account links on a non-inventory type.
       inventoryAssetAccountId = null;

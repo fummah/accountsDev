@@ -713,6 +713,13 @@ safeHandle('get-inventory-purchase-audit', async () => {
     return { duplicate: Svc.auditDuplicatePurchaseMovements(), qoh: Svc.reconcileQoh() };
   } catch (error) { return { error: error.message }; }
 });
+// READ-ONLY audit of Inventory Part account mappings (missing/ambiguous COGS).
+safeHandle('get-item-account-audit', async () => {
+  try {
+    const Svc = require('../services/itemAccounts');
+    return Svc.auditItemAccountMappings();
+  } catch (error) { return { error: error.message }; }
+});
 safeHandle('get-vendor-activity', async (event, vendorId) => {
   try { return PurchaseOrders.getVendorActivity(vendorId); } catch (error) { return { error: error.message }; }
 });

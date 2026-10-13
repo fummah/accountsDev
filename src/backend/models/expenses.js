@@ -35,35 +35,31 @@ const LINE_INSERT_SQL = `INSERT INTO expense_lines
  * only when no suitable account can be resolved.
  */
 const resolveItemLineAccountId = (line) => {
-  if (line.accountId != null && Number.isFinite(Number(line.accountId))) return Number(line.accountId);
-  const COA = require('./chartOfAccounts');
+  const ItemAccounts = require('../services/itemAccounts');
+  const Classification = require('../services/productClassification');
   let prod = null;
   if (line.product_id != null) {
     try {
       prod = db.prepare('SELECT type, inventory_asset_account_id, purchase_expense_account_id FROM products WHERE id = ?').get(Number(line.product_id));
     } catch { /* product lookup optional */ }
   }
-  const Classification = require('../services/productClassification');
   const isInventory = prod ? Classification.tracksInventory(prod.type) : true;
 
-  if (isInventory) {
-    if (prod && prod.inventory_asset_account_id) {
-      const byId = COA.getAccount(Number(prod.inventory_asset_account_id));
-      if (byId) return Number(prod.inventory_asset_account_id);
-    }
-    try {
-      const inv = COA.getSystemAccount('Inventory Asset');
-      if (inv && inv.id != null) return Number(inv.id);
-    } catch { /* fall through */ }
-    return null;
-  }
+  // Inventory Part: ALWAYS the Inventory Asset account (the central inventory
+  // purchasing model). A generic Purchase Expense/COGS account — whether it is
+  // stored on the item or supplied on the line — is NEVER used, so a bill can
+  // never Dr Expense while the inventory model also Dr Inventory Asset.
+  if (isInventory) return ItemAccounts.resolvePurchasePostingAccountId(prod);
 
-  // Non-inventory part / service: debit the item's configured expense account.
-  if (prod && prod.purchase_expense_account_id) {
-    const byId = COA.getAccount(Number(prod.purchase_expense_account_id));
-    if (byId) return Number(prod.purchase_expense_account_id);
-  }
+  // Non-Inventory / Service: an explicit account wins, else the item's
+  // configured Purchase Expense/COGS account.
+  if (line.accountId != null && Number.isFinite(Number(line.accountId))) return Number(line.accountId);
+  const configured = ItemAccounts.resolvePurchasePostingAccountId(prod);
+  if (configured != null) return configured;
+  // Last-resort fallback ONLY for a non-inventory item with nothing configured
+  // (never reached for an Inventory Part, which always resolves Inventory Asset).
   try {
+    const COA = require('./chartOfAccounts');
     const fallback = COA.getByName('General Expenses')
       || db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(type) IN ('expense','cost of goods sold','other expense') AND status = 'Active' ORDER BY id LIMIT 1").get();
     return fallback ? Number(fallback.id) : null;
