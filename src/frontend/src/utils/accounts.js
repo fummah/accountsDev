@@ -308,3 +308,31 @@ export const isBillLineAccount = (account = {}) => {
 /** Filter a chart-of-accounts list down to the accounts valid on a bill line. */
 export const getBillLineAccounts = (accounts = []) =>
   (Array.isArray(accounts) ? accounts : []).filter(isBillLineAccount);
+
+// ── Manual Deposit source-account eligibility ─────────────────────────────
+//
+// A Manual Deposit line credits WHERE THE MONEY CAME FROM — not necessarily
+// revenue. Valid source accounts are the POSTABLE Income / Liability / Equity
+// families (revenue, loans, credit-card liabilities, owner/equity
+// contributions). This is a MIRROR of the backend rule
+// (src/backend/services/accountEligibility.js → isManualDepositSourceAccount);
+// the backend is authoritative and also validates on save.
+//
+// Excluded by classification (never by name): Asset family (Bank/Cash/AR —
+// bank-to-bank is the Bank Transfer workflow, AR is a control account), Expense
+// family, Accounts Payable (control account), NonPosting, system control
+// accounts, and inactive accounts.
+const MANUAL_DEPOSIT_SOURCE_FAMILIES = new Set(['Income', 'Liability', 'Equity']);
+const MANUAL_DEPOSIT_EXCLUDED_TYPES = new Set(['accounts payable']);
+
+export const isManualDepositSourceAccount = (account = {}) => {
+  const t = accountTypeKey(account);
+  if (!t) return false;
+  if (String(account.status || 'Active').trim().toLowerCase() !== 'active') return false;
+  if (account.isSystem === true || Number(account.isSystem) === 1) return false;
+  if (MANUAL_DEPOSIT_EXCLUDED_TYPES.has(t)) return false;
+  return MANUAL_DEPOSIT_SOURCE_FAMILIES.has(ACCOUNT_TYPE_FAMILY[t]);
+};
+
+export const getManualDepositSourceAccounts = (accounts = []) =>
+  (Array.isArray(accounts) ? accounts : []).filter(isManualDepositSourceAccount);

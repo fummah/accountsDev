@@ -38,6 +38,18 @@ function registerDepositHandlers() {
     }
   });
 
+  // The canonical list of accounts a Manual Deposit line may credit
+  // (active, postable, Income/Liability/Equity only — never a bank/control).
+  ipcMain.handle('get-deposit-source-accounts', async () => {
+    try {
+      const Svc = require('../services/depositAccounts');
+      return Svc.listValidDepositSourceAccounts();
+    } catch (error) {
+      console.error('Error listing deposit source accounts:', error);
+      return { error: error.message };
+    }
+  });
+
   ipcMain.handle('update-deposit', async (event, id, data) => {
     try {
       return Deposits.update(id, data);

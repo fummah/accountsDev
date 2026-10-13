@@ -24,6 +24,17 @@ const normalizeParty = (a = {}) => {
   return { type, id };
 };
 
+// Resolve an allocation's account reference (id, or legacy account NAME) to a
+// numeric Chart-of-Accounts id. Never a name match for storage — only the
+// legacy name-string form is translated once, to its unique id.
+const resolveAccountIdValue = (a = {}) => {
+  let acctId = a.accountId != null ? a.accountId : (a.account != null ? a.account : null);
+  if (acctId == null || acctId === '') return null;
+  if (!isNaN(Number(acctId))) return Number(acctId);
+  const found = db.prepare('SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1').get(String(acctId));
+  return found ? Number(found.id) : null;
+};
+
 const Deposits = {
   createTable: () => {
     db.prepare(`
@@ -93,11 +104,7 @@ const Deposits = {
       if (allocations && allocations.length > 0) {
         const allocStmt = db.prepare('INSERT INTO deposit_allocations (deposit_id, account_id, amount, description, party_type, party_id) VALUES (?, ?, ?, ?, ?, ?)');
         for (const a of allocations) {
-          let acctId = a.accountId || null;
-          if (acctId && isNaN(Number(acctId))) {
-            const found = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1").get(String(acctId));
-            acctId = found ? found.id : null;
-          }
+          const acctId = resolveAccountIdValue(a);
           const party = normalizeParty(a);
           allocStmt.run(depositId, acctId, Number(a.amount || 0), a.description || null, party.type, party.id);
         }
@@ -128,23 +135,21 @@ const Deposits = {
         if (!undeposited) throw new Error('Undeposited Funds account not found');
         creditLines.push({ account_id: undeposited.id, debit: 0, credit: totalAmount, description: 'Clear undeposited funds' });
       } else {
-        // Manual deposit — credit each allocation's chosen account/category.
-        // Fall back to Undeposited Funds only if an allocation has no account.
-        const undeposited = COA.getSystemAccount('Undeposited Funds') || db.prepare("SELECT id FROM chart_of_accounts WHERE name = 'Undeposited Funds' LIMIT 1").get();
+        // Manual deposit — credit each line's chosen Deposit From Account.
+        // Validated centrally: active, postable, Income/Liability/Equity only,
+        // never the receiving bank, never a protected control account. There is
+        // deliberately NO silent Undeposited-Funds fallback — a manual line MUST
+        // name where the money came from (revenue, loan, equity, credit card…).
+        const DepositAccounts = require('../services/depositAccounts');
         for (const a of (allocations || [])) {
           const amt = Number(a.amount || 0);
           if (amt <= 0) continue;
-          let creditAcctId = a.accountId || null;
-          // accountId may be a name string — resolve to COA id
-          if (creditAcctId && isNaN(Number(creditAcctId))) {
-            const found = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1").get(String(creditAcctId));
-            creditAcctId = found ? found.id : null;
-          }
-          if (!creditAcctId && undeposited) creditAcctId = undeposited.id;
-          if (!creditAcctId) throw new Error('Deposit allocation has no valid account/category');
-          creditLines.push({ account_id: Number(creditAcctId), debit: 0, credit: amt, description: a.description || 'Deposit' });
+          const creditAcctId = resolveAccountIdValue(a);
+          const v = DepositAccounts.validateDepositSourceAccount(creditAcctId, { receivingBankAccountId: bank.id });
+          if (!v.ok) throw new Error(v.error);
+          creditLines.push({ account_id: v.account.id, debit: 0, credit: amt, description: a.description || 'Deposit' });
         }
-        if (!creditLines.length) throw new Error('Manual deposit requires at least one allocation with an account');
+        if (!creditLines.length) throw new Error('Manual deposit requires at least one allocation with an amount and a Deposit From Account');
       }
 
       JournalEntries.post({
@@ -281,20 +286,16 @@ const Deposits = {
         if (!undeposited) throw new Error('Undeposited Funds account not found');
         creditLines.push({ account_id: undeposited.id, debit: 0, credit: totalAmount, description: 'Clear undeposited funds' });
       } else {
-        const undeposited = COA.getSystemAccount('Undeposited Funds') || db.prepare("SELECT id FROM chart_of_accounts WHERE name = 'Undeposited Funds' LIMIT 1").get();
+        const DepositAccounts = require('../services/depositAccounts');
         for (const a of (allocations || [])) {
           const amt = Number(a.amount || 0);
           if (amt <= 0) continue;
-          let creditAcctId = a.accountId || null;
-          if (creditAcctId && isNaN(Number(creditAcctId))) {
-            const found = db.prepare("SELECT id FROM chart_of_accounts WHERE LOWER(name) = LOWER(?) LIMIT 1").get(String(creditAcctId));
-            creditAcctId = found ? found.id : null;
-          }
-          if (!creditAcctId && undeposited) creditAcctId = undeposited.id;
-          if (!creditAcctId) throw new Error('Deposit allocation has no valid account/category');
-          creditLines.push({ account_id: Number(creditAcctId), debit: 0, credit: amt, description: a.description || 'Deposit' });
+          const creditAcctId = resolveAccountIdValue(a);
+          const v = DepositAccounts.validateDepositSourceAccount(creditAcctId, { receivingBankAccountId: bank.id });
+          if (!v.ok) throw new Error(v.error);
+          creditLines.push({ account_id: v.account.id, debit: 0, credit: amt, description: a.description || 'Deposit' });
         }
-        if (!creditLines.length) throw new Error('Manual deposit requires at least one allocation with an account');
+        if (!creditLines.length) throw new Error('Manual deposit requires at least one allocation with an amount and a Deposit From Account');
       }
 
       JournalEntries.post({

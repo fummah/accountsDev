@@ -82,6 +82,39 @@ const isBillLineAccount = (account = {}) => {
 const getBillLineAccounts = (accounts) =>
   (Array.isArray(accounts) ? accounts : []).filter(isBillLineAccount);
 
+// ── Manual Deposit source-account eligibility ───────────────────────────────
+//
+// A Manual Deposit line credits "where the money came from". That is NOT always
+// revenue: it may be Sales/Other Income, a Loan/Liability, an Owner/Equity
+// contribution, or a Credit-Card liability. So the source account is NOT
+// restricted to Income — it is restricted to the POSTABLE Income / Liability /
+// Equity families.
+//
+// Deliberately EXCLUDED:
+//   • Asset family (Bank, Cash, Accounts Receivable, …) — bank-to-bank belongs
+//     to the Bank Transfer workflow, and AR is a protected control account.
+//   • Expense family — a deposit is not a purchase (kept narrow on purpose).
+//   • Accounts Payable — a protected control account (never credited here).
+//   • NonPosting accounts — never hit the ledger.
+//   • System control accounts (isSystem) — e.g. AR/AP/Undeposited Funds/
+//     Retained Earnings/Opening Balance Equity must not be posted to directly.
+//   • Inactive accounts.
+const MANUAL_DEPOSIT_SOURCE_FAMILIES = new Set(['Income', 'Liability', 'Equity']);
+const MANUAL_DEPOSIT_EXCLUDED_TYPES = new Set(['accounts payable']);
+
+const isManualDepositSourceAccount = (account = {}) => {
+  const t = typeKey(account);
+  if (!t) return false;
+  if (String(account.status || 'Active').trim().toLowerCase() !== 'active') return false;
+  if (Number(account.isSystem) === 1 || account.isSystem === true) return false;
+  if (MANUAL_DEPOSIT_EXCLUDED_TYPES.has(t)) return false;
+  return MANUAL_DEPOSIT_SOURCE_FAMILIES.has(ACCOUNT_TYPE_FAMILY[t]);
+};
+
+/** Filter a chart-of-accounts list down to valid Manual Deposit source accounts. */
+const getManualDepositSourceAccounts = (accounts) =>
+  (Array.isArray(accounts) ? accounts : []).filter(isManualDepositSourceAccount);
+
 module.exports = {
   ACCOUNT_TYPE_FAMILY,
   BILL_EXCLUDED_FAMILIES,
@@ -89,4 +122,8 @@ module.exports = {
   accountFamily,
   isBillLineAccount,
   getBillLineAccounts,
+  MANUAL_DEPOSIT_SOURCE_FAMILIES,
+  MANUAL_DEPOSIT_EXCLUDED_TYPES,
+  isManualDepositSourceAccount,
+  getManualDepositSourceAccounts,
 };

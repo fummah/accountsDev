@@ -180,12 +180,40 @@ const money = (v) => Math.round((Number(v) || 0) * 100) / 100;
     /allowedTypes/.test(selectSrc) && /allow\.has\(/.test(selectSrc));
 
   const makeSrc = fs.readFileSync(path.join(ROOT, 'src', 'frontend', 'src', 'components', 'banking', 'MakeDeposits.js'), 'utf8');
-  check('MakeDeposits.js derives its line accounts from the Income helper',
-    /getIncomeAccounts\(/.test(makeSrc));
+  check('MakeDeposits.js derives its line accounts from the shared deposit-source list',
+    /getManualDepositSourceAccounts\(/.test(makeSrc) && /getDepositSourceAccounts/.test(makeSrc));
+  check('MakeDeposits.js no longer restricts lines to income accounts',
+    !/getIncomeAccounts\(/.test(makeSrc));
+  check('MakeDeposits.js labels the field "Deposit From Account"',
+    /Deposit From Account/.test(makeSrc));
+
+  // ── NEW CONTRACT: Deposit From = Income / Liability / Equity (not income-only)
+  const synSrc = fe.getManualDepositSourceAccounts(synthetic);
+  check('synthetic: Income parents AND children are offered as Deposit From',
+    [9001, 9002, 9003, 9004].every(id => synSrc.some(a => a.id === id)),
+    JSON.stringify(synSrc.map(a => a.id)));
+  check('synthetic: Equity (Owner Draw) is now offered (not income-only)',
+    synSrc.some(a => a.id === 9007));
+  check('synthetic: a Bank account is still never offered (bank-to-bank = transfer)',
+    !synSrc.some(a => a.id === 9005));
+  check('synthetic: an Expense is never offered',
+    !synSrc.some(a => a.id === 9006));
+  const synLoan = [{ id: 9101, name: 'Loan Payable', type: 'Liability', status: 'Active' },
+                   { id: 9102, name: 'Visa', type: 'Credit Card', status: 'Active' },
+                   { id: 9103, name: 'AP', type: 'Accounts Payable', status: 'Active' },
+                   { id: 9104, name: 'AR', type: 'Asset', subType: 'Accounts Receivable', status: 'Active' },
+                   { id: 9105, name: 'Off', type: 'Income', status: 'Inactive' }];
+  const synLoanSrc = fe.getManualDepositSourceAccounts(synLoan);
+  check('synthetic: Liabilities + Credit Card + Equity are offered',
+    synLoanSrc.some(a => a.id === 9101) && synLoanSrc.some(a => a.id === 9102));
+  check('synthetic: Accounts Payable + Accounts Receivable + inactive are excluded',
+    !synLoanSrc.some(a => a.id === 9103) && !synLoanSrc.some(a => a.id === 9104) && !synLoanSrc.some(a => a.id === 9105));
 
   const utilSrc = fs.readFileSync(path.join(ROOT, 'src', 'frontend', 'src', 'utils', 'accounts.js'), 'utf8');
-  check('utils/accounts.js exposes getIncomeAccounts / isIncomeAccount',
+  check('utils/accounts.js exposes getIncomeAccounts / isIncomeAccount (still used elsewhere)',
     /export const getIncomeAccounts/.test(utilSrc) && /export const isIncomeAccount/.test(utilSrc));
+  check('utils/accounts.js exposes the Manual Deposit source rule',
+    /export const getManualDepositSourceAccounts/.test(utilSrc) && /export const isManualDepositSourceAccount/.test(utilSrc));
 
   // ── (f) Manual deposit posting ─────────────────────────────────────────
   const bank = active.find(isBank);

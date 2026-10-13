@@ -4,7 +4,7 @@ import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutli
 import moment from 'moment';
 import { useLocation } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
-import { getBankAccounts, getIncomeAccounts } from '../../utils/accounts';
+import { getBankAccounts, getManualDepositSourceAccounts } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
 import JournalEntryDetailModal from '../accountant/JournalEntryDetailModal';
 
@@ -21,6 +21,9 @@ const MakeDeposits = () => {
   const [form] = Form.useForm();
   const [accounts, setAccounts] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
+  // Valid Manual Deposit "Deposit From" accounts, server-authoritative (falls
+  // back to the shared local rule when the IPC bridge is unavailable).
+  const [depositSourceAccounts, setDepositSourceAccounts] = useState([]);
   const [depositHistory, setDepositHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
@@ -65,18 +68,21 @@ const MakeDeposits = () => {
 
   const loadData = async () => {
     try {
-      const [accRes, txnRes, pmts, custRes, vendRes] = await Promise.all([
+      const [accRes, txnRes, pmts, custRes, vendRes, srcRes] = await Promise.all([
         window.electronAPI.getChartOfAccounts().catch(() => []),
         window.electronAPI.getTransactions().catch(() => []),
         window.electronAPI.getPayments?.().catch(() => []),
         window.electronAPI.getAllCustomers().catch(() => ({ all: [] })),
         window.electronAPI.getAllSuppliers().catch(() => []),
+        window.electronAPI.getDepositSourceAccounts?.().catch(() => null),
       ]);
       const accs = Array.isArray(accRes) ? accRes : [];
       setAccounts(accs);
       setAllAccounts(accs);
       // "Deposit To" must show ONLY accounts whose real account type is BANK.
       setBankAccounts(getBankAccounts(accs));
+      // "Deposit From" list — server-authoritative when available.
+      setDepositSourceAccounts(Array.isArray(srcRes) ? srcRes : getManualDepositSourceAccounts(accs));
 
       const txns = Array.isArray(txnRes) ? txnRes : [];
       const deps = txns.filter(t => (t.type || '').toLowerCase() === 'deposit')
@@ -243,13 +249,14 @@ const MakeDeposits = () => {
     return accounts.find(a => String(a.id) === String(selectedAccountId));
   }, [accounts, selectedAccountId]);
 
-  // Deposit lines credit the account that represents WHAT the money is: a
-  // revenue account. Only the Income family (Type 'Income' / 'Other Income')
-  // is valid — never bank, asset, equity or liability accounts, and never by
-  // matching on the account name.
-  const categoryAccounts = useMemo(
-    () => getIncomeAccounts(accounts).filter(a => String(a.status || 'Active').toLowerCase() === 'active'),
-    [accounts]
+  // Manual Deposit lines credit WHERE THE MONEY CAME FROM — revenue, a loan /
+  // liability, an owner/equity contribution, or a credit-card liability. The
+  // list is server-authoritative (active, postable, Income/Liability/Equity
+  // only, no protected control accounts). The receiving bank account is hidden
+  // from the source dropdown (bank-to-bank belongs to the Bank Transfer flow).
+  const depositFromAccounts = useMemo(
+    () => depositSourceAccounts.filter(a => String(a.id) !== String(selectedAccountId)),
+    [depositSourceAccounts, selectedAccountId]
   );
 
   const getAccName = (id) => {
@@ -390,11 +397,15 @@ const MakeDeposits = () => {
                     extra={<Button type="dashed" onClick={() => add({ type: 'Cash' })} icon={<PlusOutlined />} size="small">Add Item</Button>}
                   >
                     {fields.length === 0 && <Alert message="Add at least one deposit item" type="info" showIcon style={{ marginBottom: 8 }} />}
+                    {fields.length > 0 && (
+                      <Alert type="info" showIcon style={{ marginBottom: 8 }}
+                        message="Deposit From Account = where the money came from (e.g. Sales Income, Loan Payable, Owner Contribution, Credit Card Liability)." />
+                    )}
                     {/* Column headers */}
                     {fields.length > 0 && (
                       <Row gutter={8} style={{ marginBottom: 4 }}>
-                        <Col sm={4}><Text type="secondary" style={{ fontSize: 11 }}>Received From</Text></Col>
-                        <Col sm={6}><Text type="secondary" style={{ fontSize: 11 }}>Account / Category *</Text></Col>
+                        <Col sm={4}><Text type="secondary" style={{ fontSize: 11 }}>Received From (optional)</Text></Col>
+                        <Col sm={6}><Text type="secondary" style={{ fontSize: 11 }}>Deposit From Account *</Text></Col>
                         <Col sm={3}><Text type="secondary" style={{ fontSize: 11 }}>Type</Text></Col>
                         <Col sm={6}><Text type="secondary" style={{ fontSize: 11 }}>Description / Memo</Text></Col>
                         <Col sm={3}><Text type="secondary" style={{ fontSize: 11 }}>Amount</Text></Col>
@@ -404,15 +415,15 @@ const MakeDeposits = () => {
                     {fields.map((field) => (
                       <Row key={field.key} gutter={8} style={{ marginBottom: 8 }} align="middle">
                         <Col xs={24} sm={4}>
-                          <Form.Item {...field} name={[field.name, 'receivedFrom']} noStyle rules={[{ required: true, message: 'Customer/Vendor required' }]}>
-                            <Select showSearch optionFilterProp="children" placeholder="Customer/Vendor" style={{ width: '100%' }}>
+                          <Form.Item {...field} name={[field.name, 'receivedFrom']} noStyle>
+                            <Select showSearch allowClear optionFilterProp="children" placeholder="Customer/Vendor (optional)" style={{ width: '100%' }}>
                               {payors.map(p => <Option key={p.id} value={p.id}>{p.name} ({p.type})</Option>)}
                             </Select>
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={6}>
-                          <Form.Item {...field} name={[field.name, 'account']} noStyle rules={[{ required: true, message: 'Account required' }]}>
-                            <AccountSelect accounts={categoryAccounts} placeholder="Account / Category" style={{ width: '100%' }} />
+                          <Form.Item {...field} name={[field.name, 'account']} noStyle rules={[{ required: true, message: 'Select a Deposit From Account' }]}>
+                            <AccountSelect accounts={depositFromAccounts} placeholder="Deposit From Account" style={{ width: '100%' }} />
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={3}>
