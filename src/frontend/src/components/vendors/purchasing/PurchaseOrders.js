@@ -7,6 +7,10 @@ import { useCurrency } from '../../../utils/currency';
 import { sumMoney } from '../../../utils/money';
 import { itemTypeLabel, capabilities, normalizeTypeCode } from '../../../utils/itemTypes';
 import FormSection, { FORM_ITEM_STYLE } from '../../shared/FormSection';
+import SendEmailModal from '../../customers/shared/SendEmailModal';
+import { buildPurchaseOrderOpts } from './purchaseOrderPdf';
+import { handleDocumentPDF } from '../../customers/shared/generateDocumentPDF';
+import { getCustomerName } from '../../../utils/contactIdentity';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -92,22 +96,27 @@ const PurchaseOrders = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // Shared document email (Invoice/Quote/PO all use the same dialog).
+  const [emailTarget, setEmailTarget] = useState(null);
+  const [company, setCompany] = useState({});
   const location = useLocation();
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptDetail, setReceiptDetail] = useState(null);
 
   const loadLookups = useCallback(async () => {
     try {
-      const [v, it, wh, vats] = await Promise.all([
+      const [v, it, wh, vats, comp] = await Promise.all([
         window.electronAPI.getAllSuppliers?.().catch(() => []),
         window.electronAPI.getAllProducts?.().catch(() => []),
         window.electronAPI.getWarehouses?.().catch(() => []),
         window.electronAPI.getAllVat?.().catch(() => []),
+        window.electronAPI.getCompany?.().catch(() => null),
       ]);
       setVendors(Array.isArray(v) ? v : (v?.all || v?.data || []));
       setItems(Array.isArray(it) ? it : (it?.all || it?.data || []));
       setWarehouses(Array.isArray(wh) ? wh : []);
       setVatRates(Array.isArray(vats) ? vats : (vats?.all || vats?.data || []));
+      if (comp && !comp.error) setCompany(comp);
     } catch (e) { console.error('PO lookups failed:', e); }
   }, []);
 
@@ -370,48 +379,29 @@ const PurchaseOrders = () => {
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   };
 
-  const buildPoHtml = (po) => {
-    const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
-    const rows = (po.lines || []).map(l => `<tr><td>${esc(l.description)}</td><td style="text-align:right">${Number(l.qty_ordered) || 0}</td><td>${esc(l.unit)}</td><td style="text-align:right">${Number(l.unit_cost || 0).toFixed(2)}</td><td style="text-align:right">${Number(l.tax_rate || 0)}%</td><td style="text-align:right">${Number(l.amount || 0).toFixed(2)}</td></tr>`).join('');
-    return `<!doctype html><html><head><title>${esc(po.po_number)}</title><style>body{font-family:Arial,sans-serif;font-size:12px;padding:24px}h2{margin-bottom:2px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #ddd;padding:6px}th{background:#f5f5f5;text-align:left}.tot{text-align:right}</style></head><body>
-      <h2>Purchase Order ${esc(po.po_number)}</h2>
-      <div>Vendor: <strong>${esc(po.vendor_name)}</strong></div>
-      <div>PO Date: ${po.po_date ? moment(po.po_date).format('MM/DD/YYYY') : '-'} &nbsp; Expected: ${po.expected_date ? moment(po.expected_date).format('MM/DD/YYYY') : '-'}</div>
-      ${po.ship_to ? `<div>Ship To: ${esc(po.ship_to)}</div>` : ''}
-      <table><thead><tr><th>Item / Description</th><th>Qty</th><th>Unit</th><th>Cost</th><th>Tax</th><th>Amount</th></tr></thead><tbody>${rows}</tbody>
-      <tfoot>
-        <tr><td colspan="5" class="tot">Subtotal</td><td class="tot">${Number(po.subtotal || 0).toFixed(2)}</td></tr>
-        <tr><td colspan="5" class="tot">Tax</td><td class="tot">${Number(po.tax_total || 0).toFixed(2)}</td></tr>
-        <tr><td colspan="5" class="tot"><strong>Total</strong></td><td class="tot"><strong>${Number(po.total || 0).toFixed(2)}</strong></td></tr>
-      </tfoot></table>
-      ${po.memo ? `<p>Memo: ${esc(po.memo)}</p>` : ''}
-      </body></html>`;
-  };
+  const poVendor = (po) => vendors.find(v => Number(v.id) === Number(po?.vendor_id)) || null;
 
+  // Print the PO through the SAME shared PDF renderer used for the email
+  // attachment, so the printed and emailed documents can never differ.
   const handlePrint = async (record) => {
     const po = await window.electronAPI.getPurchaseOrder?.(record.id);
     if (!po) { message.error('Could not load Purchase Order'); return; }
-    const w = window.open('', '_blank');
-    w.document.open(); w.document.write(buildPoHtml(po)); w.document.close();
-    setTimeout(() => w.print(), 300);
+    handleDocumentPDF('print', buildPurchaseOrderOpts(po, { company, vendor: poVendor(po) }));
   };
 
+  // Email → the ONE shared document email dialog (Invoice / Quote / PO).
+  // Vendor email is prefilled; a vendor with no email still opens the dialog
+  // (blank recipient + a controlled notice) so the user can type one.
   const handleEmailPO = async (record) => {
     const po = await window.electronAPI.getPurchaseOrder?.(record.id);
     if (!po) { message.error('Could not load Purchase Order'); return; }
-    const vendor = vendors.find(v => Number(v.id) === Number(po.vendor_id));
-    if (!vendor || !vendor.email) { message.warning('This vendor has no email address on file.'); return; }
-    try {
-      const res = await window.electronAPI.emailSend?.({
-        to: vendor.email,
-        subject: `Purchase Order ${po.po_number}`,
-        body: buildPoHtml(po),
-        document_type: 'purchase_order',
-        document_id: po.id,
-      });
-      if (res?.success) message.success(`Purchase Order emailed to ${vendor.email}`);
-      else message.error(res?.error || 'Email could not be sent');
-    } catch { message.error('Email could not be sent'); }
+    const vendor = poVendor(po);
+    setEmailTarget({
+      id: po.id,
+      number: po.po_number || '',
+      recipientEmail: (vendor && vendor.email) || po.vendor_email || '',
+      vendorName: (vendor ? getCustomerName(vendor) : '') || po.vendor_name || '',
+    });
   };
 
   const summary = useMemo(() => {
@@ -452,6 +442,7 @@ const PurchaseOrders = () => {
         <Space size={4}>
           <Tooltip title="View"><Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openDetail(r)} /></Tooltip>
           <Tooltip title="Print"><Button type="text" size="small" icon={<PrinterOutlined />} onClick={() => handlePrint(r)} /></Tooltip>
+          <Tooltip title="Email"><Button type="text" size="small" icon={<MailOutlined />} onClick={() => handleEmailPO(r)} /></Tooltip>
           {r.status !== 'CANCELLED' && r.status !== 'CLOSED' && (
             <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} /></Tooltip>
           )}
@@ -926,6 +917,18 @@ const PurchaseOrders = () => {
           </>
         )}
       </Modal>
+
+      {/* Shared document email dialog (same component Invoice/Quote use). */}
+      <SendEmailModal
+        visible={!!emailTarget}
+        onClose={() => setEmailTarget(null)}
+        documentType="Purchase Order"
+        documentId={emailTarget?.id}
+        documentNumber={emailTarget?.number}
+        recipientEmail={emailTarget?.recipientEmail}
+        customerName={emailTarget?.vendorName}
+        companyName={company?.company_name || company?.name || ''}
+      />
     </div>
   );
 };

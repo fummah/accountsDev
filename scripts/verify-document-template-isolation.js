@@ -46,10 +46,29 @@ const lineItemsMod = { exports: {} };
 new Function('require', 'module', 'exports', lineItemsCode)(require, lineItemsMod, lineItemsMod.exports);
 
 const mod = { exports: {} };
+// Compile the shared address util (and its own identity import) so the renderer's
+// relative imports resolve in this Node harness.
+const compileFeModule = (file, shim) => {
+  const c = babel.transformSync(fs.readFileSync(file, 'utf8'), {
+    filename: file, babelrc: false, configFile: false,
+    presets: [[presetEnv, { targets: { node: 'current' }, modules: 'commonjs' }]],
+  }).code;
+  const m = { exports: {} };
+  // eslint-disable-next-line no-new-func
+  new Function('require', 'module', 'exports', '__filename', '__dirname', c)(shim || require, m, m.exports, file, path.dirname(file));
+  return m.exports;
+};
+const contactIdentityMod = compileFeModule(path.join(FE, 'src', 'utils', 'contactIdentity.js'));
+const addressMod = compileFeModule(
+  path.join(FE, 'src', 'utils', 'address.js'),
+  (id) => (id === './contactIdentity' ? contactIdentityMod : require(id))
+);
+
 const shimRequire = (id) => {
   if (id === 'jspdf') return require(jspdfPath);
   if (id === 'jspdf-autotable') return require(autotablePath);
   if (id === '../../../utils/lineItems') return lineItemsMod.exports;
+  if (id === '../../../utils/address') return addressMod;
   return require(id);
 };
 // eslint-disable-next-line no-new-func

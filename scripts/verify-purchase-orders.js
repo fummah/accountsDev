@@ -163,8 +163,10 @@ check('PO Terms is a dropdown (like the invoice Terms)',
   /TERMS_OPTIONS/.test(page) && /name="terms"[\s\S]{0,200}<Select/.test(page));
 check('PO Ship To auto-fills from the selected vendor',
   /vendorAddress/.test(page) && /onChange=\{\(v\) => \{[\s\S]{0,200}setFieldsValue\(\{ shipTo: vendorAddress/.test(page));
-check('PO print/PDF output implemented', /buildPoHtml/.test(page) && /handlePrint/.test(page) && /\.print\(\)/.test(page));
-check('PO email reuses the shared mail engine', /emailSend/.test(page) && /buildPoHtml/.test(page));
+check('PO print uses the shared document PDF renderer',
+  /handleDocumentPDF\('print', buildPurchaseOrderOpts/.test(page) && /import \{ buildPurchaseOrderOpts \}/.test(page));
+check('PO email reuses the ONE shared document email dialog (Invoice/Quote/PO)',
+  /import SendEmailModal from '\.\.\/\.\.\/customers\/shared\/SendEmailModal'/.test(page) && /documentType="Purchase Order"/.test(page) && /handleEmailPO/.test(page));
 check('PO export covers the filtered list', /exportCSV/.test(page) && /rows\.map/.test(page));
 check('bill stock receipt excludes PO-linked lines (no double count)',
   /purchase_order_line_id == null/.test(fs.readFileSync(path.join(ROOT, 'src', 'backend', 'models', 'expenses.js'), 'utf8')));

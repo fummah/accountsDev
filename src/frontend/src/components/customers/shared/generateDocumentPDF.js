@@ -227,7 +227,9 @@ export function generateDocumentPDF({
 
   const docTitle = docType === 'Quote'
     ? (T.quoteLabel || 'QUOTE').toUpperCase()
-    : (T.invoiceLabel || 'INVOICE').toUpperCase();
+    : docType === 'Purchase Order'
+      ? (T.purchaseOrderLabel || 'PURCHASE ORDER').toUpperCase()
+      : (T.invoiceLabel || 'INVOICE').toUpperCase();
 
   const companyName = company.name || company.company_name || '';
   const stacked = headerLayout === 'stacked';
@@ -346,10 +348,18 @@ export function generateDocumentPDF({
 
   // Compact metadata card (right-anchored, independent of title alignment)
   const metaRows = [];
-  const numLabel = docType === 'Quote' ? (T.quoteNoLabel || 'QUOTE #') : (T.invoiceNoLabel || 'INVOICE #');
+  const numLabel = docType === 'Quote'
+    ? (T.quoteNoLabel || 'QUOTE #')
+    : docType === 'Purchase Order'
+      ? (T.purchaseOrderNoLabel || 'PO #')
+      : (T.invoiceNoLabel || 'INVOICE #');
   if (header.number) metaRows.push([numLabel.toUpperCase(), String(header.number)]);
   if (header.date) metaRows.push([(T.dateLabel || 'DATE').toUpperCase(), String(header.date)]);
-  const dueLabel = docType === 'Quote' ? (T.validUntilLabel || 'VALID UNTIL') : (T.dueDateLabel || 'DUE DATE');
+  const dueLabel = docType === 'Quote'
+    ? (T.validUntilLabel || 'VALID UNTIL')
+    : docType === 'Purchase Order'
+      ? (T.expectedDateLabel || 'EXPECTED DATE')
+      : (T.dueDateLabel || 'DUE DATE');
   if (header.dueDate) metaRows.push([dueLabel.toUpperCase(), String(header.dueDate)]);
   if (header.terms) metaRows.push([(T.termsLabel || 'TERMS').toUpperCase(), String(header.terms)]);
 

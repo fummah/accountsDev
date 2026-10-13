@@ -57,6 +57,24 @@ export const DEFAULT_EMAIL_TEMPLATES = {
       '{email}',
     ].join('\n'),
   },
+  purchaseOrder: {
+    subject: 'Purchase Order {po_number} - {company}',
+    body: [
+      'Hello {vendor_name},',
+      '',
+      'Please find attached Purchase Order {po_number}.',
+      '',
+      'PO Date: {po_date}',
+      'Expected Delivery: {expected_date}',
+      '',
+      'Please review the order details and expected delivery requirements.',
+      '',
+      'Thank you,',
+      '{company}',
+      '{phone}',
+      '{email}',
+    ].join('\n'),
+  },
 };
 
 const VOID_LIKE = ['void', 'voided', 'cancelled', 'canceled', 'draft'];
@@ -74,7 +92,9 @@ export function isInvoiceFullyPaid({ status, balance } = {}) {
 
 // Pick the template key from document type + payment state.
 export function selectEmailTemplateKey({ documentType, isPaid } = {}) {
-  if (String(documentType || '').toLowerCase() === 'quote') return 'quote';
+  const dt = String(documentType || '').toLowerCase();
+  if (dt === 'quote') return 'quote';
+  if (dt === 'purchase order' || dt === 'purchase_order' || dt === 'purchase-order' || dt === 'po') return 'purchaseOrder';
   return isPaid ? 'invoicePaid' : 'invoiceOutstanding';
 }
 
@@ -111,6 +131,18 @@ export function renderTemplate(template, context = {}) {
     phone_number: context.companyPhone,
     email: context.companyEmail,
     company_email: context.companyEmail,
+    // Purchase Order tokens.
+    vendor: context.vendorName,
+    vendorName: context.vendorName,
+    vendor_name: context.vendorName,
+    po_number: context.poNumber,
+    poNumber: context.poNumber,
+    po_date: context.poDate,
+    poDate: context.poDate,
+    expected_date: context.expectedDate,
+    expectedDate: context.expectedDate,
+    po_total: context.poTotal,
+    poTotal: context.poTotal,
   };
   const valueOf = (key) => {
     const v = map[key];
@@ -143,6 +175,7 @@ export function buildDocumentEmail({ documentType = 'Invoice', isPaid = false, c
     quote: { subject: config.quote_subject, body: config.quote_body },
     invoicePaid: { subject: config.invoice_paid_subject, body: config.invoice_paid_body },
     invoiceOutstanding: { subject: config.invoice_outstanding_subject, body: config.invoice_outstanding_body },
+    purchaseOrder: { subject: config.po_subject || config.purchase_order_subject, body: config.po_body || config.purchase_order_body },
   }[key] || {};
   const def = DEFAULT_EMAIL_TEMPLATES[key];
   const subjectTemplate = override.subject && String(override.subject).trim() ? override.subject : def.subject;

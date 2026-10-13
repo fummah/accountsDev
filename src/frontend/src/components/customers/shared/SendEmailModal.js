@@ -4,6 +4,8 @@ import { MailOutlined, SendOutlined, DesktopOutlined, CloudOutlined, PaperClipOu
 import { useHistory } from 'react-router-dom';
 import moment from 'moment';
 import { generateDocumentPDF } from './generateDocumentPDF';
+import { buildPurchaseOrderPdfData } from '../../vendors/purchasing/purchaseOrderPdf';
+import { getCustomerName } from '../../../utils/contactIdentity';
 import { getCurrencySymbol } from '../../../utils/currency';
 import { buildDocumentEmail, isInvoiceFullyPaid, textToSafeHtml } from './documentEmail';
 
@@ -45,8 +47,14 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
   const [lastError, setLastError] = useState(null);
   // The compact "this app cannot attach" choice — a small modal, not a banner.
   const [fallbackOpen, setFallbackOpen] = useState(false);
+  // Purchase Order with no vendor email on file: open with a blank recipient
+  // and a clear, controlled notice (never a silent failure).
+  const [noRecipientNotice, setNoRecipientNotice] = useState(false);
   const pendingRef = useRef(null);
   const templateRef = useRef(null);
+
+  // ONE dialog for Invoice / Quote / Purchase Order.
+  const isPO = String(documentType || '').toLowerCase().includes('purchase');
 
   useEffect(() => {
     if (visible) { setLastError(null); setFallbackOpen(false); loadDefaults(); }
@@ -65,16 +73,72 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
   const loadDefaults = async () => {
     try {
       setPdfAttachment(null);
+      setNoRecipientNotice(false);
       const isQuote = documentType === 'Quote';
       const [cfg, comp, doc] = await Promise.all([
         window.electronAPI.emailSettingsGet?.().catch(() => null),
         window.electronAPI.getCompany?.().catch(() => null),
         documentId
-          ? (isQuote
-              ? window.electronAPI.getSingleQuote?.(documentId).catch(() => null)
-              : window.electronAPI.getSingleInvoice?.(documentId).catch(() => null))
+          ? (isPO
+              ? window.electronAPI.getPurchaseOrder?.(documentId).catch(() => null)
+              : (isQuote
+                  ? window.electronAPI.getSingleQuote?.(documentId).catch(() => null)
+                  : window.electronAPI.getSingleInvoice?.(documentId).catch(() => null)))
           : Promise.resolve(null),
       ]);
+
+      const sym = getCurrencySymbol();
+      const companyNameResolved = comp?.company_name || comp?.name || companyName || '';
+
+      let context;
+      let tpl;
+      let to;
+
+      if (isPO) {
+        // Vendor (by id, never by name) — shared identity rule for the name.
+        let vendor = null;
+        if (doc?.vendor_id) {
+          vendor = await window.electronAPI.getSingleSupplier?.(doc.vendor_id).catch(() => null);
+        }
+        const vendorName = (vendor ? getCustomerName(vendor) : '') || doc?.vendor_name || '';
+        context = {
+          companyName: companyNameResolved,
+          companyPhone: comp?.phone || comp?.phone_number || '',
+          companyEmail: comp?.email || '',
+          vendorName,
+          poNumber: doc?.po_number || documentNumber || '',
+          poDate: fmtDate(doc?.po_date),
+          expectedDate: fmtDate(doc?.expected_date),
+          poTotal: `${sym} ${(Number(doc?.total) || 0).toFixed(2)}`,
+          documentType: 'Purchase Order',
+        };
+        tpl = buildDocumentEmail({ documentType: 'Purchase Order', config: cfg || {}, context });
+        to = recipientEmail || (vendor && vendor.email) || '';
+        setNoRecipientNotice(!to);
+      } else {
+        const subtotal = (doc?.lines || []).reduce((s, l) => s + Number(l.amount || 0), 0);
+        const vatPct = Number(doc?.vat || 0);
+        const grandTotal = subtotal * (1 + vatPct / 100);
+        const paid = isQuote ? 0 : Number(doc?.totalPaid || 0);
+        const balance = isQuote ? 0
+          : (doc && doc.balance != null ? Number(doc.balance) : Math.max(0, grandTotal - paid));
+        const isPaid = !isQuote && isInvoiceFullyPaid({ status: doc?.status, balance });
+        context = {
+          companyName: companyNameResolved,
+          companyPhone: comp?.phone || comp?.phone_number || '',
+          companyEmail: comp?.email || '',
+          customerName: customerName || fullName(doc),
+          documentNumber: documentNumber || doc?.number || '',
+          documentType: documentType || 'Invoice',
+          total: `${sym} ${grandTotal.toFixed(2)}`,
+          balanceDue: `${sym} ${Math.max(0, balance).toFixed(2)}`,
+          dueDate: fmtDate(doc?.last_date),
+          paidDate: fmtDate(doc?.paidDate),
+        };
+        tpl = buildDocumentEmail({ documentType: documentType || 'Invoice', isPaid, config: cfg || {}, context });
+        templateRef.current = { ...tpl, context, isPaid };
+        to = recipientEmail || doc?.customer_email || '';
+      }
 
       // The saved default method. "prompt" historically meant "ask each time";
       // the dialog now always shows the method selector, so prompt simply starts
@@ -82,37 +146,7 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
       const method = cfg?.email_send_method;
       setSendMethod(method === 'external' ? 'external' : 'builtin');
 
-      const sym = getCurrencySymbol();
-      const subtotal = (doc?.lines || []).reduce((s, l) => s + Number(l.amount || 0), 0);
-      const vatPct = Number(doc?.vat || 0);
-      const grandTotal = subtotal * (1 + vatPct / 100);
-      const paid = isQuote ? 0 : Number(doc?.totalPaid || 0);
-      const balance = isQuote ? 0
-        : (doc && doc.balance != null ? Number(doc.balance) : Math.max(0, grandTotal - paid));
-      const isPaid = !isQuote && isInvoiceFullyPaid({ status: doc?.status, balance });
-
-      const context = {
-        companyName: comp?.company_name || comp?.name || companyName || '',
-        companyPhone: comp?.phone || comp?.phone_number || '',
-        companyEmail: comp?.email || '',
-        customerName: customerName || fullName(doc),
-        documentNumber: documentNumber || doc?.number || '',
-        documentType: documentType || 'Invoice',
-        total: `${sym} ${grandTotal.toFixed(2)}`,
-        balanceDue: `${sym} ${Math.max(0, balance).toFixed(2)}`,
-        dueDate: fmtDate(doc?.last_date),
-        paidDate: fmtDate(doc?.paidDate),
-      };
-
-      const tpl = buildDocumentEmail({
-        documentType: documentType || 'Invoice',
-        isPaid,
-        config: cfg || {},
-        context,
-      });
-      templateRef.current = { ...tpl, context, isPaid };
-
-      const to = recipientEmail || doc?.customer_email || '';
+      templateRef.current = { ...tpl, context };
       form.setFieldsValue({ to, subject: tpl.subject, body: tpl.body });
       setPreviewBody(tpl.body);
 
@@ -131,6 +165,25 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
   const generatePdfData = async () => {
     if (!documentId) return null;
     const isQuote = documentType === 'Quote';
+    if (isPO) {
+      const [po, comp] = await Promise.all([
+        window.electronAPI.getPurchaseOrder(documentId),
+        window.electronAPI.getCompany?.(),
+      ]);
+      if (!po || !po.lines) return null;
+      const vendor = po.vendor_id
+        ? await window.electronAPI.getSingleSupplier?.(po.vendor_id).catch(() => null)
+        : null;
+      return buildPurchaseOrderPdfData(po, {
+        company: {
+          name: comp?.company_name || comp?.name || '', email: comp?.email || '', phone: comp?.phone || '',
+          address: comp?.address || '', address1: comp?.address1 || '', address2: comp?.address2 || '',
+          city: comp?.city || '', state: comp?.state || '', postal_code: comp?.postal_code || comp?.zip || '',
+          country: comp?.country || '', logo: comp?.logo || null,
+        },
+        vendor,
+      });
+    }
     const [doc, tmpl, comp] = await Promise.all([
       isQuote ? window.electronAPI.getSingleQuote(documentId) : window.electronAPI.getSingleInvoice(documentId),
       isQuote ? window.electronAPI.getQuoteTemplate?.() : window.electronAPI.getInvoiceTemplate?.(),
@@ -213,10 +266,10 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
       to: vals.to, cc: vals.cc || undefined, subject: vals.subject, body: vals.body,
       html: textToSafeHtml(vals.body),
       attachments: [{ filename: pdfData.filename, content: pdfData.base64, contentType: pdfData.contentType || 'application/pdf' }],
-      document_type: documentType || 'Invoice', document_id: documentId || undefined,
+      document_type: isPO ? 'purchase_order' : (documentType || 'Invoice'), document_id: documentId || undefined,
     });
     if (res?.success) {
-      await window.electronAPI.emailMarkSent({ document_type: documentType || 'Invoice', document_id: documentId, method: 'Built-in', status: 'Sent' });
+      await window.electronAPI.emailMarkSent({ document_type: isPO ? 'purchase_order' : (documentType || 'Invoice'), document_id: documentId, method: 'Built-in', status: 'Sent' });
       message.success('Email sent successfully.');
       onClose();
       return true;
@@ -233,7 +286,7 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
       to: vals.to, cc: vals.cc || undefined, subject: vals.subject, body: vals.body,
       pdfFilename: pdfData ? pdfData.filename : undefined,
       pdfBase64: pdfData ? pdfData.base64 : undefined,
-      document_type: documentType || 'Invoice', document_id: documentId,
+      document_type: isPO ? 'purchase_order' : (documentType || 'Invoice'), document_id: documentId,
       requireAttachment: !!withAttachment,
     });
     if (res?.success) {
@@ -308,7 +361,7 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
     finally { setSending(false); }
   };
 
-  const kind = templateRef.current?.isPaid ? 'paid invoice' : (documentType === 'Quote' ? 'quote' : 'invoice');
+  const kind = isPO ? 'purchase order' : (templateRef.current?.isPaid ? 'paid invoice' : (documentType === 'Quote' ? 'quote' : 'invoice'));
 
   return (
     <Modal
@@ -347,8 +400,12 @@ const SendEmailModal = ({ visible, onClose, recipientEmail, documentType, docume
           ) : null}
         </div>
 
+        {noRecipientNotice ? (
+          <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+            message="No email address is saved for this Vendor. Enter an email address to continue." />
+        ) : null}
         <Form.Item name="to" label="To" rules={[{ required: true, type: 'email', message: 'Valid email required' }]}>
-          <Input placeholder="customer@example.com" />
+          <Input placeholder={isPO ? 'vendor@example.com' : 'customer@example.com'} />
         </Form.Item>
         <Form.Item name="cc" label="CC">
           <Input placeholder="Optional CC" />
