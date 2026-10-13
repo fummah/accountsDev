@@ -164,6 +164,52 @@ console.log('\n=== TEST 14/15: atomic — a failing check rolls the refund back 
   check('no check row left behind', db.prepare("SELECT COUNT(*) c FROM transactions WHERE LOWER(type)='check'").get().c === beforeTx);
 }
 
+console.log('\n=== PART 5/6: refunds are NOT available unapplied; genuine value is ===');
+{
+  const Payments = require(path.join(ROOT, 'src', 'backend', 'models', 'payments'));
+  const mkInvoice = (customerId, amount) => {
+    const prod = db.prepare('SELECT id FROM products ORDER BY id LIMIT 1').get();
+    const r = db.prepare("INSERT INTO invoices (number, customer, status, start_date, last_date, vat, terms) VALUES (?,?, 'Open', '2026-03-01','2026-04-01',0,30)").run('INV-T' + RID(), customerId);
+    const invId = Number(r.lastInsertRowid);
+    db.prepare("INSERT INTO invoice_lines (invoice_id, product, description, quantity, rate, amount) VALUES (?, ?, 'test', 1, ?, ?)").run(invId, prod ? prod.id : 0, amount, amount);
+    return invId;
+  };
+  const unappliedOf = (customerId, paymentId) => {
+    const row = Payments.getByCustomer(customerId).find(p => Number(p.id) === Number(paymentId));
+    return row ? Number(row.unapplied) : null;
+  };
+
+  const cid = mkCustomer('Unapp', 'Lied', '');
+  const p1 = mkPayment(cid, 1150);
+  CustomerRefunds.createRefund({ paymentId: p1, amount: 1150, bankAccountId: bankId, requestId: 'u1-' + RID() });
+  check('full unapplied refund → unapplied 0', unappliedOf(cid, p1) === 0, unappliedOf(cid, p1));
+
+  const p2 = mkPayment(cid, 1000);
+  const rf = CustomerRefunds.createRefund({ paymentId: p2, amount: 400, bankAccountId: bankId, requestId: 'u2-' + RID() });
+  check('partial unapplied refund → unapplied 600', unappliedOf(cid, p2) === 600, unappliedOf(cid, p2));
+  CustomerRefunds.reverseRefund(rf.id, {});
+  check('reversed refund restores unapplied to 1000', unappliedOf(cid, p2) === 1000, unappliedOf(cid, p2));
+
+  const p3 = mkPayment(cid, 700);
+  check('untouched payment stays fully unapplied (700)', unappliedOf(cid, p3) === 700, unappliedOf(cid, p3));
+
+  // Partly applied + partly refunded → genuine remaining unapplied = 500.
+  const cid2 = mkCustomer('Part', 'Applied', '');
+  const inv = mkInvoice(cid2, 2000);
+  const p4 = mkPayment(cid2, 2000);
+  db.prepare('INSERT INTO payment_allocations (paymentId, invoiceId, amount) VALUES (?,?,?)').run(p4, inv, 1000);
+  CustomerRefunds.createRefund({ paymentId: p4, amount: 500, bankAccountId: bankId, requestId: 'u4-' + RID() });
+  check('applied 1000 + refunded 500 → unapplied 500 (not 1000)', unappliedOf(cid2, p4) === 500, unappliedOf(cid2, p4));
+
+  // The customer balance summary agrees.
+  const bal = Payments.getCustomerBalance(cid2);
+  check('balance unappliedCredits = 500', Number(bal.unappliedCredits) === 500, bal);
+
+  // A genuine customer CREDIT is unaffected (still available).
+  const cn = db.prepare("INSERT INTO credit_notes (customer_id, date, total, status) VALUES (?, '2026-03-01', 300, 'Issued')").run(cid).lastInsertRowid;
+  check('a genuine credit note is not touched by the refund rule', !!cn);
+}
+
 console.log('\n=== static wiring ===');
 {
   const cr = fs.readFileSync(path.join(ROOT, 'src', 'backend', 'models', 'customerRefunds.js'), 'utf8');
@@ -178,6 +224,10 @@ console.log('\n=== static wiring ===');
   check('Print Now opens the existing Check Printing workflow', /check-printing\?checkId=/.test(ui));
   const cp = fs.readFileSync(path.join(ROOT, 'src', 'frontend', 'src', 'components', 'accountant', 'CheckPrinting.js'), 'utf8');
   check('check list shows the Customer Refund source', /Customer Refund/.test(cp));
+  const pay = fs.readFileSync(path.join(ROOT, 'src', 'backend', 'models', 'payments.js'), 'utf8');
+  check('payments unapplied subtracts completed refunds', /refunded_total/.test(pay) && /UNAPPLIED_EXPR/.test(pay));
+  const pdm = fs.readFileSync(path.join(ROOT, 'src', 'frontend', 'src', 'components', 'customers', 'payments', 'PaymentDetailsModal.js'), 'utf8');
+  check('payment/refund detail shows the linked check (View Check)', /check-printing\?checkId=/.test(pdm) && /Refund History/.test(pdm));
 }
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);

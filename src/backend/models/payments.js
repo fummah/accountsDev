@@ -1,6 +1,27 @@
 const db = require('./dbmgr');
 const { recalcInvoiceFinancials } = require('../services/invoiceFinancials');
 
+// ── Unapplied balance vs completed cash refunds ─────────────────────────────
+// A payment's "unapplied" amount is the customer value STILL available to apply
+// to an invoice: amount − applied − refunded. A COMPLETED CASH REFUND has left
+// the business, so it is no longer available customer value and MUST be removed
+// from the payment's unapplied balance (otherwise a refunded payment keeps
+// showing under "Payments Unapplied" and can be re-applied). Reversed refunds
+// are excluded, so a refund reversal correctly restores availability.
+//
+// `applied` is the CURRENT allocation sum (a refund that unwound an applied
+// invoice allocation already reduced it), so subtracting the refund total as
+// well is what stops that refunded money from reappearing as available credit.
+const REFUNDED_JOIN = `
+      LEFT JOIN (
+        SELECT payment_id AS pid, SUM(amount) AS refunded_total
+        FROM customer_refunds
+        WHERE status != 'Reversed' AND payment_id IS NOT NULL
+        GROUP BY payment_id
+      ) refd ON refd.pid = p.id`;
+const APPLIED_EXPR = `COALESCE(app.applied, CASE WHEN p.invoiceId IS NOT NULL AND p.invoiceId != 0 THEN p.amount ELSE 0 END)`;
+const UNAPPLIED_EXPR = `p.amount - ${APPLIED_EXPR} - COALESCE(refd.refunded_total, 0)`;
+
 const Payments = {
   createTable: () => {
     db.prepare(`
@@ -311,11 +332,12 @@ const Payments = {
   getByInvoice: (invoiceId) => {
     return db.prepare(`
       SELECT p.*,
-             COALESCE(app.applied, CASE WHEN p.invoiceId IS NOT NULL AND p.invoiceId != 0 THEN p.amount ELSE 0 END) AS applied,
-             p.amount - COALESCE(app.applied, CASE WHEN p.invoiceId IS NOT NULL AND p.invoiceId != 0 THEN p.amount ELSE 0 END) AS unapplied,
+             ${APPLIED_EXPR} AS applied,
+             ${UNAPPLIED_EXPR} AS unapplied,
              c.display_name AS customerName
       FROM payments p
       LEFT JOIN (SELECT paymentId, SUM(amount) AS applied FROM payment_allocations GROUP BY paymentId) app ON app.paymentId = p.id
+      ${REFUNDED_JOIN}
       LEFT JOIN customers c ON p.customerId = c.id
       WHERE p.invoiceId = ? OR EXISTS (SELECT 1 FROM payment_allocations a WHERE a.paymentId = p.id AND a.invoiceId = ?)
       ORDER BY p.date DESC, p.createdAt DESC
@@ -330,11 +352,12 @@ const Payments = {
              (SELECT COALESCE(SUM(il.amount * (1 + i2.vat/100)),0)
               FROM invoice_lines il JOIN invoices i2 ON il.invoice_id = i2.id WHERE i2.id = p.invoiceId)
                AS invoiceTotal,
-             COALESCE(app.applied, CASE WHEN p.invoiceId IS NOT NULL AND p.invoiceId != 0 THEN p.amount ELSE 0 END) AS applied,
-             p.amount - COALESCE(app.applied, CASE WHEN p.invoiceId IS NOT NULL AND p.invoiceId != 0 THEN p.amount ELSE 0 END) AS unapplied,
+             ${APPLIED_EXPR} AS applied,
+             ${UNAPPLIED_EXPR} AS unapplied,
              c.display_name AS customerName
       FROM payments p
       LEFT JOIN (SELECT paymentId, SUM(amount) AS applied FROM payment_allocations GROUP BY paymentId) app ON app.paymentId = p.id
+      ${REFUNDED_JOIN}
       LEFT JOIN invoices i ON p.invoiceId = i.id
       LEFT JOIN customers c ON p.customerId = c.id
       WHERE p.customerId = ?
@@ -399,10 +422,11 @@ const Payments = {
              i.number  AS invoiceNumber,
              i.status  AS invoiceStatus,
              c.display_name AS customerName,
-             COALESCE(app.applied, CASE WHEN p.invoiceId IS NOT NULL AND p.invoiceId != 0 THEN p.amount ELSE 0 END) AS applied,
-             p.amount - COALESCE(app.applied, CASE WHEN p.invoiceId IS NOT NULL AND p.invoiceId != 0 THEN p.amount ELSE 0 END) AS unapplied
+             ${APPLIED_EXPR} AS applied,
+             ${UNAPPLIED_EXPR} AS unapplied
       FROM payments p
       LEFT JOIN (SELECT paymentId, SUM(amount) AS applied FROM payment_allocations GROUP BY paymentId) app ON app.paymentId = p.id
+      ${REFUNDED_JOIN}
       LEFT JOIN invoices i ON p.invoiceId = i.id
       LEFT JOIN customers c ON p.customerId = c.id
       WHERE ${where}

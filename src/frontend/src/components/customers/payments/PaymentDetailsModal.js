@@ -132,6 +132,14 @@ const PaymentDetailsModal = ({ payment, visible, onClose, onPrint }) => {
                     { title: 'Refund #', dataIndex: 'refund_number', key: 'refund_number', render: v => v || '—' },
                     { title: 'Date', dataIndex: 'date', key: 'date', render: d => d ? moment(d).format('MM/DD/YYYY') : '—' },
                     { title: 'Amount', dataIndex: 'amount', key: 'amount', align: 'right', render: v => <Text strong style={{ color: '#cf1322' }}>-{fmt(v, cSym)}</Text> },
+                    { title: 'Check', key: 'check', render: (_, r) => (
+                      r.check_transaction_id
+                        ? <Link to={`/main/accountant/check-printing?checkId=${r.check_transaction_id}`}>
+                            <PrinterOutlined style={{ marginRight: 4 }} />CHK {r.checkNumber || r.check_transaction_id}
+                          </Link>
+                        : <Text type="secondary">—</Text>
+                    ) },
+                    { title: 'Bank', key: 'cleared', width: 90, render: (_, r) => (Number(r.checkReconciled) ? <Tag color="green">Cleared</Tag> : <Tag>Unreconciled</Tag>) },
                     { title: 'Reason', dataIndex: 'reason', key: 'reason', render: v => v || '—' },
                   ]}
                 />
