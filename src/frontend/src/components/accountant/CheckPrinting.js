@@ -838,6 +838,13 @@ const CheckPrinting = () => {
     { title: '#', dataIndex: 'reference', key: 'reference', width: 80, render: v => <Text strong>{v || '-'}</Text> },
     { title: 'Date', dataIndex: 'date', key: 'date', width: 100, render: v => v ? moment(v).format('MM/DD/YYYY') : '-' },
     { title: 'Description', dataIndex: 'description', key: 'description', ellipsis: true },
+    { title: 'Source', key: 'source', width: 150, render: (_, r) => {
+      const st = String(r.source_type || '').toLowerCase();
+      if (st === 'customer_refund') return <Tag color="purple">Customer Refund</Tag>;
+      if (st === 'bill_payment') return <Tag color="blue">Bill Payment</Tag>;
+      return <Text type="secondary">—</Text>;
+    } },
+    { title: 'Cleared', key: 'cleared', width: 90, render: (_, r) => (Number(r.isReconciled) ? <Tag color="green">Yes</Tag> : <Tag>No</Tag>) },
     { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'right', render: (v, r) => <Text strong>${fmt(v || r.debit || 0)}</Text> },
     { title: 'Printed', key: 'printed', width: 110, render: (_, r) => (
       <Tag color={r.printed ? 'green' : 'orange'} style={{ cursor: 'pointer' }} onClick={async () => {

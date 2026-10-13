@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Modal, Form, DatePicker, Input, InputNumber, Select, Button, message, Row, Col, Typography, Divider, Table, Tag, Alert, Spin } from 'antd';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useHistory } from 'react-router-dom';
+import { Modal, Form, DatePicker, Input, InputNumber, Select, Button, message, Row, Col, Typography, Divider, Table, Tag, Alert, Spin, Result } from 'antd';
 import { DollarOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../../utils/currency';
@@ -18,12 +19,18 @@ const REASONS = ['Returned Goods', 'Service Cancellation', 'Price Adjustment', '
  */
 const RefundPaymentModal = ({ payment, customerId, customerName, visible, onClose, onSuccess }) => {
   const { symbol: cSym } = useCurrency();
+  const history = useHistory();
   const [form] = Form.useForm();
   const [info, setInfo] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [accounts, setAccounts] = useState([]);
+  // After a successful refund: the linked check + the Print Now / Save for Later choice.
+  const [done, setDone] = useState(null);
+  // Idempotency key: one per modal session, so a double-click / retry can never
+  // create a second refund + check.
+  const requestIdRef = useRef(null);
 
   const money = (v) => `${cSym} ${Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const amount = Form.useWatch('amount', form);
@@ -53,6 +60,8 @@ const RefundPaymentModal = ({ payment, customerId, customerName, visible, onClos
       form.resetFields();
       form.setFieldsValue({ date: moment(), amount: undefined, method: payment.paymentMethod || 'Original Method', reason: undefined });
       setPreview(null);
+      setDone(null);
+      requestIdRef.current = `refund-${payment.id}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     }
   }, [visible, payment, form, loadInfo]);
 
@@ -86,13 +95,22 @@ const RefundPaymentModal = ({ payment, customerId, customerName, visible, onClos
         reference: vals.reference || null,
         reason: vals.reason || null,
         memo: vals.memo || null,
+        requestId: requestIdRef.current,
       });
       if (!res || res.success === false || res.error) { message.error(res?.error || 'Refund failed'); return; }
-      message.success(`Refund ${res.refund_number || ''} processed`);
       onSuccess && onSuccess();
-      onClose && onClose();
+      // Show the Print Now / Save for Later choice instead of closing outright.
+      setDone({ refundNumber: res.refund_number || '', amount: amt, checkId: res.checkTransactionId || null, checkNumber: res.checkNumber || '' });
     } catch (e) { if (!e?.errorFields) message.error(e?.message || 'Refund failed'); }
     finally { setSaving(false); }
+  };
+
+  const finishClose = () => { setDone(null); onClose && onClose(); };
+  const printNow = () => {
+    const id = done && done.checkId;
+    setDone(null);
+    onClose && onClose();
+    if (id) history.push(`/main/accountant/check-printing?checkId=${id}`);
   };
 
   const thisRefund = Number(amount) || 0;
@@ -104,10 +122,11 @@ const RefundPaymentModal = ({ payment, customerId, customerName, visible, onClos
   if (preview && preview.fromUnapplied > 0.005) allocRows.unshift({ key: 'unapplied', target: 'Unapplied credit', amount: preview.fromUnapplied });
 
   return (
+    <>
     <Modal
       title={<span><DollarOutlined style={{ marginRight: 8 }} />Refund Payment {payment ? `PMT-${String(payment.id).padStart(5, '0')}` : ''}</span>}
       visible={visible}
-      onCancel={onClose}
+      onCancel={finishClose}
       onOk={handleOk}
       confirmLoading={saving}
       okText="Process Refund"
@@ -185,6 +204,26 @@ const RefundPaymentModal = ({ payment, customerId, customerName, visible, onClos
         </Form>
       </Spin>
     </Modal>
+
+    <Modal title="Refund Processed Successfully" visible={!!done} onCancel={finishClose} zIndex={1200}
+      footer={[
+        <Button key="later" onClick={finishClose}>Save Check for Later</Button>,
+        <Button key="print" type="primary" disabled={!done || !done.checkId} onClick={printNow}>Print Check Now</Button>,
+      ]}
+    >
+      {done && (
+        <div>
+          <Alert type="success" showIcon style={{ marginBottom: 12 }}
+            message={`Refund ${done.refundNumber} posted${done.checkNumber ? ` — check #${done.checkNumber}` : ''}`} />
+          <p><Text type="secondary">Amount</Text><br /><Text strong style={{ fontSize: 18 }}>{money(done.amount)}</Text></p>
+          <p style={{ marginBottom: 0 }}>
+            A refund check has been created{done.checkNumber ? ` (#${done.checkNumber})` : ''}. The bank account has been reduced
+            <b> once</b>. Print it now, or leave it as <b>To Print</b> under Banking → Check Printing to print later.
+          </p>
+        </div>
+      )}
+    </Modal>
+    </>
   );
 };
 

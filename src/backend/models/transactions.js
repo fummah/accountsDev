@@ -321,6 +321,12 @@ const Transactions = {
   voidTransaction(id) {
     this.assertNotReconciled(id);
     const tx = this.getById(id);
+    // A refund-sourced check is HALF of a customer refund. Voiding it alone
+    // would leave an active Refund with no bank representation. Route through
+    // the refund reversal, which voids the check AND reverses the accounting.
+    if (tx && String(tx.source_type || '').toLowerCase() === 'customer_refund') {
+      throw new Error('This check belongs to a customer refund. Reverse the refund instead — that voids the check and reverses the accounting together.');
+    }
     // A check carries accounting (and possibly bill payment allocations) that a
     // bare status flip would leave posted. Route it through the same central
     // reversal used by delete, but keep the row and mark it Voided.
@@ -365,6 +371,11 @@ const Transactions = {
     }
     if (String(check.type || '').toLowerCase() !== 'check') {
       return { success: false, error: `Transaction #${id} is not a check` };
+    }
+    // A refund-sourced check must be reversed through the refund, so the two
+    // stay coherent (never delete the check and leave the refund posted).
+    if (String(check.source_type || '').toLowerCase() === 'customer_refund') {
+      return { success: false, error: 'This check belongs to a customer refund and cannot be deleted directly. Reverse the refund instead.' };
     }
 
     const BillPayments = require('./billPayments');

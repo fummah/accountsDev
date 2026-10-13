@@ -60,6 +60,20 @@ const CustomerRefunds = {
       db.prepare('CREATE INDEX IF NOT EXISTS idx_cr_payment ON customer_refunds(payment_id)').run();
       db.prepare('CREATE INDEX IF NOT EXISTS idx_cra_refund ON customer_refund_allocations(refund_id)').run();
     } catch { /* indexes optional */ }
+
+    // ADDITIVE migrations (existing DBs):
+    //   check_transaction_id — the bank-register CHECK row this refund created
+    //                          (stable id link; the refund journal is the ONE
+    //                          authoritative bank posting, the check row is the
+    //                          register/print representation of the same event).
+    //   client_request_id    — idempotency key so a double-click / retry can
+    //                          never create two refunds + two checks.
+    try {
+      const cols = new Set(db.prepare("PRAGMA table_info('customer_refunds')").all().map(r => r.name));
+      if (!cols.has('check_transaction_id')) db.prepare('ALTER TABLE customer_refunds ADD COLUMN check_transaction_id INTEGER').run();
+      if (!cols.has('client_request_id')) db.prepare('ALTER TABLE customer_refunds ADD COLUMN client_request_id TEXT').run();
+      db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_cr_request ON customer_refunds(client_request_id) WHERE client_request_id IS NOT NULL').run();
+    } catch { /* additive migration / partial index best-effort */ }
   },
 
   generateNumber() {
@@ -154,6 +168,23 @@ const CustomerRefunds = {
    * transaction so two users can never over-refund the same payment.
    */
   createRefund(payload = {}, ctx = {}) {
+    const Contacts = require('../services/contactIdentity');
+    const Transactions = require('./transactions');
+
+    // Idempotency: a retry / double-click that reuses the same client_request_id
+    // returns the FIRST refund instead of creating a second refund + a second
+    // check (that would be two bank credits for one cash outflow).
+    const requestId = payload.requestId != null && String(payload.requestId).trim() !== ''
+      ? String(payload.requestId).trim() : null;
+    if (requestId) {
+      const existing = db.prepare('SELECT id, refund_number, check_transaction_id FROM customer_refunds WHERE client_request_id = ? LIMIT 1').get(requestId);
+      if (existing) {
+        const chk = existing.check_transaction_id
+          ? db.prepare('SELECT reference FROM transactions WHERE id = ?').get(existing.check_transaction_id) : null;
+        return { success: true, id: existing.id, refund_number: existing.refund_number, checkTransactionId: existing.check_transaction_id || null, checkNumber: chk ? chk.reference : null, idempotent: true };
+      }
+    }
+
     const paymentId = payload.paymentId != null && payload.paymentId !== '' ? Number(payload.paymentId) : null;
     const creditNoteId = payload.creditNoteId != null && payload.creditNoteId !== '' ? Number(payload.creditNoteId) : null;
     const amount = round2(payload.amount);
@@ -189,8 +220,24 @@ const CustomerRefunds = {
 
     const date = payload.date || new Date().toISOString().slice(0, 10);
 
+    // Payee of the generated check = the customer, via the shared display-name
+    // rule (First/Last → Company → Display) — never blank for a company-only
+    // customer. Address is copied for the pre-printed check window.
+    let payeeName = payload.customerName || '';
+    let payeeAddress = '';
+    if (customerId) {
+      const cust = db.prepare('SELECT * FROM customers WHERE id = ?').get(Number(customerId));
+      if (cust) {
+        payeeName = Contacts.getCustomerName(cust) || payeeName;
+        payeeAddress = [cust.address1, cust.address2, [cust.city, cust.state].filter(Boolean).join(' '), cust.postal_code, cust.country]
+          .map(v => String(v == null ? '' : v).trim()).filter(Boolean).join('\n');
+      }
+    }
+
     let refundId = null;
     let number = null;
+    let checkTransactionId = null;
+    let checkNumber = null;
     try {
       const run = db.transaction(() => {
         // Re-check the refundable amount inside the transaction (concurrency).
@@ -202,15 +249,15 @@ const CustomerRefunds = {
 
         number = this.generateNumber();
         const res = db.prepare(`
-          INSERT INTO customer_refunds (refund_number, customer_id, payment_id, invoice_id, credit_note_id, date, amount, method, bank_account_id, reference, memo, reason, status, created_by)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'Posted', ?)
+          INSERT INTO customer_refunds (refund_number, customer_id, payment_id, invoice_id, credit_note_id, date, amount, method, bank_account_id, reference, memo, reason, status, created_by, client_request_id)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'Posted', ?, ?)
         `).run(
           number, customerId || null, paymentId,
           payload.invoiceId != null ? Number(payload.invoiceId) : null,
           creditNoteId,
           date, amount, payload.method || null, bankAccountId,
           payload.reference || null, payload.memo || null, payload.reason || null,
-          ctx.userId || 'system'
+          ctx.userId || 'system', requestId
         );
         refundId = Number(res.lastInsertRowid);
 
@@ -232,7 +279,8 @@ const CustomerRefunds = {
           }
         }
 
-        // Accounting: Dr AR / Cr Bank (money out).
+        // Accounting: Dr AR / Cr Bank (money out). This is the ONE authoritative
+        // bank posting for the refund.
         JournalEntries.post({
           date,
           reference: number,
@@ -246,6 +294,31 @@ const CustomerRefunds = {
           ],
         });
 
+        // Bank-register CHECK row: the register / reconciliation / print
+        // representation of the SAME cash outflow. It posts NO journal (the
+        // refund journal above is authoritative), so Bank is credited EXACTLY
+        // ONCE. Linked by stable ids (source_type/source_id) + refund.check_transaction_id.
+        const stats = Transactions.getCheckStats();
+        checkNumber = String(stats.nextCheckNumber || '');
+        const ins = Transactions.insert({
+          date,
+          type: 'Check',
+          amount,
+          description: payload.memo || `Customer Refund ${number} to ${payeeName}`.trim(),
+          accountId: bankAccountId,
+          customerId: customerId || null,
+          reference: checkNumber,
+          debit: 0,
+          credit: amount,
+          payee_name: payeeName,
+          payee_address: payeeAddress,
+          source_type: 'customer_refund',
+          source_id: refundId,
+          entered_by: ctx.userId || 'system',
+        });
+        checkTransactionId = Number(ins.lastInsertRowid);
+        db.prepare('UPDATE customer_refunds SET check_transaction_id = ? WHERE id = ?').run(checkTransactionId, refundId);
+
         // Recompute the affected invoices' balances/status.
         const Payments = require('./payments');
         affectedInvoices.forEach(invId => Payments.recomputeInvoice(invId));
@@ -257,10 +330,10 @@ const CustomerRefunds = {
         const AuditLog = require('./auditLog');
         AuditLog.log({
           userId: ctx.userId || 'system', action: 'create', entityType: 'customer_refund', entityId: refundId,
-          details: { paymentId, creditNoteId, amount, bankAccountId, refundNumber: number, reason: payload.reason || null },
+          details: { paymentId, creditNoteId, amount, bankAccountId, refundNumber: number, checkTransactionId, checkNumber, reason: payload.reason || null },
         });
       } catch { /* audit best-effort */ }
-      return { success: true, id: refundId, refund_number: number, affectedInvoices: out.affectedInvoices };
+      return { success: true, id: refundId, refund_number: number, checkTransactionId, checkNumber, affectedInvoices: out.affectedInvoices };
     } catch (e) {
       console.error('[customerRefunds] createRefund failed:', e.message);
       return { success: false, error: e.message };
@@ -316,10 +389,14 @@ const CustomerRefunds = {
 
   getById(id) {
     const r = db.prepare(`
-      SELECT r.*, c.display_name AS customerName, p.amount AS paymentAmount, p.date AS paymentDate
+      SELECT r.*, c.display_name AS customerName, p.amount AS paymentAmount, p.date AS paymentDate,
+             t.reference AS checkNumber, t.printed AS checkPrinted, t.printed_at AS checkPrintedAt,
+             t.isReconciled AS checkReconciled, t.reconciliationDate AS checkReconciliationDate,
+             t.status AS checkStatus, t.payee_name AS checkPayee
       FROM customer_refunds r
       LEFT JOIN customers c ON c.id = r.customer_id
       LEFT JOIN payments p ON p.id = r.payment_id
+      LEFT JOIN transactions t ON t.id = r.check_transaction_id
       WHERE r.id = ?
     `).get(Number(id));
     if (!r) return null;
@@ -333,14 +410,24 @@ const CustomerRefunds = {
 
   getByCustomer(customerId) {
     return db.prepare(`
-      SELECT r.*, p.amount AS paymentAmount
-      FROM customer_refunds r LEFT JOIN payments p ON p.id = r.payment_id
+      SELECT r.*, p.amount AS paymentAmount,
+             t.reference AS checkNumber, t.printed AS checkPrinted,
+             t.isReconciled AS checkReconciled, t.status AS checkStatus
+      FROM customer_refunds r
+      LEFT JOIN payments p ON p.id = r.payment_id
+      LEFT JOIN transactions t ON t.id = r.check_transaction_id
       WHERE r.customer_id = ? ORDER BY r.id DESC
     `).all(Number(customerId));
   },
 
   getByPayment(paymentId) {
-    return db.prepare('SELECT * FROM customer_refunds WHERE payment_id = ? ORDER BY id DESC').all(Number(paymentId));
+    return db.prepare(`
+      SELECT r.*, t.reference AS checkNumber, t.printed AS checkPrinted,
+             t.isReconciled AS checkReconciled, t.status AS checkStatus
+      FROM customer_refunds r
+      LEFT JOIN transactions t ON t.id = r.check_transaction_id
+      WHERE r.payment_id = ? ORDER BY r.id DESC
+    `).all(Number(paymentId));
   },
 
   /** Void the refund's journal and restore the payment's settlement. */
@@ -355,6 +442,19 @@ const CustomerRefunds = {
         // Void the refund journal.
         const je = db.prepare("SELECT id FROM journal_entries WHERE source_type = 'customer_refund' AND source_id = ? AND status = 'Posted' LIMIT 1").get(Number(id));
         if (je) JournalEntries.voidEntry(je.id);
+
+        // Void the linked bank-register CHECK coherently (never leave an active
+        // check in the register/reconciliation for a reversed refund). A
+        // reconciled check cannot be reversed until the reconciliation is undone.
+        if (refund.check_transaction_id) {
+          const chk = db.prepare('SELECT id, isReconciled FROM transactions WHERE id = ?').get(Number(refund.check_transaction_id));
+          if (chk) {
+            if (Number(chk.isReconciled)) {
+              throw new Error('This refund cannot be reversed: its check is part of a bank reconciliation. Undo the reconciliation first.');
+            }
+            db.prepare("UPDATE transactions SET status = 'Voided' WHERE id = ?").run(chk.id);
+          }
+        }
 
         // Restore the payment allocations the refund unwound.
         const allocs = db.prepare('SELECT * FROM customer_refund_allocations WHERE refund_id = ?').all(Number(id));
