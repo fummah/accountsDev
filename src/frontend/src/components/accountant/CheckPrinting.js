@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
-import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Alert, Tooltip, Modal, Statistic, Spin } from 'antd';
-import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, PlusOutlined, PaperClipOutlined, EditOutlined, BookOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { Card, Form, Input, InputNumber, DatePicker, Select, Button, Row, Col, message, Table, Tag, Space, Typography, Alert, Tooltip, Modal, Statistic, Spin, Divider } from 'antd';
+import { PrinterOutlined, SaveOutlined, EyeOutlined, HistoryOutlined, DeleteOutlined, SearchOutlined, DollarOutlined, BankOutlined, WarningOutlined, CheckCircleOutlined, PlusOutlined, PaperClipOutlined, EditOutlined, BookOutlined, UnorderedListOutlined, UserAddOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useCurrency } from '../../utils/currency';
 import { getCustomerName } from '../../utils/contactIdentity';
 import { dedupeAccounts, getBankAccounts, isBillLineAccount, isBankAccount } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
+import PartyCreateModal from '../shared/PartyCreateModal';
+import { useCloseDropdownOnScroll } from '../../utils/useCloseDropdownOnScroll';
 import JournalEntryDetailModal from './JournalEntryDetailModal';
 import { FormSection, FormGrid, FormCol, DocumentActionBar, FORM_ITEM_STYLE } from '../shared/FormSection';
 import AttachmentManager from '../shared/AttachmentManager';
@@ -77,6 +79,14 @@ const CheckPrinting = () => {
     [accounts]
   );
   const [payees, setPayees] = useState([]);
+  // "+ Add New Customer / Vendor" from the Payee dropdown (shared dialog).
+  const [partyModal, setPartyModal] = useState({ open: false, type: 'vendor' });
+  const [payeeOpen, setPayeeOpen] = useState(false);
+  useCloseDropdownOnScroll(payeeOpen, () => setPayeeOpen(false));
+  // Check History Bank Account filter (id; '' = all). Defaults to the form's
+  // selected bank account once one is chosen.
+  const [historyBankId, setHistoryBankId] = useState('');
+  const [historyBankTouched, setHistoryBankTouched] = useState(false);
   const [checkHistory, setCheckHistory] = useState([]);
   const [journalDetailId, setJournalDetailId] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -102,10 +112,17 @@ const CheckPrinting = () => {
 
   // Load static data once on mount
   useEffect(() => { loadStaticData(); }, []);
-  // Load paginated history on mount and when page/pageSize/search changes
-  useEffect(() => { loadCheckHistory(); }, [page, pageSize, searchText]);
+  // Load paginated history on mount and when page/pageSize/search/bank change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadCheckHistory(); }, [page, pageSize, searchText, historyBankId]);
   // Load stats on mount (and after mutations)
   useEffect(() => { loadCheckStats(); }, []);
+
+  // When a Bank Account is chosen in the check form, default the History filter
+  // to it (until the user picks their own filter).
+  useEffect(() => {
+    if (watchAccountId && !historyBankTouched) setHistoryBankId(String(watchAccountId));
+  }, [watchAccountId, historyBankTouched]);
 
   // Load the saved preprinted-check alignment calibration.
   useEffect(() => {
@@ -165,17 +182,34 @@ const CheckPrinting = () => {
     }
   }, [payees, autoLoadCheckId]);
 
-  const loadStaticData = async () => {
+  // Payee list (customers + vendors + employees), labels via the shared
+  // identity rule so company-only parties still show a name.
+  const loadPayees = async () => {
     try {
-      const [accRes, vendorsRes, customersRes, employeesRes, companyRes] = await Promise.all([
-        // ALL accounts. The Bank Account field filters this to Bank; the Split
-        // Lines field needs every account a payment can be posted against.
-        // Fetching Bank-only here is exactly what wrongly made the Split Lines
-        // selector show Bank accounts only.
-        window.electronAPI.getChartOfAccounts(),
+      const [vendorsRes, customersRes, employeesRes] = await Promise.all([
         window.electronAPI.getAllSuppliers().catch(() => []),
         window.electronAPI.getAllCustomers().catch(() => ({ all: [] })),
         window.electronAPI.getEmployees ? window.electronAPI.getEmployees().catch(() => []) : Promise.resolve([]),
+      ]);
+      const vendors = Array.isArray(vendorsRes) ? vendorsRes : (vendorsRes?.data || vendorsRes?.all || []);
+      const customers = Array.isArray(customersRes?.all) ? customersRes.all : (Array.isArray(customersRes) ? customersRes : []);
+      const employees = Array.isArray(employeesRes?.data) ? employeesRes.data : (Array.isArray(employeesRes) ? employeesRes : []);
+      const merged = [
+        ...vendors.map(v => ({ id: `v-${v.id}`, name: getCustomerName(v) || v.name || `Vendor #${v.id}`, type: 'Vendor', _raw: v })),
+        ...customers.map(c => ({ id: `c-${c.id}`, name: getCustomerName(c) || `Customer #${c.id}`, type: 'Customer', _raw: c })),
+        ...employees.map(e => ({ id: `e-${e.id}`, name: e.name || `${e.first_name || ''} ${e.last_name || ''}`.trim() || `Employee #${e.id}`, type: 'Employee', _raw: e })),
+      ].filter(p => p.name);
+      setPayees(merged);
+      return merged;
+    } catch { setPayees([]); return []; }
+  };
+
+  const loadStaticData = async () => {
+    try {
+      const [accRes, companyRes] = await Promise.all([
+        // ALL accounts. The Bank Account field filters this to Bank; the Split
+        // Lines field needs every account a payment can be posted against.
+        window.electronAPI.getChartOfAccounts(),
         window.electronAPI.getCompany?.().catch(() => ({})),
       ]);
 
@@ -183,19 +217,7 @@ const CheckPrinting = () => {
       setAccounts(dedupeAccounts(accs));
       setBankAccounts(getBankAccounts(accs));
 
-      const vendors = Array.isArray(vendorsRes) ? vendorsRes : (vendorsRes?.data || vendorsRes?.all || []);
-      const customers = Array.isArray(customersRes?.all) ? customersRes.all : (Array.isArray(customersRes) ? customersRes : []);
-      const employees = Array.isArray(employeesRes?.data) ? employeesRes.data : (Array.isArray(employeesRes) ? employeesRes : []);
-      const merged = [
-        // ONE shared identity rule for customers/vendors (person → company →
-        // display name), so a company-only payee still shows a name. Employees
-        // keep their own name field. Each always has a safe fallback, so a
-        // company-only payee is never dropped from the list.
-        ...vendors.map(v => ({ id: `v-${v.id}`, name: getCustomerName(v) || v.name || `Vendor #${v.id}`, type: 'Vendor', _raw: v })),
-        ...customers.map(c => ({ id: `c-${c.id}`, name: getCustomerName(c) || `Customer #${c.id}`, type: 'Customer', _raw: c })),
-        ...employees.map(e => ({ id: `e-${e.id}`, name: e.name || `${e.first_name || ''} ${e.last_name || ''}`.trim() || `Employee #${e.id}`, type: 'Employee', _raw: e })),
-      ].filter(p => p.name);
-      setPayees(merged);
+      await loadPayees();
 
       if (companyRes && !companyRes.error) setCompany(companyRes);
     } catch (e) {
@@ -204,10 +226,25 @@ const CheckPrinting = () => {
     }
   };
 
+  // After a new party is created from the Payee dropdown: refresh the list and
+  // auto-select it as the Payee, PRESERVING the rest of the check form.
+  const handlePartyCreated = async (record, meta = {}) => {
+    await loadPayees();
+    if (record && record.id != null) {
+      const value = `${meta.isVendor ? 'v' : 'c'}-${record.id}`;
+      const name = getCustomerName(record) || meta.display || '';
+      form.setFieldsValue({ payee: value, payeeName: name });
+      setWatchPayeeName(name);
+      const addr = formatPayeeAddress({ _raw: record });
+      form.setFieldsValue({ payeeAddress: addr });
+      setWatchPayeeAddress(addr);
+    }
+  };
+
   const loadCheckHistory = async () => {
     setHistoryLoading(true);
     try {
-      const res = await window.electronAPI.getTransactionsPaginated?.({ page, pageSize, search: searchText, type: 'Check' }).catch(() => ({ data: [], total: 0 }));
+      const res = await window.electronAPI.getTransactionsPaginated?.({ page, pageSize, search: searchText, type: 'Check', bankAccountId: historyBankId || '' }).catch(() => ({ data: [], total: 0 }));
       if (res && res.error) { setCheckHistory([]); setHistoryTotal(0); return; }
       const items = (res?.data || []).map((t, i) => ({ ...t, key: t.id || i }));
       setCheckHistory(items);
@@ -1037,7 +1074,28 @@ const CheckPrinting = () => {
                 <FormGrid columns={2}>
                   <FormCol>
                     <Form.Item name="payee" label="Pay To" style={FORM_ITEM_STYLE}>
-                      <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear onChange={(val, opt) => {
+                      <Select showSearch optionFilterProp="children" placeholder="Select payee" allowClear
+                        open={payeeOpen}
+                        onDropdownVisibleChange={(o) => setPayeeOpen(o)}
+                        dropdownRender={(menu) => (
+                          <>
+                            {menu}
+                            <Divider style={{ margin: '4px 0' }} />
+                            <Button type="link" size="small" icon={<PlusOutlined />}
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => { setPayeeOpen(false); setPartyModal({ open: true, type: 'customer' }); }}
+                              style={{ width: '100%', textAlign: 'left' }}>
+                              Add New Customer
+                            </Button>
+                            <Button type="link" size="small" icon={<UserAddOutlined />}
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => { setPayeeOpen(false); setPartyModal({ open: true, type: 'vendor' }); }}
+                              style={{ width: '100%', textAlign: 'left' }}>
+                              Add New Vendor
+                            </Button>
+                          </>
+                        )}
+                        onChange={(val, opt) => {
                         // Resolve the payee name from the SAME shared identity rule
                         // used to build the option labels (never a blank company payee).
                         const found = val ? payees.find(p => p.id === val) : null;
@@ -1227,7 +1285,18 @@ const CheckPrinting = () => {
 
       {/* Check History */}
       <Card title={<><HistoryOutlined style={{ marginRight: 4 }} /> Check History</>} size="small" style={{ marginTop: 16 }}
-        extra={<Input.Search placeholder="Search checks..." onSearch={v => { setSearchText(v); setPage(1); }} allowClear style={{ width: 200 }} />}
+        extra={
+          <Space>
+            <Select value={historyBankId || 'all'} style={{ width: 210 }} placeholder="All Bank Accounts"
+              onChange={(v) => { setHistoryBankTouched(true); setHistoryBankId(v === 'all' ? '' : String(v)); setPage(1); }}>
+              <Select.Option value="all">All Bank Accounts</Select.Option>
+              {bankAccounts.map(a => (
+                <Select.Option key={a.id} value={String(a.id)}>{a.accountName || a.name || `#${a.id}`}</Select.Option>
+              ))}
+            </Select>
+            <Input.Search placeholder="Search checks..." onSearch={v => { setSearchText(v); setPage(1); }} allowClear style={{ width: 200 }} />
+          </Space>
+        }
       >
         <Table
           columns={historyColumns}
@@ -1336,6 +1405,14 @@ const CheckPrinting = () => {
         journalEntryId={journalDetailId}
         visible={!!journalDetailId}
         onClose={() => setJournalDetailId(null)}
+      />
+
+      {/* Add New Customer / Vendor from the Payee dropdown (shared dialog). */}
+      <PartyCreateModal
+        open={partyModal.open}
+        type={partyModal.type}
+        onClose={() => setPartyModal((m) => ({ ...m, open: false }))}
+        onCreated={handlePartyCreated}
       />
     </div>
   );

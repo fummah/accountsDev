@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Select, Tag, Space } from 'antd';
 import { buildAccountLabelMap } from '../../utils/accounts';
+import { useCloseDropdownOnScroll } from '../../utils/useCloseDropdownOnScroll';
 
 const { Option } = Select;
 
@@ -131,6 +132,14 @@ const AccountSelect = ({
 
   const toValue = (a) => (valueMode === 'name' ? a.name : a.id);
 
+  // Close the popup when the surrounding page/container is scrolled (a floating
+  // detached dropdown feels broken); scrolling inside the popup keeps it open.
+  // Shared here so every account/bank selector in the app behaves consistently.
+  const [open, setOpen] = useState(false);
+  const controlledOpen = rest.open;
+  const callerOnVisible = rest.onDropdownVisibleChange;
+  useCloseDropdownOnScroll(controlledOpen !== undefined ? controlledOpen : open, () => setOpen(false));
+
   return (
     <Select
       showSearch
@@ -145,6 +154,8 @@ const AccountSelect = ({
       optionFilterProp="children"
       dropdownRender={dropdownRender}
       {...rest}
+      open={controlledOpen !== undefined ? controlledOpen : open}
+      onDropdownVisibleChange={(o) => { setOpen(o); if (typeof callerOnVisible === 'function') callerOnVisible(o); }}
     >
       {rows.map((a) => (
         <Option

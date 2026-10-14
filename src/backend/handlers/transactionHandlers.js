@@ -40,9 +40,9 @@ const registerTransactionHandlers = () => {
     }
   });
 
-  ipcMain.handle('get-transactions-paginated', async (_e, { page = 1, pageSize = 25, search = '', type = '' } = {}) => {
+  ipcMain.handle('get-transactions-paginated', async (_e, { page = 1, pageSize = 25, search = '', type = '', bankAccountId = '' } = {}) => {
     try {
-      return Transactions.getPaginated(page, pageSize, search, type);
+      return Transactions.getPaginated(page, pageSize, search, type, bankAccountId);
     } catch (error) {
       console.error('Error fetching paginated transactions:', error);
       return { error: error.message };

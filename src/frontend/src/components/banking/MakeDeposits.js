@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, DatePicker, Form, Input, InputNumber, Select, Button, Table, Space, message, Modal, Row, Col, Statistic, Typography, Tag, Tooltip, Alert, Tabs, Checkbox, Divider, Spin } from 'antd';
-import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutlined, HistoryOutlined, DollarOutlined, SearchOutlined, SwapOutlined, MoneyCollectOutlined, BookOutlined } from '@ant-design/icons';
+import { PlusOutlined, SaveOutlined, BankOutlined, DeleteOutlined, DownloadOutlined, HistoryOutlined, DollarOutlined, SearchOutlined, SwapOutlined, MoneyCollectOutlined, BookOutlined, UserAddOutlined } from '@ant-design/icons';
 import moment from 'moment';
 import { useLocation } from 'react-router-dom';
 import { useCurrency } from '../../utils/currency';
 import { getBankAccounts, getManualDepositSourceAccounts } from '../../utils/accounts';
 import AccountSelect from '../shared/AccountSelect';
+import PartyCreateModal from '../shared/PartyCreateModal';
+import { getCustomerName } from '../../utils/contactIdentity';
+import { useCloseDropdownOnScroll } from '../../utils/useCloseDropdownOnScroll';
 import JournalEntryDetailModal from '../accountant/JournalEntryDetailModal';
 
 
@@ -35,6 +38,11 @@ const MakeDeposits = () => {
   const [selectedPayments, setSelectedPayments] = useState([]);
   const [allAccounts, setAllAccounts] = useState([]);
   const [payors, setPayors] = useState([]);
+  // "+ Add New Customer / Vendor" from the Received-From dropdown.
+  const [partyModal, setPartyModal] = useState({ open: false, type: 'customer', lineIndex: null });
+  // Which Received-From dropdown is open (so a parent scroll can close it).
+  const [payorOpenKey, setPayorOpenKey] = useState(null);
+  useCloseDropdownOnScroll(payorOpenKey != null, () => setPayorOpenKey(null));
   const [journalDetailId, setJournalDetailId] = useState(null);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountForm] = Form.useForm();
@@ -66,14 +74,41 @@ const MakeDeposits = () => {
     setDepositDetailLoading(false);
   };
 
+  // Received-From payors (customers + vendors), labels via the shared
+  // identity rule (person → company → display) so company-only parties show.
+  const loadPayors = async () => {
+    try {
+      const [custRes, vendRes] = await Promise.all([
+        window.electronAPI.getAllCustomers().catch(() => ({ all: [] })),
+        window.electronAPI.getAllSuppliers().catch(() => []),
+      ]);
+      const customers = Array.isArray(custRes?.all) ? custRes.all : (Array.isArray(custRes) ? custRes : []);
+      const vendors = Array.isArray(vendRes) ? vendRes : (vendRes?.data || vendRes?.all || []);
+      setPayors([
+        ...customers.map(c => ({ id: `c-${c.id}`, name: getCustomerName(c) || `Customer #${c.id}`, type: 'Customer' })),
+        ...vendors.map(v => ({ id: `v-${v.id}`, name: getCustomerName(v) || `Vendor #${v.id}`, type: 'Vendor' })),
+      ].filter(p => p.name));
+    } catch { setPayors([]); }
+  };
+
+  // After a new party is created from the dropdown: refresh the list, auto-select
+  // it on the originating line, and PRESERVE the rest of the deposit form.
+  const handlePartyCreated = async (record, meta = {}) => {
+    await loadPayors();
+    const lineIndex = partyModal.lineIndex;
+    if (record && record.id != null && lineIndex != null) {
+      form.setFieldValue(['items', lineIndex, 'receivedFrom'], `${meta.isVendor ? 'v' : 'c'}-${record.id}`);
+    }
+  };
+
   const loadData = async () => {
     try {
-      const [accRes, txnRes, pmts, custRes, vendRes, srcRes] = await Promise.all([
+      const [accRes, txnRes, pmts, , , srcRes] = await Promise.all([
         window.electronAPI.getChartOfAccounts().catch(() => []),
         window.electronAPI.getTransactions().catch(() => []),
         window.electronAPI.getPayments?.().catch(() => []),
-        window.electronAPI.getAllCustomers().catch(() => ({ all: [] })),
-        window.electronAPI.getAllSuppliers().catch(() => []),
+        Promise.resolve(null),
+        Promise.resolve(null),
         window.electronAPI.getDepositSourceAccounts?.().catch(() => null),
       ]);
       const accs = Array.isArray(accRes) ? accRes : [];
@@ -93,14 +128,7 @@ const MakeDeposits = () => {
       const pmtArr = Array.isArray(pmts) ? pmts : (pmts?.all || pmts?.data || []);
       setPendingPayments(pmtArr.filter(p => (p.status || '').toLowerCase() !== 'deposited'));
 
-      // Load payors (customers + vendors) for Received From dropdown
-      const customers = Array.isArray(custRes?.all) ? custRes.all : (Array.isArray(custRes) ? custRes : []);
-      const vendors = Array.isArray(vendRes) ? vendRes : (vendRes?.data || vendRes?.all || []);
-      const merged = [
-        ...customers.map(c => ({ id: `c-${c.id}`, name: c.display_name || `${c.first_name || ''} ${c.last_name || ''}`.trim(), type: 'Customer' })),
-        ...vendors.map(v => ({ id: `v-${v.id}`, name: v.display_name || `${v.first_name || ''} ${v.last_name || ''}`.trim(), type: 'Vendor' })),
-      ].filter(p => p.name);
-      setPayors(merged);
+      await loadPayors();
     } catch { setAccounts([]); setDepositHistory([]); }
   };
 
@@ -416,7 +444,30 @@ const MakeDeposits = () => {
                       <Row key={field.key} gutter={8} style={{ marginBottom: 8 }} align="middle">
                         <Col xs={24} sm={4}>
                           <Form.Item {...field} name={[field.name, 'receivedFrom']} noStyle>
-                            <Select showSearch allowClear optionFilterProp="children" placeholder="Customer/Vendor (optional)" style={{ width: '100%' }}>
+                            <Select
+                              showSearch allowClear optionFilterProp="children"
+                              placeholder="Customer/Vendor (optional)" style={{ width: '100%' }}
+                              open={payorOpenKey === field.key}
+                              onDropdownVisibleChange={(o) => setPayorOpenKey(o ? field.key : null)}
+                              dropdownRender={(menu) => (
+                                <>
+                                  {menu}
+                                  <Divider style={{ margin: '4px 0' }} />
+                                  <Button type="link" size="small" icon={<PlusOutlined />}
+                                    onMouseDown={e => e.preventDefault()}
+                                    onClick={() => { setPayorOpenKey(null); setPartyModal({ open: true, type: 'customer', lineIndex: field.name }); }}
+                                    style={{ width: '100%', textAlign: 'left' }}>
+                                    Add New Customer
+                                  </Button>
+                                  <Button type="link" size="small" icon={<UserAddOutlined />}
+                                    onMouseDown={e => e.preventDefault()}
+                                    onClick={() => { setPayorOpenKey(null); setPartyModal({ open: true, type: 'vendor', lineIndex: field.name }); }}
+                                    style={{ width: '100%', textAlign: 'left' }}>
+                                    Add New Vendor
+                                  </Button>
+                                </>
+                              )}
+                            >
                               {payors.map(p => <Option key={p.id} value={p.id}>{p.name} ({p.type})</Option>)}
                             </Select>
                           </Form.Item>
@@ -611,6 +662,14 @@ const MakeDeposits = () => {
         journalEntryId={journalDetailId}
         visible={!!journalDetailId}
         onClose={() => setJournalDetailId(null)}
+      />
+
+      {/* Add New Customer / Vendor from the Received-From dropdown (shared). */}
+      <PartyCreateModal
+        open={partyModal.open}
+        type={partyModal.type}
+        onClose={() => setPartyModal((m) => ({ ...m, open: false }))}
+        onCreated={handlePartyCreated}
       />
 
       {/* ═══ DEPOSIT DETAILS MODAL (deep-linked from the General Ledger) ═══ */}

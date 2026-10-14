@@ -179,7 +179,7 @@ const Transactions = {
     return { total, totalAmount, thisMonthCount, nextCheckNumber: String((lastRef || 0) + 1) };
   },
 
-  getPaginated(page = 1, pageSize = 25, search = '', typeFilter = '') {
+  getPaginated(page = 1, pageSize = 25, search = '', typeFilter = '', bankAccountId = '') {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const limit = Math.max(1, Math.min(500, pageSize));
     const conditions = [];
@@ -187,6 +187,12 @@ const Transactions = {
     if (typeFilter) {
       conditions.push(`LOWER(type) = LOWER(?)`);
       params.push(typeFilter);
+    }
+    // Filter by Bank Account using the STABLE account id (never the name).
+    const bankId = Number(bankAccountId);
+    if (bankAccountId && Number.isFinite(bankId) && bankId > 0) {
+      conditions.push('accountId = ?');
+      params.push(bankId);
     }
     if (search && search.trim()) {
       conditions.push('(type LIKE ? OR date LIKE ? OR description LIKE ? OR reference LIKE ? OR payee_name LIKE ? OR CAST(amount AS TEXT) LIKE ?)');
