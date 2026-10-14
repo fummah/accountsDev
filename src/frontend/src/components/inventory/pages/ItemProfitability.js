@@ -71,7 +71,7 @@ const ItemProfitability = () => {
     { title: 'Item', key: 'item', render: (_, r) => <a onClick={() => history.push(`/main/inventory/items?item=${r.itemId}`)} style={{ fontWeight: 600 }}>{r.name}</a>, sorter: (a, b) => (a.name || '').localeCompare(b.name || '') },
     { title: 'SKU', dataIndex: 'sku', key: 'sku', width: 120, render: (v) => v || <Text type="secondary">—</Text> },
     { title: 'Type', key: 'type', width: 150, render: (_, r) => <Tag>{itemTypeLabel(r.type)}</Tag> },
-    { title: 'Cost', key: 'cost', width: 110, align: 'right', sorter: (a, b) => (a.cost || 0) - (b.cost || 0), render: (_, r) => r.cost == null ? <Text type="secondary">Not configured</Text> : money(r.cost) },
+    { title: 'Purchase Cost', key: 'cost', width: 130, align: 'right', sorter: (a, b) => (a.cost || 0) - (b.cost || 0), render: (_, r) => r.cost == null ? <Text type="secondary">Not configured</Text> : money(r.cost) },
     { title: 'Selling Price', key: 'price', width: 120, align: 'right', sorter: (a, b) => (a.sellingPrice || 0) - (b.sellingPrice || 0), render: (_, r) => r.sellingPrice == null ? <Text type="secondary">Not configured</Text> : money(r.sellingPrice) },
     { title: 'Gross Profit', key: 'gp', width: 120, align: 'right', sorter: (a, b) => (a.grossProfit || 0) - (b.grossProfit || 0),
       render: (_, r) => r.grossProfit == null ? <Text type="secondary">—</Text> : <Text strong style={{ color: r.grossProfit < 0 ? '#cf1322' : r.grossProfit > 0 ? '#3f8600' : undefined }}>{money(r.grossProfit)}</Text> },

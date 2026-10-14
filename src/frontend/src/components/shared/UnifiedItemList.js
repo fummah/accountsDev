@@ -1154,7 +1154,7 @@ const UnifiedItemList = () => {
                 <Card size="small" title={<Space><RiseOutlined /> Profitability</Space>} style={{ marginBottom: 16 }}>
                   <Row gutter={16}>
                     {[
-                      { l: 'Cost', v: prof.cost == null ? '—' : `${cSym} ${Number(prof.cost).toFixed(2)}` },
+                      { l: 'Purchase Cost', v: prof.cost == null ? '—' : `${cSym} ${Number(prof.cost).toFixed(2)}` },
                       { l: 'Selling Price', v: prof.sellingPrice == null ? '—' : `${cSym} ${Number(prof.sellingPrice).toFixed(2)}` },
                       { l: 'Gross Profit', v: prof.grossProfit == null ? '—' : `${cSym} ${Number(prof.grossProfit).toFixed(2)}`, c: prof.grossProfit == null ? undefined : prof.grossProfit < 0 ? '#cf1322' : '#3f8600' },
                       { l: 'Gross Margin', v: prof.marginPercent == null ? '—' : `${Number(prof.marginPercent).toFixed(2)}%`, c: prof.marginPercent == null ? undefined : prof.marginPercent < 0 ? '#cf1322' : '#3f8600' },

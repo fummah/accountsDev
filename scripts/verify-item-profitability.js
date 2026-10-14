@@ -5,10 +5,11 @@
  *   Gross Profit = Selling Price − Cost
  *   Gross Margin = Gross Profit / Selling Price × 100      (NOT markup)
  *
- * Cost source: Inventory Part = current inventory carrying cost (value / qty on
- * hand from the movement ledger), falling back to the configured Purchase Cost
- * when there is no stock; Non-Inventory = Purchase Cost; Service = Purchase Cost.
- * Selling price is the Item Master price, tax EXCLUSIVE.
+ * Cost source: the Item Master's CONFIGURED PURCHASE COST (products.purchase_cost)
+ * for EVERY item type — a current unit-level estimate. It is NEVER the inventory
+ * carrying/valuation cost (FIFO/weighted-average), which answers a different
+ * question (Inventory Value / realized COGS). Selling price is the Item Master
+ * price, tax EXCLUSIVE.
  *
  * Nothing is stored (derived). Runs on a SCRATCH COPY of the company file.
  */
@@ -64,32 +65,40 @@ check('A5 cost 120 / price 100 → NEGATIVE, margin −20%', (() => { const r = 
 check('A6 cost == price → ZERO profit, 0% margin', (() => { const r = Profit.computeProfitability(100, 100); return r.status === 'ZERO' && r.grossProfit === 0 && r.marginPercent === 0; })());
 check('A7 cost 0 is allowed (not treated as missing)', (() => { const r = Profit.computeProfitability(0, 100); return r.status === 'POSITIVE' && r.cost === 0 && r.grossProfit === 100; })());
 
-console.log('\n=== B. Inventory Part cost = carrying cost, not the default purchase cost ===');
+console.log('\n=== B. Inventory Part cost = configured Purchase Cost (NOT carrying/valuation cost) ===');
 const A = mkItem('INVENTORY_PART', 'PFZ Inv A', { salesPrice: 100, purchaseCost: 5 }); setStock(A.id, 10, 8);
 const pa = Profit.getItemProfitability(A.id);
-check('B1 carrying cost 8 wins over default 5', pa.cost === 8 && pa.costSource === 'FIFO_CARRYING_COST', JSON.stringify(pa));
-check('B1 GP 92 / margin 92%', pa.grossProfit === 92 && Math.abs(pa.marginPercent - 92) < 1e-9);
+check('B1 configured purchase cost 5 wins (carrying cost 8 is NOT used)', pa.cost === 5 && pa.costSource === 'PURCHASE_COST', JSON.stringify(pa));
+check('B1 GP 95 / margin 95%', pa.grossProfit === 95 && Math.abs(pa.marginPercent - 95) < 1e-9);
 setStock(A.id, -2, 8);
 const pa2 = Profit.getItemProfitability(A.id);
-check('B2 selling stock does not change the unit carrying cost', pa2.cost === 8 && pa2.costSource === 'FIFO_CARRYING_COST', JSON.stringify(pa2));
+check('B2 selling stock does not change the profitability cost (still 5)', pa2.cost === 5 && pa2.costSource === 'PURCHASE_COST', JSON.stringify(pa2));
 
 const WA = mkItem('INVENTORY_PART', 'PFZ Inv WA', { salesPrice: 50, purchaseCost: 5, valuationMethod: 'WEIGHTED_AVERAGE' }); setStock(WA.id, 10, 6);
 const pwa = Profit.getItemProfitability(WA.id);
-check('B3 weighted-average method → WEIGHTED_AVERAGE source, cost 6', pwa.cost === 6 && pwa.costSource === 'WEIGHTED_AVERAGE', JSON.stringify(pwa));
+check('B3 valuation method does not affect profitability cost (still 5)', pwa.cost === 5 && pwa.costSource === 'PURCHASE_COST', JSON.stringify(pwa));
 
 const B = mkItem('INVENTORY_PART', 'PFZ Inv B', { salesPrice: 100, purchaseCost: 7 });
 const pb = Profit.getItemProfitability(B.id);
-check('B4 no stock → falls back to default purchase cost 7', pb.cost === 7 && pb.costSource === 'DEFAULT_PURCHASE_COST', JSON.stringify(pb));
+check('B4 no stock → still the configured purchase cost 7', pb.cost === 7 && pb.costSource === 'PURCHASE_COST', JSON.stringify(pb));
 check('B4 GP 93', pb.grossProfit === 93);
 
 const C = mkItem('INVENTORY_PART', 'PFZ Inv C', { salesPrice: 100, purchaseCost: 0 });
 const pc = Profit.getItemProfitability(C.id);
-check('B5 no stock and no positive cost → MISSING_COST', pc.status === 'MISSING_COST' && pc.grossProfit === null, JSON.stringify(pc));
+check('B5 explicit zero cost stays 0 (POSITIVE, GP 100)', pc.status === 'POSITIVE' && pc.cost === 0 && pc.grossProfit === 100, JSON.stringify(pc));
+
+// A NULL purchase cost on an Inventory Part is MISSING_COST — the carrying /
+// valuation cost is NEVER substituted (the $349.97 bug).
+const N = mkItem('INVENTORY_PART', 'PFZ Inv Null', { salesPrice: 100, purchaseCost: 5 });
+setStock(N.id, 10, 42);
+db.prepare('UPDATE products SET purchase_cost = NULL WHERE id = ?').run(N.id);
+const pn = Profit.getItemProfitability(N.id);
+check('B6 null purchase cost + stock 42 → MISSING_COST (valuation cost NOT substituted)', pn.status === 'MISSING_COST' && pn.cost === null, JSON.stringify(pn));
 
 console.log('\n=== C. Non-Inventory Part / Service ===');
 const NI = mkItem('NON_INVENTORY_PART', 'PFZ NI', { salesPrice: 100, purchaseCost: 30 });
 const pni = Profit.getItemProfitability(NI.id);
-check('C1 non-inventory cost = purchase cost 30, GP 70', pni.cost === 30 && pni.grossProfit === 70 && pni.costSource === 'DEFAULT_PURCHASE_COST', JSON.stringify(pni));
+check('C1 non-inventory cost = purchase cost 30, GP 70', pni.cost === 30 && pni.grossProfit === 70 && pni.costSource === 'PURCHASE_COST', JSON.stringify(pni));
 
 const S = mkItem('SERVICE', 'PFZ Svc', { salesPrice: 200, purchaseCost: 50 });
 const ps = Profit.getItemProfitability(S.id);
@@ -133,7 +142,7 @@ check('F1 getItemDetail includes profitability', !!detail.profitability);
 check('F2 detail profitability matches the service', detail.profitability.cost === pa2.cost && detail.profitability.grossProfit === pa2.grossProfit && detail.profitability.marginPercent === pa2.marginPercent, JSON.stringify(detail.profitability));
 check('F3 unknown id → null', Profit.getItemProfitability(99999999) === null);
 
-console.log('\n=== G. efficiency (one batch carrying-cost query, no N+1) ===');
+console.log('\n=== G. efficiency (whole-company list, no N+1) ===');
 for (let i = 0; i < 1200; i++) { const it = mkItem('INVENTORY_PART', `PFZBulk${i}`, { salesPrice: 20, purchaseCost: 5 }); setStock(it.id, 5, 4); }
 const t0 = Date.now();
 const big = Profit.getItemProfitabilities({});
@@ -150,7 +159,7 @@ check('H3 preload exposes getItemProfitability/getItemProfitabilities', /getItem
 const util = fs.readFileSync(path.join(FE, 'utils', 'profitability.js'), 'utf8');
 check('H4 renderer util computes margin = GP / selling price', /grossProfit \/ p\) \* 100/.test(util));
 const page = fs.readFileSync(path.join(FE, 'components/inventory/pages/ItemProfitability.js'), 'utf8');
-check('H5 report page has the required columns', ['Cost', 'Selling Price', 'Gross Profit', 'Margin', 'Status'].every((c) => page.includes(c)));
+check('H5 report page has the required columns', ['Purchase Cost', 'Selling Price', 'Gross Profit', 'Margin', 'Status'].every((c) => page.includes(c)));
 check('H6 report page has summary cards + filters', /Items With Profitability/.test(page) && /Missing Cost/.test(page) && /getItemProfitabilities/.test(page));
 check('H7 report page drills into the item detail', /items\?item=/.test(page));
 const idx = fs.readFileSync(path.join(FE, 'components/inventory/index.js'), 'utf8');
@@ -165,6 +174,22 @@ check('H12 item list supports ?item= deep link', /URLSearchParams\(location\.sea
 console.log('\n=== I. no accounting impact ===');
 check('I1 no new journal entries created by profitability', db.prepare("SELECT COUNT(*) AS n FROM journal_entries WHERE memo LIKE '%profitab%'").get().n === 0);
 check('I2 service stores nothing (no profitability table)', (() => { try { db.prepare('SELECT 1 FROM item_profitability LIMIT 1').get(); return false; } catch { return true; } })());
+
+console.log('\n=== J. screenshot case: configured cost vs carrying cost (the $349.97 bug) ===');
+{
+  const ABC = mkItem('INVENTORY_PART', 'ABC Standard Pillow', { salesPrice: 125, purchaseCost: 99.99 });
+  // Deliberately give it a DIFFERENT carrying cost (the old wrong source).
+  setStock(ABC.id, 5, 349.97);
+  const pabc = Profit.getItemProfitability(ABC.id);
+  check('J1 Cost = configured Purchase Cost 99.99 (NOT carrying 349.97)', pabc.cost === 99.99, JSON.stringify(pabc));
+  check('J2 Gross Profit = 25.01', Math.abs(pabc.grossProfit - 25.01) < 1e-9, pabc.grossProfit);
+  check('J3 Margin ≈ 20.01% (GP/price, not markup)', Math.abs(pabc.marginPercent - 20.008) < 0.02, pabc.marginPercent);
+  check('J4 status POSITIVE', pabc.status === 'POSITIVE');
+  // The inventory valuation LEDGER is untouched — it still holds the real layers.
+  const itemId = Inventory.resolveItemId(ABC.id);
+  const ledgerVal = db.prepare('SELECT SUM(quantityChange * COALESCE(unitCost,0)) AS v FROM stock_movements WHERE itemId = ?').get(itemId).v;
+  check('J5 inventory valuation ledger still uses its own layers (5 × 349.97), not 99.99', Math.abs(Number(ledgerVal) - 5 * 349.97) < 0.05, ledgerVal);
+}
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

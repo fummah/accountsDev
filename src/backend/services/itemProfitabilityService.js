@@ -2,27 +2,37 @@
  * services/itemProfitabilityService.js — Simple Item Profitability.
  *
  * Answers one question: "if I sell this item at its configured selling price
- * using its current/configured cost, what is the unit gross profit and margin?"
+ * using its configured purchase cost, what is the unit gross profit and margin?"
  *
  *   Gross Profit = Selling Price − Cost
  *   Gross Margin = Gross Profit / Selling Price × 100      (NOT markup)
  *
- * Cost source (audited, reusing existing data — no new cost field):
- *   Inventory Part      central inventory carrying cost = current inventory
- *                       value / quantity on hand (from the movement ledger),
- *                       falling back to the configured Purchase Cost when there
- *                       is no stock. The default Purchase Cost is NEVER used to
- *                       rewrite the carrying cost of existing inventory.
+ * Cost source (audited): the Item Master's CONFIGURED PURCHASE COST
+ * (`products.purchase_cost`) — for EVERY item type. This is a CURRENT,
+ * unit-level ESTIMATE, so it must use exactly what the user configured on the
+ * item — never a carrying/valuation cost.
+ *
+ *   Inventory Part      configured Purchase Cost
  *   Non-Inventory Part  configured Purchase Cost
- *   Service             configured Purchase Cost, else "not available" (a
- *                       Service cost is never assumed to be zero)
+ *   Service             configured Purchase Cost
+ *
+ * IMPORTANT — this is NOT the Inventory Valuation cost. The inventory valuation
+ * engine (FIFO / Weighted Average carrying layers) and the realized-COGS engine
+ * answer different questions and MUST NOT be substituted here:
+ *   • Inventory Value / carrying cost  = cost of the stock actually on hand
+ *   • Realized COGS                    = cost actually removed on a sale
+ *   • Item Profitability               = configured cost vs selling price
+ * Using the carrying cost (inventory value / QOH) here produced a wrong "Cost"
+ * (e.g. $349.97) whenever the movement ledger's costing differed from the item's
+ * configured purchase cost — which is exactly what this fixes. Inventory
+ * valuation and COGS are untouched.
  *
  * Selling Price = the Item Master's Sales Price (`products.price`), tax
  * EXCLUSIVE — tax is never treated as profit.
  *
  * Missing/zero handling: NULL cost or price is NOT zero. A zero selling price
  * never divides by zero (margin is null / N/A). Negative profit and margin are
- * supported (loss-making items).
+ * supported (loss-making items). An explicitly configured 0 cost stays 0.
  *
  * Nothing is stored — profitability is derived, so it can never drift. This is
  * informational only and creates no journal entries or inventory movements.
@@ -59,59 +69,27 @@ const computeProfitability = (cost, sellingPrice, costSource) => {
   return { cost: c, sellingPrice: p, grossProfit, marginPercent, status, costSource };
 };
 
-/** itemId -> { value, qty } from the movement ledger + item_stock (batch). */
-const carryingCostMap = (itemIds) => {
-  const map = new Map();
-  const ids = [...new Set((itemIds || []).map(Number).filter(Boolean))];
-  if (!ids.length) return map;
-  const ph = ids.map(() => '?').join(',');
-  const qtyMap = new Map();
-  try {
-    for (const r of db.prepare(`SELECT itemId, SUM(quantity) AS qty FROM item_stock WHERE itemId IN (${ph}) GROUP BY itemId`).all(...ids)) {
-      qtyMap.set(Number(r.itemId), Number(r.qty) || 0);
-    }
-  } catch { /* item_stock may be empty */ }
-  const valueMap = new Map();
-  try {
-    for (const r of db.prepare(`SELECT itemId, SUM(quantityChange * COALESCE(unitCost, 0)) AS value FROM stock_movements WHERE itemId IN (${ph}) GROUP BY itemId`).all(...ids)) {
-      valueMap.set(Number(r.itemId), Number(r.value) || 0);
-    }
-  } catch { /* movements may be empty */ }
-  for (const id of ids) {
-    const qty = qtyMap.get(id) || 0;
-    const value = valueMap.get(id) || 0;
-    map.set(id, { value, qty, cost: qty > 0 ? value / qty : null });
-  }
-  return map;
-};
-
-const costForProduct = (p, carrying) => {
-  if (ItemTypes.tracksInventory(p.type)) {
-    const c = p.item_id != null ? carrying.get(Number(p.item_id)) : null;
-    if (c && c.qty > 0 && c.cost != null) {
-      const method = String(p.valuation_method || 'FIFO').toUpperCase();
-      return { cost: c.cost, costSource: method.includes('WEIGHTED') ? 'WEIGHTED_AVERAGE' : 'FIFO_CARRYING_COST' };
-    }
-    const fallback = num(p.purchase_cost);
-    return fallback != null && fallback > 0
-      ? { cost: fallback, costSource: 'DEFAULT_PURCHASE_COST' }
-      : { cost: null, costSource: 'NONE' };
-  }
+/**
+ * The configured Purchase Cost. A NULL/blank cost is "not configured"
+ * (MISSING_COST downstream); an explicit 0 is a real, known zero.
+ * A Service's cost is labelled SERVICE_COST so the source stays explicit.
+ */
+const costForProduct = (p) => {
   const cfg = num(p.purchase_cost);
   if (cfg == null) return { cost: null, costSource: 'NONE' };
-  return { cost: cfg, costSource: ItemTypes.normalizeTypeCode(p.type) === 'SERVICE' ? 'SERVICE_COST' : 'DEFAULT_PURCHASE_COST' };
+  const isService = String(ItemTypes.normalizeTypeCode ? ItemTypes.normalizeTypeCode(p.type) : p.type) === 'SERVICE';
+  return { cost: cfg, costSource: isService ? 'SERVICE_COST' : 'PURCHASE_COST' };
 };
 
 /** Profitability for one item. */
 const getItemProfitability = (itemId) => {
-  const p = db.prepare('SELECT id, name, sku, type, price, purchase_cost, item_id, valuation_method FROM products WHERE id = ?').get(Number(itemId));
+  const p = db.prepare('SELECT id, name, sku, type, price, purchase_cost FROM products WHERE id = ?').get(Number(itemId));
   if (!p) return null;
-  const carrying = carryingCostMap([p.item_id]);
-  const { cost, costSource } = costForProduct(p, carrying);
+  const { cost, costSource } = costForProduct(p);
   return { itemId: Number(p.id), name: p.name, sku: p.sku || '', type: p.type, ...computeProfitability(cost, p.price, costSource) };
 };
 
-/** Profitability for many items (one batch carrying-cost query — no N+1). */
+/** Profitability for many items. */
 const getItemProfitabilities = (filters = {}) => {
   const search = String(filters.search || '').trim().toLowerCase();
   const type = String(filters.type || '').trim();
@@ -123,11 +101,10 @@ const getItemProfitabilities = (filters = {}) => {
   if (type) { where.push('type = ?'); params.push(type); }
   if (category) { where.push('category = ?'); params.push(category); }
   if (search) { where.push('(LOWER(name) LIKE ? OR LOWER(sku) LIKE ?)'); params.push(`%${search}%`, `%${search}%`); }
-  const rows = db.prepare(`SELECT id, name, sku, type, category, price, purchase_cost, item_id, valuation_method FROM products${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY name ASC`).all(...params);
+  const rows = db.prepare(`SELECT id, name, sku, type, category, price, purchase_cost FROM products${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY name ASC`).all(...params);
 
-  const carrying = carryingCostMap(rows.filter((r) => ItemTypes.tracksInventory(r.type)).map((r) => r.item_id));
   let items = rows.map((p) => {
-    const { cost, costSource } = costForProduct(p, carrying);
+    const { cost, costSource } = costForProduct(p);
     return { itemId: Number(p.id), name: p.name, sku: p.sku || '', type: p.type, category: p.category || '', ...computeProfitability(cost, p.price, costSource) };
   });
 
