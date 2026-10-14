@@ -449,6 +449,12 @@ const CheckPrinting = () => {
        All physical offsets live in the :root block above.
        â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
     const payeeAddrLines = (payeeAddr || '').split('\n').filter(Boolean);
+    // The mailing / payee address block BEGINS with the same resolved payee name
+    // used on the main "Pay to the Order of" line (two placements, one identity).
+    // Guarded so a snapshot that already carries the name is never duplicated.
+    const mailingLines = (payeeName && payeeAddrLines[0] !== payeeName)
+      ? [payeeName, ...payeeAddrLines]
+      : payeeAddrLines;
 
     return `<!doctype html><html><head><title>Check</title>
     <style>
@@ -495,7 +501,7 @@ const CheckPrinting = () => {
 
       /* ---------- PAYEE NAME (bold) - printed ABOVE the written amount ------ */
       .payee-row  { margin-top: var(--check-payee-top); }
-      .payee-name { font-weight: 700; font-size: 14px; }
+      .payee-name { font-weight: 700; font-size: 14px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
       /* ---------- WRITTEN AMOUNT (largest of the three; no rule beneath,
                      the pre-printed stock supplies it) ---------- */
@@ -543,9 +549,11 @@ const CheckPrinting = () => {
             <span class="words-text">${wordsLine}</span>
           </div>
 
-          <!-- PAYEE ADDRESS - printed BELOW the written amount. -->
+          <!-- PAYEE ADDRESS - printed BELOW the written amount. Begins with the
+               resolved payee name (mailing block), same identity as the main
+               Pay to the Order of line above. -->
           <div class="addr-window">
-            ${payeeAddrLines.map(l => `<div>${l}</div>`).join('')}
+            ${mailingLines.map(l => `<div>${l}</div>`).join('')}
           </div>
 
           <!-- Memo only when the user enters one -->

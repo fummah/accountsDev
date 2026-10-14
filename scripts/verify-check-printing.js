@@ -68,7 +68,7 @@ check('still prints Date', /\$\{dateStr\}/.test(tpl));
 check('still prints Payee', /\$\{payeeName/.test(tpl));
 check('still prints numeric amount', /\$\{cSym\}\$\{amtStr\}/.test(tpl));
 check('still prints amount in words', /\$\{wordsLine\}/.test(tpl));
-check('still prints payee address', /payeeAddrLines/.test(tpl));
+check('still prints payee address (mailing block begins with the payee name)', /mailingLines/.test(tpl) && /addr-window/.test(tpl));
 check('still prints memo conditionally', /memoLine \?/.test(tpl));
 check('removes check# from stub header', !/check#/.test(tpl));
 
@@ -162,8 +162,8 @@ check('written amount before address line 1', at('One Thousand Two Hundred Thirt
 check('address line 1 before city/state/zip', at('Unit 4, Riverbend Park') < at('Cape Town, Western Cape 7441'));
 check('address before memo', at('Cape Town, Western Cape 7441') < at('Invoice INV-88213'));
 check('date is the first printed field', at('09/30/2026') < at('$1234.56'));
-check('payee name appears exactly ONCE in the check body',
-  (checkBody.match(/Acme Industrial Supplies/g) || []).length === 1,
+check('payee name appears in BOTH the main payee line AND the mailing block (two intended placements)',
+  (checkBody.match(/Acme Industrial Supplies/g) || []).length === 2,
   String((checkBody.match(/Acme Industrial Supplies/g) || []).length));
 check('payee name is ABOVE the written amount in the main cheque area',
   checkBody.indexOf('Acme Industrial Supplies') < checkBody.indexOf('One Thousand Two Hundred Thirty-Four'));
